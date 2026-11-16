@@ -41,7 +41,7 @@ import { Subject } from './Subject';
 
 const blankWall = (): Wall => ({ label: '', headline: '', picks: [], arranged: 'auto' });
 /** The order errors are listed in: the page's order, top to bottom. */
-const ORDER = ['kind', 'headline', 'tiers', 'percent', 'ends', 'picks', 'wall', 'photos', 'story', 'mission', 'subject', 'preheader'];
+const ORDER = ['kind', 'tiers', 'percent', 'ends', 'picks', 'wall', 'photos', 'story', 'mission', 'subject', 'preheader'];
 
 /** An event as the preview draws it while it's still being typed: what's missing is filled in or left out. */
 function draftEvent(ev: StoreEvent): StoreEvent | null {
@@ -67,7 +67,7 @@ const spillMessage = (s: Spill) => `“${s.word}” in ${SPILL_WHERE[s.part][0]}
 const easternDay = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(iso));
 
 export default function EmailApp(props: AppProps) {
-  const { send, label, today, last } = props;
+  const { send, label, today, presets } = props;
   // ── The week: sale and products, saved together ──
   const [form, setForm] = useState<SaleForm>(() => saleFormOf(props.record?.special ?? null));
   const [wall, setWallState] = useState<Wall>(() => props.record?.wall ?? blankWall());
@@ -173,7 +173,7 @@ export default function EmailApp(props: AppProps) {
   const longNames = useMemo(() => new Set([...(fit.small?.longNames ?? []), ...(fit.phone?.longNames ?? [])]), [fit]);
   const layoutProblem =
     fold !== null && fold > FIRST_SCREEN
-      ? `On a phone the sale button lands ${fold - FIRST_SCREEN} px below the first screen. Shorten the headline${form.kind === 'tiers' ? ' or use fewer tiers' : ''}.`
+      ? `On a phone the sale button lands ${fold - FIRST_SCREEN} px below the first screen.${form.kind === 'tiers' ? ' Use fewer tiers.' : ''}`
       : spillWords && spillAt!.part !== 'layout'
         ? spillWords
         : longNames.size
@@ -244,16 +244,6 @@ export default function EmailApp(props: AppProps) {
     setProblem(null);
   }
 
-  /** Last week's sale as this week's, with its last day left to set (a sale with no discount has none). */
-  const startFromLast = () => {
-    if (!last) return;
-    set({ ...saleFormOf(last.special), ends: '' });
-    setTouched({});
-    setAttempted(false);
-    const discount = last.special.kind !== 'headline';
-    window.setTimeout(() => document.getElementById(fieldId(discount ? 'ends' : 'headline'))?.focus(), 0);
-    toast(discount ? `Started from the ${last.label} sale. Set its last day.` : `Started from the ${last.label} headline.`);
-  };
 
   // Leaving with unsaved changes asks first; ⌘S / Ctrl+S saves
   const leaving = dirty || Boolean(draft);
@@ -406,7 +396,7 @@ export default function EmailApp(props: AppProps) {
           )}
 
           <Section n={1} id="em-sale" locked={locked} title="The sale" state={saleState.state} tone={saleState.tone}>
-            <Sale form={form} special={special} errors={saleErrors} shown={shownSale} set={set} touch={touch} last={last} startFromLast={startFromLast} />
+            <Sale form={form} special={special} errors={saleErrors} shown={shownSale} set={set} touch={touch} presets={presets} />
           </Section>
 
           <Section n={2} id="em-products" locked={locked} title="The products" state={wallState.state} tone={wallState.tone}>

@@ -9,7 +9,6 @@ export type Kind = keyof typeof KINDS;
 
 export interface Special {
   kind: Kind | '';
-  headline: string;
   tiers: { spend: number | null; percent: number | null }[];
   percent: number | null;
   ends: string;
@@ -18,7 +17,6 @@ export interface Special {
 /** The sale as typed: numbers stay text until they're read, so "1,0" isn't fought while typing. */
 export interface SaleForm {
   kind: Kind | '';
-  headline: string;
   tiers: { spend: string; percent: string }[];
   percent: string;
   ends: string;
@@ -78,11 +76,16 @@ export interface EventRecord {
   updatedBy: string;
 }
 
-/** The most recent sale saved before this email's, to start from. */
-export interface LastSale {
-  label: string;
-  summary: string;
-  special: Special;
+/**
+ * What each ready-made sale opens with: the store's last of that kind, else the usual (20% off
+ * everything; a spend-more sale's amounts are the store's to set the first time).
+ */
+export interface SalePresets {
+  percent: number;
+  /** The last spend-more tiers the store used, or null if it never has. */
+  tiers: { spend: number; percent: number }[] | null;
+  /** The last day a sale runs unless she changes it (usualEnds). */
+  ends: string;
 }
 
 export interface AppProps {
@@ -91,7 +94,7 @@ export interface AppProps {
   label: string;
   today: string;
   record: { special: Special | null; wall: Wall | null; updatedAt: string; updatedBy: string } | null;
-  last: LastSale | null;
+  presets: SalePresets;
   events: EventRecord[];
   test: { people: TestPerson[]; me: string };
   /** The rest of the email (parts.mjs), as saved, or blank. */
@@ -181,10 +184,9 @@ const twoTiers = () => [
 ];
 
 export function saleFormOf(s: Special | null): SaleForm {
-  if (!s) return { kind: '', headline: '', tiers: twoTiers(), percent: '', ends: '' };
+  if (!s) return { kind: '', tiers: twoTiers(), percent: '', ends: '' };
   return {
     kind: s.kind,
-    headline: s.headline ?? '',
     tiers: s.tiers?.length ? s.tiers.map((t) => ({ spend: money(t.spend), percent: num(t.percent) })) : twoTiers(),
     percent: num(s.percent ?? null),
     ends: s.ends ?? '',
@@ -199,9 +201,8 @@ export function saleSnapshot(f: SaleForm): string {
   if (!s.kind) return '';
   const keep: Record<string, unknown> = { kind: s.kind };
   if (isDiscount(s.kind)) keep.ends = s.ends;
-  if (s.kind === 'tiers') Object.assign(keep, { headline: s.headline, tiers: s.tiers });
+  if (s.kind === 'tiers') keep.tiers = s.tiers;
   if (s.kind === 'percent') keep.percent = s.percent;
-  if (s.kind === 'headline') keep.headline = s.headline;
   return JSON.stringify(keep);
 }
 

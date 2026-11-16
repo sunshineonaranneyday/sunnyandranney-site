@@ -1,10 +1,7 @@
 /** @jsxImportSource preact */
-import { KINDS, LIMITS, isDiscount, termsLine } from '@/lib/sunny-side/special.mjs';
-import { type Kind, type LastSale, type SaleForm, type Special, fieldId, tidyMoney, tidyPercent } from './model';
-import { Counter, FieldError, Segmented } from './parts';
-
-/** The kinds as the switch names them: short enough for one row on a phone. */
-const KIND_NAMES: Record<Kind, string> = { tiers: 'Spend more, save more', percent: 'Percent off', headline: 'No sale' };
+import { LIMITS, USUAL_PERCENT, isDiscount, termsLine } from '@/lib/sunny-side/special.mjs';
+import { type Kind, type SaleForm, type SalePresets, type Special, fieldId, tidyMoney, tidyPercent } from './model';
+import { FieldError } from './parts';
 
 interface Props {
   form: SaleForm;
@@ -13,16 +10,19 @@ interface Props {
   shown: (key: string) => string | undefined;
   set: (patch: Partial<SaleForm>) => void;
   touch: (key: string) => void;
-  last: LastSale | null;
-  startFromLast: () => void;
+  presets: SalePresets;
 }
 
+const money = (n: number) => n.toLocaleString('en-US');
+const filled = (tiers: SaleForm['tiers']) => tiers.some((t) => t.spend.trim() || t.percent.trim());
+
 /**
- * The week's sale: the deal, a headline, the last day, and nothing else. The small label, the
- * button and the fine print are the store's own for each kind (special.mjs, defaults), and the
- * preview beside it shows them.
+ * The week's sale: three ready-made sales, already filled in. She taps one and changes a number
+ * if she needs to; the last day comes set to the week's Sunday. Nothing to write: the label, the
+ * words, the button and the fine print are the store's for each (special.mjs, defaults), and the
+ * preview beside it shows them. (Peter, 2026-11-16: "pick a ready-made sale".)
  */
-export function Sale({ form, special, errors, shown, set, touch, last, startFromLast }: Props) {
+export function Sale({ form, special, errors, shown, set, touch, presets }: Props) {
   const kind = form.kind;
   const terms = termsLine({ ...special, ends: errors.ends ? '' : special.ends });
   const invalid = (key: string) => (shown(key) ? { 'aria-invalid': true, 'aria-describedby': `${fieldId(key)}-error` } : {});
@@ -31,52 +31,79 @@ export function Sale({ form, special, errors, shown, set, touch, last, startFrom
     set({ tiers: [...form.tiers, { spend: '', percent: '' }] });
     window.setTimeout(() => document.getElementById(fieldId(`tiers.${form.tiers.length}.spend`))?.focus(), 0);
   };
+  const presetTiers = presets.tiers?.map((t) => ({ spend: money(t.spend), percent: String(t.percent) })) ?? null;
+
+  /** Taps a ready-made sale: it comes filled in, keeping anything already typed for it this week. */
+  const choose = (k: Kind) => {
+    if (k === 'percent') set({ kind: k, percent: form.percent.trim() || String(presets.percent), ends: form.ends || presets.ends });
+    else if (k === 'tiers') {
+      const tiers = filled(form.tiers) ? form.tiers : (presetTiers ?? [{ spend: '', percent: '' }, { spend: '', percent: '' }]);
+      set({ kind: k, tiers, ends: form.ends || presets.ends });
+      // With no amounts to carry over, the first one is where she starts
+      if (!filled(tiers)) window.setTimeout(() => document.getElementById(fieldId('tiers.0.spend'))?.focus(), 0);
+    } else set({ kind: k });
+  };
+
+  const percentShown = kind === 'percent' ? form.percent.trim() || '?' : String(presets.percent);
+  const tiersShown = kind === 'tiers' && filled(form.tiers) ? form.tiers : presetTiers;
 
   return (
     <>
-      {kind === '' && last && (
-        <div class="em-last">
-          <p class="em-last-what">
-            <strong>{last.label}:</strong> {last.summary}
-          </p>
-          <button type="button" class="btn btn-small" aria-label={`Use the ${last.label} sale again`} onClick={startFromLast}>
-            Use it again
-          </button>
-        </div>
-      )}
+      <div class="em-sale-cards" role="group" aria-label="This week’s sale" id={fieldId('kind')}>
+        <button type="button" class="em-sale-card" aria-pressed={kind === 'percent'} onClick={() => choose('percent')}>
+          <span class="em-sale-card-title">{percentShown}% off everything</span>
+          <span class="em-sale-card-sub">{Number(percentShown) === USUAL_PERCENT ? 'The store’s usual' : 'Like last time'}</span>
+        </button>
+        <button type="button" class="em-sale-card" aria-pressed={kind === 'tiers'} onClick={() => choose('tiers')}>
+          <span class="em-sale-card-title">Spend more, save more</span>
+          {tiersShown ? (
+            <span class="em-sale-card-sub">
+              {tiersShown
+                .filter((t) => t.spend || t.percent)
+                .map((t) => (
+                  <span class="em-sale-card-line">
+                    ${t.spend || '?'} → {t.percent || '?'}% off
+                  </span>
+                ))}
+            </span>
+          ) : (
+            <span class="em-sale-card-sub">Set the amounts the first time</span>
+          )}
+        </button>
+        <button type="button" class="em-sale-card" aria-pressed={kind === 'headline'} onClick={() => choose('headline')}>
+          <span class="em-sale-card-title">No sale this week</span>
+          <span class="em-sale-card-sub">Shows what’s new instead</span>
+        </button>
+      </div>
+      <FieldError id={`${fieldId('kind')}-error`} message={shown('kind')} />
 
-      <Segmented
-        id={fieldId('kind')}
-        legend="This week’s sale"
-        name="kind"
-        value={kind}
-        options={(Object.keys(KINDS) as Kind[]).map((k) => ({ value: k, label: KIND_NAMES[k], hint: KINDS[k].hint }))}
-        onChange={(k) => set({ kind: k as Kind })}
-        error={shown('kind')}
-      />
-
-      {kind !== '' && (
-        <div class="em-sale-body">
-          {kind !== 'percent' && (
-            <div class="field">
-              <label for={fieldId('headline')}>
-                Headline <Counter value={form.headline} limit={LIMITS.headline} />
-              </label>
-              <input
-                id={fieldId('headline')}
-                value={form.headline}
-                onInput={(e) => set({ headline: (e.target as HTMLInputElement).value })}
-                onBlur={() => touch('headline')}
-                {...invalid('headline')}
-              />
-              <FieldError id={`${fieldId('headline')}-error`} message={shown('headline')} />
-              {!shown('headline') && <p class="em-hint">{kind === 'tiers' ? 'Like “The holidays are here. So are the savings.”' : 'Like “Black Friday sneak peeks start this Friday.”'}</p>}
+      {isDiscount(kind) && (
+        <div class="em-sale-edit">
+          {kind === 'percent' && (
+            <div class="field em-percent">
+              <label for={fieldId('percent')}>Percent off everything</label>
+              <span class="em-affix em-affix-end">
+                <input
+                  id={fieldId('percent')}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  value={form.percent}
+                  onInput={(e) => set({ percent: (e.target as HTMLInputElement).value })}
+                  onBlur={() => {
+                    set({ percent: tidyPercent(form.percent) });
+                    touch('percent');
+                  }}
+                  {...invalid('percent')}
+                />
+                <span aria-hidden="true">% off</span>
+              </span>
+              <FieldError id={`${fieldId('percent')}-error`} message={shown('percent')} />
             </div>
           )}
 
           {kind === 'tiers' && (
             <fieldset class="em-tiers" id={fieldId('tiers')}>
-              <legend>The tiers</legend>
+              <legend>The amounts</legend>
               <div class="em-tier-head" aria-hidden="true">
                 <span>Spend at least</span>
                 <span>Save</span>
@@ -138,43 +165,16 @@ export function Sale({ form, special, errors, shown, set, touch, last, startFrom
                   + Add a tier
                 </button>
               )}
-              <span class="em-hint em-inline">
-                {form.tiers.length >= LIMITS.tiers[1] ? `${LIMITS.tiers[1]} tiers is the most the email shows.` : `${LIMITS.tiers[0]} to ${LIMITS.tiers[1]} tiers, smallest first.`}
-              </span>
               <FieldError id={`${fieldId('tiers')}-error`} message={shown('tiers')} />
             </fieldset>
           )}
 
-          {kind === 'percent' && (
-            <div class="field em-percent">
-              <label for={fieldId('percent')}>Percent off everything</label>
-              <span class="em-affix em-affix-end">
-                <input
-                  id={fieldId('percent')}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  value={form.percent}
-                  onInput={(e) => set({ percent: (e.target as HTMLInputElement).value })}
-                  onBlur={() => {
-                    set({ percent: tidyPercent(form.percent) });
-                    touch('percent');
-                  }}
-                  {...invalid('percent')}
-                />
-                <span aria-hidden="true">% off</span>
-              </span>
-              <FieldError id={`${fieldId('percent')}-error`} message={shown('percent')} />
-            </div>
-          )}
-
-          {isDiscount(kind) && (
-            <div class="field em-ends">
-              <label for={fieldId('ends')}>Last day</label>
-              <input id={fieldId('ends')} type="date" value={form.ends} onInput={(e) => set({ ends: (e.target as HTMLInputElement).value })} onBlur={() => touch('ends')} {...invalid('ends')} />
-              <FieldError id={`${fieldId('ends')}-error`} message={shown('ends')} />
-              {!shown('ends') && <p class="em-hint">{`Under the button: “${terms}”`}</p>}
-            </div>
-          )}
+          <div class="field em-ends">
+            <label for={fieldId('ends')}>Ends</label>
+            <input id={fieldId('ends')} type="date" value={form.ends} onInput={(e) => set({ ends: (e.target as HTMLInputElement).value })} onBlur={() => touch('ends')} {...invalid('ends')} />
+            <FieldError id={`${fieldId('ends')}-error`} message={shown('ends')} />
+            {!shown('ends') && <p class="em-hint">{`Under the button: “${terms}”`}</p>}
+          </div>
         </div>
       )}
     </>

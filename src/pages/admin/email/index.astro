@@ -5,7 +5,7 @@ import EmailApp from '@/components/email/EmailApp';
 import type { AppProps } from '@/components/email/model';
 import '@/components/email/email.css';
 import AdminBase from '@/layouts/AdminBase.astro';
-import { sendLabel, summary } from '@/lib/sunny-side/special.mjs';
+import { USUAL_PERCENT, sendLabel, usualEnds } from '@/lib/sunny-side/special.mjs';
 import { eventsFrom } from '@/lib/sunny-side/event-store.mjs';
 import { pastWeeks, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { IMPACT_PAGE, impactFromPage } from '@/lib/sunny-side/impact.mjs';
@@ -58,7 +58,7 @@ async function kidsNow() {
 }
 
 const [past, events, testList, library, impact, kids, usual, subscribers] = await Promise.all([
-  pastWeeks(db, send, 1),
+  pastWeeks(db, send, 12),
   eventsFrom(db, today),
   listPeople(db),
   listPhotos(db, 80),
@@ -80,8 +80,11 @@ if (record?.kit && kitStatus?.status === 'gone') {
   record.kit = null;
 }
 const kitSend = record?.kit ? { ...record.kit, url: broadcastUrl(record.kit.id), status: kitStatus?.status ?? 'scheduled' } : null;
-// The sale saved most recently before this one, usually last week's, to start from
-const last = past[0]?.special ? { label: sendLabel(past[0].send), summary: summary(past[0].special), special: past[0].special } : null;
+// What each ready-made sale opens with: the store's last of its kind, else the usual (special.mjs)
+const lastOf = (kind: string) => past.find((r) => r.special?.kind === kind)?.special ?? null;
+type Tier = { spend: number | null; percent: number | null };
+const lastTiers = (lastOf('tiers')?.tiers as Tier[] | undefined)?.filter((t): t is { spend: number; percent: number } => t.spend !== null && t.percent !== null);
+const presets = { percent: lastOf('percent')?.percent ?? USUAL_PERCENT, tiers: lastTiers?.length ? lastTiers : null, ends: usualEnds(send) };
 
 // The shared rules are plain JavaScript; the page's types say what they return
 const props = {
@@ -89,7 +92,7 @@ const props = {
   label: sendLabel(send),
   today,
   record: record ? { special: record.special, wall: record.wall, updatedAt: record.updatedAt, updatedBy: record.updatedBy } : null,
-  last,
+  presets,
   events,
   // Who checks each email: the store's list, kept in D1, with whoever is signed in first
   test: { people: testPeople(testList, admin.email), me: admin.email.toLowerCase() },

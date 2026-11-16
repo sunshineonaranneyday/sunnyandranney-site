@@ -81,11 +81,27 @@
 .em-seg-option:hover span { color: var(--ink); background: color-mix(in srgb, var(--panel) 55%, transparent); }
 .em-seg-option:has(input:checked) span { background: var(--panel); color: var(--ink); box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
 .em-seg-option:has(input:focus-visible) span { outline: 2px solid var(--teal); outline-offset: 1px; }
-.em-sale-body { margin-top: 1.25rem; }
-/* Last week's sale, one tap from being this week's, when nothing is set yet */
-.em-last { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin: 0 0 1.25rem; padding: 0.75rem 0.75rem 0.75rem 1rem; border-radius: var(--r-md); background: var(--sunk); }
-.em-last-what { flex: 1 1 14rem; min-width: 0; font-size: 0.9375rem; color: var(--ink-2); overflow-wrap: anywhere; }
-.em-last-what strong { color: var(--ink); }
+.em-sale-edit { margin-top: 1.25rem; display: grid; gap: 1.25rem; }
+.em-sale-edit .field, .em-sale-edit fieldset { margin: 0; }
+/* The ready-made sales: three cards, one tap each; the chosen one is outlined (Peter, 2026-11-16) */
+.em-sale-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.625rem; }
+@container (max-width: 560px) { .em-sale-cards { grid-template-columns: minmax(0, 1fr); } }
+.em-sale-card {
+  position: relative; display: grid; align-content: start; gap: 0.25rem; min-height: 5.25rem; padding: 0.875rem 2.25rem 0.875rem 1rem;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font: inherit; text-align: left;
+  cursor: pointer; box-shadow: var(--shadow-sm); transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+.em-sale-card:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); }
+.em-sale-card:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-sale-card[aria-pressed='true'] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+/* A check in the chosen card's corner */
+.em-sale-card[aria-pressed='true']::after {
+  content: ''; position: absolute; top: 0.875rem; right: 0.875rem; width: 1.125rem; height: 1.125rem; border-radius: 50%;
+  background: var(--ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / 0.6875rem no-repeat;
+}
+.em-sale-card-title { font-size: 1.0625rem; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.em-sale-card-sub { display: grid; font-size: 0.875rem; color: var(--ink-3); line-height: 1.4; }
+.em-sale-card-line { white-space: nowrap; }
 
 /* ── Money and percent fields ── */
 .em-affix { position: relative; display: block; }

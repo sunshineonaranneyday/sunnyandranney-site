@@ -1,10 +1,10 @@
 /**
  * The week's special: what Staci types in the admin, and how it becomes the email's offer
  * ===========================================================================
- * Staci picks one of three kinds and fills in only what changes week to week: the deal, a
- * headline, the last day. Everything else the offer shows (its small label, the button's
- * words and page, the fine print) is the store's, by kind (defaults), so there's nothing
- * else to set (the store, 2026-11-16). clean() turns what she typed into a special, check()
+ * Staci taps one of three ready-made sales and changes a number if she needs to: the deal and
+ * its last day, nothing else (Peter, 2026-11-16: "pick a ready-made sale"). Everything else the
+ * offer shows (its small label, its words, the button's words and page, the fine print) is the
+ * store's, by kind (defaults), so there's nothing to write. clean() turns what she typed into a special, check()
  * says what's wrong in words she can act on (the same rules in her browser and on the
  * server), and toSale() makes the email's offer from it. No Node or browser APIs, so
  * the admin page, the API and the weekly build (scripts/sunny-side/build.mjs) share it.
@@ -16,11 +16,24 @@ import { day, monthShort, weekday } from './email.mjs';
 /** The Sunny Side goes out on Tuesdays (Tue Nov 3 and Tue Nov 10, 2026). 0 = Sunday. */
 export const SEND_WEEKDAY = 2;
 
+/** The ready-made sales, in the order the page offers them: the usual one first. */
 export const KINDS = {
-  tiers: { title: 'Spend more, save more', hint: 'Bigger discounts for bigger orders' },
   percent: { title: 'Percent off everything', hint: 'One discount on the whole order' },
-  headline: { title: 'No sale this week', hint: 'A headline instead, with no discount' },
+  tiers: { title: 'Spend more, save more', hint: 'Bigger discounts for bigger orders' },
+  headline: { title: 'No sale this week', hint: 'What’s new instead, with no discount' },
 };
+
+/**
+ * The store's usual sale: 20% off. Of the 190 orders from Oct 20 to Nov 16, 2026, 148 were
+ * discounted 20% at the register; no other discount came close.
+ */
+export const USUAL_PERCENT = 20;
+
+/** The big line over the deal, by kind: the store's words, not a field to fill. A percent sale's number is its own. */
+export const SALE_HEADLINES = { tiers: 'Spend more, save more.', headline: 'New in the showroom this week.' };
+
+/** The last day a sale runs unless she changes it: the Sunday the email's week ends on, or the day itself if that's a Sunday. */
+export const usualEnds = (send) => addDays(send, (7 - day(send).getUTCDay()) % 7);
 
 /** The kinds that are a discount, so the email says where it counts and when it ends. */
 export const isDiscount = (kind) => kind === 'tiers' || kind === 'percent';
@@ -33,12 +46,10 @@ export const isDiscount = (kind) => kind === 'tiers' || kind === 'percent';
 export const EVERYWHERE = 'In the showroom and online.';
 
 /**
- * Lengths come from the email's layout: a headline over three lines on a small phone
- * would push the button off the first screen, and four digits of spend can't be written
- * short exactly unless they're round.
+ * Limits from the email's layout: four digits of spend can't be written short exactly unless
+ * they're round, and more than four tiers don't fit a phone.
  */
 export const LIMITS = {
-  headline: 70,
   percent: [1, 90],
   spend: [50, 50000],
   spendStep: 50,
@@ -55,12 +66,12 @@ export const LIMITS = {
 export function defaults(kind) {
   if (kind === 'percent') return { label: 'Storewide sale', cta: 'Shop the sale', link: '/shop/' };
   if (kind === 'headline') return { label: 'This week', cta: 'See what’s new', link: '/shop/?collection=new-arrivals' };
-  return { label: 'Spend more, save more', cta: 'Shop the sale', link: '/shop/' };
+  return { label: 'This week’s sale', cta: 'Shop the sale', link: '/shop/' };
 }
 
 /** A fresh special of a kind: two empty tiers to start from, everything else blank. */
 export function blank(kind = 'tiers') {
-  return { kind, headline: '', tiers: [{ spend: null, percent: null }, { spend: null, percent: null }], percent: null, ends: '' };
+  return { kind, tiers: [{ spend: null, percent: null }, { spend: null, percent: null }], percent: null, ends: '' };
 }
 
 const str = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
@@ -82,7 +93,6 @@ export function clean(input) {
   const rows = Array.isArray(i.tiers) ? i.tiers : [];
   return {
     kind: Object.hasOwn(KINDS, i.kind) ? i.kind : '',
-    headline: str(i.headline),
     tiers: rows.slice(0, 8).map((r) => ({ spend: whole(r?.spend), percent: whole(r?.percent) })),
     percent: whole(i.percent),
     ends: typeof i.ends === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(i.ends) ? i.ends : '',
@@ -91,9 +101,9 @@ export function clean(input) {
 
 /** Only the fields the special's kind uses, for saving. A headline week has no discount, so no terms. */
 export function forKind(s) {
-  if (s.kind === 'tiers') return { kind: s.kind, headline: s.headline, tiers: s.tiers, ends: s.ends };
+  if (s.kind === 'tiers') return { kind: s.kind, tiers: s.tiers, ends: s.ends };
   if (s.kind === 'percent') return { kind: s.kind, percent: s.percent, ends: s.ends };
-  return { kind: s.kind, headline: s.headline };
+  return { kind: s.kind };
 }
 
 const money = (n) => '$' + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -115,14 +125,7 @@ const addDays = (iso, n) => new Date(day(iso).getTime() + n * 86400000).toISOStr
 export function check(s, send) {
   /** @type {Record<string, string>} */
   const e = {};
-  if (!s.kind) e.kind = 'Pick what kind of special this is.';
-  const tooLong = (field, name) => {
-    if (s[field].length > LIMITS[field]) e[field] = `${name} can be ${LIMITS[field]} characters at most. This one is ${s[field].length}.`;
-  };
-  if (s.kind === 'tiers' || s.kind === 'headline') {
-    if (!s.headline) e.headline = s.kind === 'tiers' ? 'Add a headline, like “The holidays are here. So are the savings.”' : 'Add the headline, like “Black Friday sneak peeks start this Friday.”';
-    else tooLong('headline', 'The headline');
-  }
+  if (!s.kind) e.kind = 'Pick this week’s sale.';
   if (s.kind === 'tiers') {
     const [few, many] = LIMITS.tiers;
     if (s.tiers.length < few) e.tiers = `Add at least ${few} tiers.`;
@@ -186,9 +189,9 @@ export function termsLine(s) {
 export function toSale(s) {
   const d = defaults(s.kind);
   const sale = { kind: s.kind, name: typeset(d.label), cta: typeset(d.cta), url: d.link };
-  if (s.kind === 'tiers') Object.assign(sale, { headline: typeset(s.headline), tiers: s.tiers.map((t) => [t.spend, t.percent]) });
+  if (s.kind === 'tiers') Object.assign(sale, { headline: typeset(SALE_HEADLINES.tiers), tiers: s.tiers.map((t) => [t.spend, t.percent]) });
   if (s.kind === 'percent') Object.assign(sale, { percent: s.percent, what: 'everything.' });
-  if (s.kind === 'headline') sale.headline = typeset(s.headline);
+  if (s.kind === 'headline') sale.headline = typeset(SALE_HEADLINES.headline);
   const fine = termsLine(s);
   if (fine) sale.details = fine;
   return sale;
@@ -201,7 +204,6 @@ export function toSale(s) {
 export function draftSale(s) {
   const kind = s.kind || 'tiers';
   const filled = { ...s, kind };
-  if (kind !== 'percent' && !filled.headline) filled.headline = kind === 'tiers' ? 'Your headline' : 'Your headline goes here';
   if (filled.ends && !isDate(filled.ends)) filled.ends = '';
   const sale = toSale(filled);
   if (kind === 'tiers') {
@@ -213,11 +215,11 @@ export function draftSale(s) {
   return sale;
 }
 
-/** One line for lists: "10% off $250+ · 15% off $500+" / "20% off everything" / the headline. */
+/** One line for lists: "10% off $250+ · 15% off $500+" / "20% off everything" / "No sale this week". */
 export function summary(s) {
   if (s.kind === 'tiers') return s.tiers.map((t) => `${t.percent}% off ${money(t.spend)}+`).join(' · ');
   if (s.kind === 'percent') return `${s.percent}% off everything`;
-  return s.headline;
+  return KINDS.headline.title;
 }
 
 // ── Send dates ──────────────────────────────────────────────────────────────
