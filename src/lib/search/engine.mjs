@@ -245,16 +245,26 @@ export function buildIndex(docs) {
     return item;
   });
   const vocab = new Set([...df.keys(), ...LEXICON_WORDS]);
-  return { items, df, vocab, n: items.length };
+  // Typo fixes and searches already worked out: the box, its suggestions and its "See all"
+  // count run the same searches on every keystroke.
+  return { items, df, vocab, n: items.length, fixes: new Map(), seen: new Map() };
 }
 
 // ── understanding a query ─────────────────────────────────────────────────
 
-/** Fixes a word that isn't in the catalog or the lexicon to the nearest one that is. */
+/** Fixes a word that isn't in the catalog or the lexicon to the nearest one that is (worked out once per word). */
 function correct(word, index) {
   if (index.vocab.has(word) || STOP.has(word) || REAL.has(word) || /\d/.test(word)) return word;
   const max = allowedTypos(word);
   if (!max) return word;
+  if (index.fixes.has(word)) return index.fixes.get(word);
+  const fixed = nearest(word, index, max);
+  if (index.fixes.size > 2000) index.fixes.clear();
+  index.fixes.set(word, fixed);
+  return fixed;
+}
+
+function nearest(word, index, max) {
   let best = null;
   for (const v of index.vocab) {
     if (Math.abs(v.length - word.length) > max || v.length <= 2) continue;
@@ -378,6 +388,19 @@ function termScore(item, word, index, partial) {
  */
 export function search(index, raw, { prefix = false, limit = Infinity } = {}) {
   raw = String(raw ?? '').slice(0, MAX_QUERY);
+  const key = `${prefix ? 1 : 0}|${limit}|${raw}`;
+  const known = index.seen?.get(key);
+  if (known) return known;
+  const result = run(index, raw, prefix, limit);
+  if (index.seen) {
+    if (index.seen.size > 500) index.seen.clear();
+    index.seen.set(key, result);
+  }
+  return result;
+}
+
+/** The search itself; `search` keeps what it has already found (results are never changed after). */
+function run(index, raw, prefix, limit) {
   const q = parse(raw, index, { prefix });
   // A query of style words alone ("modern", "farmhouse") looks for those words.
   if (q.styles && !q.kinds.length && !q.rooms.length && !q.looks.length && !q.terms.length) {
