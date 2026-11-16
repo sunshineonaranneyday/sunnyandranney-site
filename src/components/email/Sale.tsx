@@ -1,12 +1,11 @@
 /** @jsxImportSource preact */
-import { KINDS, LIMITS, LINKS, WHERE, defaults, isDiscount, termsLine } from '@/lib/sunny-side/special.mjs';
-import { type Kind, type Other, type SaleForm, type Special, type Where, fieldId, tidyMoney, tidyPercent } from './model';
+import { KINDS, LIMITS, LINKS, defaults, isDiscount, termsLine } from '@/lib/sunny-side/special.mjs';
+import { type Kind, type Other, type SaleForm, type Special, fieldId, tidyMoney, tidyPercent } from './model';
 import { Counter, FieldError, Segmented } from './parts';
 
 const OTHER = '__other';
 /** The kinds as the switch names them: short enough for one row on a phone. */
 const KIND_NAMES: Record<Kind, string> = { tiers: 'Spend more, save more', percent: 'Percent off', headline: 'No discount' };
-const WHERE_NAMES: Record<Where, string> = { both: 'Showroom and online', store: 'Showroom only', online: 'Online only' };
 
 interface Props {
   form: SaleForm;
@@ -192,24 +191,12 @@ export function Sale({ form, special, errors, shown, set, touch, others, startFr
 
           {isDiscount(kind) && (
             <div class="em-terms">
-              <Segmented
-                id={fieldId('where')}
-                legend="Where it applies"
-                name="where"
-                value={form.where}
-                options={(Object.keys(WHERE) as Where[]).map((w) => ({ value: w, label: WHERE_NAMES[w] }))}
-                onChange={(w) => {
-                  set({ where: w as Where });
-                  touch('where');
-                }}
-                error={shown('where')}
-              />
               <div class="field em-ends">
                 <label for={fieldId('ends')}>Last day</label>
                 <input id={fieldId('ends')} type="date" value={form.ends} onInput={(e) => set({ ends: (e.target as HTMLInputElement).value })} onBlur={() => touch('ends')} {...invalid('ends')} />
                 <FieldError id={`${fieldId('ends')}-error`} message={shown('ends')} />
               </div>
-              <p class="em-hint em-terms-line">{terms ? `Under the button: “${terms}”` : 'The email says where the sale applies and when it ends, under the button.'}</p>
+              <p class="em-hint em-terms-line">{`Under the button: “${terms}”`}</p>
             </div>
           )}
 

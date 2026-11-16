@@ -68,7 +68,7 @@ test('the email gets the event with what its rules allow on that send date', () 
   assert.equal(b.items.length, 6);
   assert.equal(b.items[4].greg, true);
   assert.equal(b.items[2].what, 'Color a Sunny &amp; Ranney Christmas banner');
-  assert.deepEqual(b.calendar, { title: 'Kids’ Christmas Saturdays at Sunny & Ranney', start: '11:00', end: '14:00', intro: 'Kids’ Christmas Saturdays, 11am-2pm:', ics: `${SITE}/events/kids-christmas-saturdays-2026.ics` });
+  assert.deepEqual(b.calendar, { title: 'Kids’ Christmas Saturdays at Sunny & Ranney', start: '11:00', end: '14:00', intro: 'Kids’ Christmas Saturdays, 11am-2pm:', ics: `${SITE}/events/kids-christmas-saturdays-2026.ics/` });
   // The email draws it: past dates gone, the calendar from the next date, Greg on his date
   const html = render({ ...previewBrief(toSale(clean({ kind: 'headline', headline: 'Hi' })), '2026-11-17'), events: [b] }, ['events']);
   assert.match(html, /Write a letter to&nbsp;Santa/);
@@ -110,16 +110,16 @@ test('the next date gets its own calendar links, for any event; "every date" onl
   const sale = toSale(clean({ kind: 'headline', headline: 'Hi' }));
   const draw = (ev, send) => render({ ...previewBrief(sale, send), events: [toBriefEvent(ev, send, SITE)] }, ['events']);
   const b = toBriefEvent(saturdays(), '2026-11-17', SITE);
-  assert.deepEqual(b.one, { title: 'Kids’ Christmas Saturdays at Sunny & Ranney', start: '11:00', end: '14:00', ics: `${SITE}/events/kids-christmas-saturdays-2026` });
+  assert.deepEqual(b.one, { title: 'Kids’ Christmas Saturdays at Sunny & Ranney', start: '11:00', end: '14:00', site: SITE, id: 'kids-christmas-saturdays-2026' });
   const html = draw(saturdays(), '2026-11-17');
   // In the card: Nov 21 alone, as one Google event and a one-date file
   assert.match(html, /Add Nov 21 to your calendar:/);
-  assert.match(html, /\/events\/kids-christmas-saturdays-2026\/2026-11-21\.ics\?[^"]*utm_content=next-apple/);
+  assert.match(html, /\/events\/kids-christmas-saturdays-2026\/2026-11-21\.ics\/\?[^"]*utm_content=next-apple/);
   assert.match(html, /utm_content=next-outlook/);
   assert.match(html, /text=Kids%E2%80%99%20Christmas%20Saturdays%20at%20Sunny%20%26%20Ranney&amp;dates=20261121T110000\/20261121T140000&amp;ctz=America\/New_York&amp;location=[^&]+&amp;details=Write%20a%20letter%20to%20Santa"/);
   // Below: every date still ahead, as before
   assert.match(html, /Add every date to your calendar:/);
-  assert.match(html, /\/events\/kids-christmas-saturdays-2026\.ics\?[^"]*utm_content=cal-apple/);
+  assert.match(html, /\/events\/kids-christmas-saturdays-2026\.ics\/\?[^"]*utm_content=cal-apple/);
   // One date left: the card's links are the only ones
   const last = draw(saturdays(), '2026-12-08');
   assert.match(last, /Add Dec 12 to your calendar:/);

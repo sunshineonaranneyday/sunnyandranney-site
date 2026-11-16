@@ -4,6 +4,7 @@ import { Miniflare } from 'miniflare';
 import { Email, render, usePhotoOrigin } from './email.mjs';
 import { broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, statusOf, subscriberCount, templateFor, usualTime } from './kit.mjs';
 import { cfIdOf, kidFor, missionOf, photosDate, revealedKids, roomsPhrase } from './kids.mjs';
+import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
 import { DEFAULT_HERO, arrangeCollage, blankParts, checkParts, cleanParts, linesOf } from './parts.mjs';
 import { addPhoto, isJpeg, listPhotos, newPhotoId, photosByIds, setAlt } from './photo-store.mjs';
@@ -14,7 +15,7 @@ import { checkWall, cleanWall } from './wall.mjs';
 
 const SITE = 'https://sunnyandranney.com';
 const SEND = '2026-11-17';
-const special = clean({ kind: 'percent', percent: 20, what: 'everything', where: 'both', ends: '2026-11-29' });
+const special = clean({ kind: 'percent', percent: 20, what: 'everything', ends: '2026-11-29' });
 const sale = draftSale(special);
 const item = (handle) => ({ handle, name: handle, title: handle, price: 100, was: null, qty: 2, added: '2026-01-01', kind: 'Chairs', type: '', collections: [], photos: [{ url: `https://cdn.shopify.com/s/files/1/0930/2117/6092/files/${handle}.jpg?v=1`, w: 1000, h: 1000 }], rank: null, staffPick: false });
 const catalog = new Map(['a', 'b', 'c', 'd'].map((h) => [h, item(h)]));
@@ -44,7 +45,7 @@ test('the whole email from the admin: every part in order, the store’s photos 
   const html = render(e.brief, e.sections);
   assert.match(html, /<title>Christmas is in store! Save up to 20%<\/title>/);
   assert.match(html, /mso-hide:all;">20% off everything\./); // an empty preview line says the sale
-  assert.ok(html.includes(`src="https://shop.sunnyandranney.com/cdn-cgi/image/width=1200,height=600,fit=cover,gravity=auto,quality=64,format=jpeg/${SITE}/media/email/${ids[0]}.jpg"`));
+  assert.ok(html.includes(`src="https://shop.sunnyandranney.com/cdn-cgi/image/width=1200,height=600,fit=cover,gravity=auto,quality=64,format=jpeg/${SITE}/media/email/${ids[0]}.jpg/"`));
   assert.match(html, /alt="Photo 1"/);
   assert.match(html, /Christmas is&nbsp;here\./);
   assert.match(html, /utm_content=story-photo-3/);
@@ -99,11 +100,25 @@ test('the parts are checked: lengths, links, the subject against the sale, alt t
   assert.deepEqual(cleanParts({ hero: '../etc', story: { photos: ['x', ids[0], ids[0]] }, extra: 1 }).story.photos, [ids[0]]);
 });
 
+test('every address on the store’s own site in an email ends in a slash, or production can’t serve it', () => {
+  // The site uses trailingSlash: 'always'; in production an on-demand route without its slash gets
+  // the 404 page before any middleware runs (addresses.mjs). The first deploy's photos and calendar
+  // files did exactly that while the dev server served them.
+  const ev = cleanEvent({ id: 'kids-christmas-saturdays-2026', title: 'Kids’ Christmas Saturdays', start: '11:00', end: '14:00', dates: [{ date: '2026-11-21', what: 'Write a letter to Santa' }, { date: '2026-11-28', what: 'Color a banner' }] });
+  const e = pageEmail({ sale, wall: wallOf(4), parts: story(5), photos, kids, catalog, events: [toBriefEvent(ev, SEND, SITE)], impact, send: SEND, site: SITE });
+  const html = render(e.brief, e.sections);
+  const own = [...html.matchAll(/https:\/\/sunnyandranney\.com(\/[^"'\s?&#)]*)/g)].map((m) => m[1]);
+  assert.ok(own.some((p) => p.startsWith('/media/email/')), 'it holds the store’s photos');
+  assert.ok(own.some((p) => /^\/events\/[^/]+\/\d{4}-\d{2}-\d{2}\.ics\/$/.test(p)), 'and the next date’s calendar file');
+  assert.ok(own.some((p) => /^\/events\/[^/]+\.ics\/$/.test(p)), 'and the series’ calendar file');
+  assert.deepEqual(own.filter((p) => !p.endsWith('/')), []);
+});
+
 test('a store photo is cropped by the resizing; on a developer’s machine it shows straight from the site', () => {
-  assert.equal(Email.photo(`photo:${ids[0]}`, 100, 50), `https://shop.sunnyandranney.com/cdn-cgi/image/width=100,height=50,fit=cover,gravity=auto,quality=64,format=jpeg/${SITE}/media/email/${ids[0]}.jpg`);
+  assert.equal(Email.photo(`photo:${ids[0]}`, 100, 50), `https://shop.sunnyandranney.com/cdn-cgi/image/width=100,height=50,fit=cover,gravity=auto,quality=64,format=jpeg/${SITE}/media/email/${ids[0]}.jpg/`);
   usePhotoOrigin('http://localhost:4322', { direct: true });
   try {
-    assert.equal(Email.photo(`photo:${ids[0]}`, 100, 50), `http://localhost:4322/media/email/${ids[0]}.jpg`);
+    assert.equal(Email.photo(`photo:${ids[0]}`, 100, 50), `http://localhost:4322/media/email/${ids[0]}.jpg/`);
   } finally {
     usePhotoOrigin(SITE);
   }

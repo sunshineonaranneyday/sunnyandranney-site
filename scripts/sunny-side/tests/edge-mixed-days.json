@@ -94,7 +94,8 @@
         "title": "December at the showroom at Sunny & Ranney",
         "start": "17:00",
         "end": "20:00",
-        "ics": "https://sunnyandranney.com/events/holiday-shopping-night-2026"
+        "site": "https://sunnyandranney.com",
+        "id": "holiday-shopping-night-2026"
       }
     }
   ],

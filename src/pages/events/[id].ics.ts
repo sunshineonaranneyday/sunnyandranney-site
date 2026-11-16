@@ -8,9 +8,9 @@ import { localDate } from '@/lib/time-clock/hours.mjs';
 // Calendar and Outlook.
 export const prerender = false;
 
-export const GET: APIRoute = async ({ url, locals }) => {
-  // From the address itself: the middleware's rewrite of "<id>.ics" to "<id>.ics/" doesn't carry the route's params
-  const id = url.pathname.match(/^\/events\/([a-z0-9][a-z0-9-]{0,80})\.ics\/?$/)?.[1];
+export const GET: APIRoute = async ({ params, locals }) => {
+  // At /events/<id>.ics/ (icsUrl): calendar apps go by the file's type and name below, not the address
+  const id = /^[a-z0-9][a-z0-9-]{0,80}$/.test(params.id ?? '') ? params.id! : null;
   const record = id ? await getEvent(locals.runtime.env.DB, id) : null;
   const today = localDate(new Date().toISOString());
   if (!record || !record.event.dates.some((d: { date: string }) => d.date >= today)) {

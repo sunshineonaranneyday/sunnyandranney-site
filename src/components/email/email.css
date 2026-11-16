@@ -252,6 +252,17 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-upload { position: relative; overflow: hidden; cursor: pointer; }
 .em-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .em-upload.is-busy { opacity: 0.7; cursor: progress; }
+/* Photos dragged over the section: the whole section takes them, with a label that stays in view */
+.em-photos { position: relative; }
+.em-drop {
+  position: absolute; inset: 0; z-index: 6; display: flex; justify-content: center; align-items: flex-start;
+  border: 2px dashed var(--ink); border-radius: var(--r-md); background: color-mix(in srgb, var(--panel) 86%, transparent);
+  pointer-events: none; animation: em-fade var(--em-fast) var(--em-ease) both;
+}
+.em-drop-label {
+  position: sticky; top: 45vh; margin: 3rem 1rem; padding: 0.625rem 1rem; border-radius: 999px; background: var(--ink); color: var(--panel);
+  font-weight: 700; box-shadow: var(--shadow); animation: em-pop var(--em-mid) var(--em-pop) both;
+}
 .em-collage { border: 0; margin: 0 0 1rem; padding: 0.875rem; min-width: 0; max-width: 27.75rem; background: var(--sunk); border-radius: var(--r-md); }
 /* The strip is the email's collage in small: one wide photo, then rows of two or three (COLLAGE_ROWS) */
 .em-collage-list { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.375rem; }

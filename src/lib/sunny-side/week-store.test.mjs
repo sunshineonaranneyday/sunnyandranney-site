@@ -14,7 +14,7 @@ async function freshDb() {
   const mf = new Miniflare({ modules: true, script: 'export default {}', d1Databases: { DB: `week-test-${dbCount++}` } });
   return { DB: await mf.getD1Database('DB'), mf };
 }
-const special = forKind(clean({ kind: 'percent', percent: 20, what: 'everything', where: 'both', ends: '2026-11-29' }));
+const special = forKind(clean({ kind: 'percent', percent: 20, what: 'everything', ends: '2026-11-29' }));
 const wall = cleanWall({ picks: [{ handle: 'a', photo: 'cf:a', name: '' }], arranged: 'hand' });
 
 test('a week saves its special and products together, checking the version the page loaded', async () => {

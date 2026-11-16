@@ -19,18 +19,15 @@ export const KINDS = {
   headline: { title: 'A headline instead', hint: 'No discount this week: say what’s new' },
 };
 
-/** The kinds that are a discount, so the email has to say where it applies and when it ends. */
+/** The kinds that are a discount, so the email says where it counts and when it ends. */
 export const isDiscount = (kind) => kind === 'tiers' || kind === 'percent';
 
 /**
- * Where a discount applies. Staci always picks one: the email's fine print says it, so a
- * customer never learns at the register (or the checkout) that the sale wasn't for them.
+ * Every sale counts in the showroom and online, so the fine print always says so and there's
+ * nothing to pick (the store, 2026-11-16). Specials saved before then may still carry a `where`;
+ * it's ignored.
  */
-export const WHERE = {
-  both: 'In the showroom and online',
-  store: 'In the showroom only',
-  online: 'Online only',
-};
+export const EVERYWHERE = 'In the showroom and online.';
 
 /** Where the button can go. Anything else is a path on sunnyandranney.com. */
 export const LINKS = [
@@ -75,7 +72,7 @@ export function defaults(kind, what = '') {
 
 /** A fresh special of a kind: two empty tiers to start from, everything else blank. */
 export function blank(kind = 'tiers') {
-  return { kind, headline: '', tiers: [{ spend: null, percent: null }, { spend: null, percent: null }], percent: null, what: 'everything', where: '', label: '', cta: '', link: '', ends: '', details: '' };
+  return { kind, headline: '', tiers: [{ spend: null, percent: null }, { spend: null, percent: null }], percent: null, what: 'everything', label: '', cta: '', link: '', ends: '', details: '' };
 }
 
 const str = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
@@ -105,7 +102,6 @@ export function clean(input) {
     tiers: rows.slice(0, 8).map((r) => ({ spend: whole(r?.spend), percent: whole(r?.percent) })),
     percent: whole(i.percent),
     what: str(i.what),
-    where: Object.hasOwn(WHERE, i.where) ? i.where : '',
     label: str(i.label),
     cta: str(i.cta),
     link: toPath(i.link),
@@ -117,7 +113,7 @@ export function clean(input) {
 /** Only the fields the special's kind uses, for saving. A headline week has no discount, so no terms. */
 export function forKind(s) {
   const common = { kind: s.kind, label: s.label, cta: s.cta, link: s.link, details: s.details };
-  const terms = { where: s.where, ends: s.ends };
+  const terms = { ends: s.ends };
   if (s.kind === 'tiers') return { ...common, ...terms, headline: s.headline, tiers: s.tiers };
   if (s.kind === 'percent') return { ...common, ...terms, percent: s.percent, what: s.what };
   return { ...common, headline: s.headline };
@@ -184,7 +180,6 @@ export function check(s, send) {
     else if (!/^\/(?!\/)[^\s<>"]*$/.test(s.link)) e.link = 'Use a page on sunnyandranney.com, starting with /, like /shop/?sale=true.';
   }
   if (isDiscount(s.kind)) {
-    if (!s.where) e.where = 'Pick where the sale applies: in the showroom, online, or both.';
     if (!s.ends) e.ends = 'Add the last day of the sale. The email tells customers when it ends.';
   }
   if (isDiscount(s.kind) && s.ends) {
@@ -216,7 +211,7 @@ export const endsLine = (iso) => {
 /** The terms as the fine print says them: "In the showroom and online. Ends Sunday, Nov 29." */
 export function termsLine(s) {
   if (!isDiscount(s.kind)) return '';
-  return [s.where ? `${WHERE[s.where]}.` : '', s.ends ? endsLine(s.ends) : ''].filter(Boolean).join(' ');
+  return [EVERYWHERE, s.ends ? endsLine(s.ends) : ''].filter(Boolean).join(' ');
 }
 
 /** The email's offer (brief.sale) from a checked special. The fine print is the terms, then anything Staci added. */
@@ -241,7 +236,6 @@ export function draftSale(s) {
   if (kind !== 'percent' && !filled.headline) filled.headline = kind === 'tiers' ? 'Your headline' : 'Your headline goes here';
   if (kind === 'percent' && !filled.what) filled.what = 'everything';
   if (filled.ends && !isDate(filled.ends)) filled.ends = '';
-  if (!Object.hasOwn(WHERE, filled.where)) filled.where = '';
   const sale = toSale(filled);
   if (kind === 'tiers') {
     const rows = s.tiers.slice(0, LIMITS.tiers[1]).map((t) => [t.spend ?? '?', t.percent ?? '?']);
