@@ -14,7 +14,19 @@ name = "DEPLOY_COORDINATOR"
 class_name = "DeployCoordinator"
 script_name = "deploy-coordinator"
 
+# Photos uploaded for the weekly email (src/lib/sunny-side/photo-store.mjs), served at /media/email/
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "sunnyandranney-email-photos"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "sunnyandranney-db"
 database_id = "a3fbfba9-569c-4dae-af1a-4a1f290963f7"
+
+# The charity's own database, read (never written) for its kids: the weekly email's charity section
+# shows one family's makeover in the charity's words (src/lib/sunny-side/kids.mjs).
+[[d1_databases]]
+binding = "SOARD_DB"
+database_name = "soard-db"
+database_id = "71ac037d-2682-4336-9cf7-234e97c5b462"

@@ -6,7 +6,7 @@ import { loadToday } from '@/lib/admin/today.mjs';
 import { initials, svg, tone } from '@/lib/admin-ui';
 import { STORE_TIME_ZONE, workweekStart, localDate, utcToLocalInput } from '@/lib/time-clock/hours.mjs';
 import { nextSend, sendLabel } from '@/lib/sunny-side/special.mjs';
-import { getSpecial } from '@/lib/sunny-side/special-store.mjs';
+import { getWeek } from '@/lib/sunny-side/week-store.mjs';
 
 const admin = Astro.locals.admin;
 if (!admin) return new Response('Not authorized', { status: 403 });
@@ -15,12 +15,13 @@ if (admin.role !== 'manager') return Astro.redirect('/admin/clock/', 302);
 const now = new Date().toISOString();
 const t = await loadToday(Astro.locals.runtime.env.DB, { now, myEmail: admin.email });
 
-// The coming Tuesday email needs its special. If the check itself fails, Today still loads without it.
+// The coming Tuesday email needs its special and its products. If the check itself fails, Today still loads without it.
 const emailSend = nextSend(localDate(now));
-const specialMissing = await getSpecial(Astro.locals.runtime.env.DB, emailSend).then(
-  (s) => s === null,
-  () => false,
+const emailMissing = await getWeek(Astro.locals.runtime.env.DB, emailSend).then(
+  (w) => [w?.special ? '' : 'the sale', w?.wall ? '' : 'the products'].filter(Boolean),
+  () => [],
 );
+const specialMissing = emailMissing.length > 0;
 const emailDays = Math.round((Date.parse(emailSend) - Date.parse(localDate(now))) / 86400000);
 const emailWhen = emailDays === 0 ? 'It goes out today' : emailDays === 1 ? 'It goes out tomorrow' : `It goes out in ${emailDays} days`;
 
@@ -179,11 +180,11 @@ interface Missed {
         <article class:list={['task', emailDays === 0 ? 'task-urgent' : 'task-warn']} id="special-task">
           <span class="task-icon" aria-hidden="true"><Fragment set:html={svg('tag', 20)} /></span>
           <div class="task-body">
-            <h3>The {sendLabel(emailSend)} email has no special yet</h3>
-            <p>{emailWhen}. Pick the sale or a headline, and see it in the email as you type.</p>
+            <h3>The {sendLabel(emailSend)} email needs {emailMissing.join(' and ')}</h3>
+            <p>{emailWhen}. Set them, and see the email as you go.</p>
           </div>
           <div class="task-actions">
-            <a class="btn btn-dark btn-small" href="/admin/special/">Set the special</a>
+            <a class="btn btn-dark btn-small" href={`/admin/email/?send=${emailSend}`}>Set up the email</a>
           </div>
         </article>
       )}

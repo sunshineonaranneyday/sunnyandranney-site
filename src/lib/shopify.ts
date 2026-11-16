@@ -195,6 +195,31 @@ export async function getProducts(first = 24, cursor?: string, sortKey: 'BEST_SE
   };
 }
 
+/**
+ * Every product that can be bought, best sellers first, as handles only: the order the
+ * weekly email's product picker offers them in (src/pages/shop/catalog.json.ts).
+ */
+export async function getBestSellingHandles(): Promise<string[]> {
+  const query = `
+    query BestSelling($after: String) {
+      products(first: 250, after: $after, sortKey: BEST_SELLING, query: "available_for_sale:true") {
+        pageInfo { hasNextPage endCursor }
+        edges { node { handle } }
+      }
+    }
+  `;
+  const handles: string[] = [];
+  let after: string | undefined;
+  for (;;) {
+    const data = await shopifyFetch<{
+      products: { pageInfo: { hasNextPage: boolean; endCursor: string }; edges: Array<{ node: { handle: string } }> };
+    }>(query, { after });
+    handles.push(...data.products.edges.map((e) => e.node.handle));
+    if (!data.products.pageInfo.hasNextPage) return handles;
+    after = data.products.pageInfo.endCursor;
+  }
+}
+
 export async function getProductByHandle(handle: string) {
   const query = `
     ${PRODUCT_FRAGMENT}

@@ -106,7 +106,7 @@ export function navFor({ role, owner }) {
       },
       {
         heading: 'Email',
-        links: [{ href: '/admin/special/', label: 'Weekly special', short: 'Special', icon: 'email', tab: false }],
+        links: [{ href: '/admin/email/', label: 'Weekly email', short: 'Email', icon: 'email', tab: false }],
       },
       {
         heading: 'Pay',

@@ -1,0 +1,133 @@
+---
+export const prerender = false;
+
+import EmailApp from '@/components/email/EmailApp';
+import type { AppProps } from '@/components/email/model';
+import '@/components/email/email.css';
+import AdminBase from '@/layouts/AdminBase.astro';
+import { sendLabel, summary, upcomingSends } from '@/lib/sunny-side/special.mjs';
+import { eventsFrom } from '@/lib/sunny-side/event-store.mjs';
+import { pastWeeks, setKit, weeksBetween } from '@/lib/sunny-side/week-store.mjs';
+import { IMPACT_PAGE, impactFromPage } from '@/lib/sunny-side/impact.mjs';
+import { broadcastUrl, kitClient, statusOf, subscriberCount, usualTime } from '@/lib/sunny-side/kit.mjs';
+import { listRevealedKids } from '@/lib/sunny-side/kids.mjs';
+import { blankParts } from '@/lib/sunny-side/parts.mjs';
+import { listPhotos, photosByIds } from '@/lib/sunny-side/photo-store.mjs';
+import { testPeople } from '@/lib/sunny-side/testers.mjs';
+import { listPeople, recentTests } from '@/lib/sunny-side/test-store.mjs';
+import { localDate } from '@/lib/time-clock/hours.mjs';
+
+const admin = Astro.locals.admin;
+if (admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
+
+// This week's Tuesday email and the three after it; past ones have already gone out.
+const db = Astro.locals.runtime.env.DB;
+const today = localDate(new Date().toISOString());
+const sends = upcomingSends(today, 4);
+const asked = Astro.url.searchParams.get('send');
+if (asked && !sends.includes(asked)) return Astro.redirect('/admin/email/', 302);
+const send = asked ?? sends[0];
+
+/** The charity's numbers for the preview's impact strip, cached an hour; the Kit draft reads them fresh. */
+async function impactNow() {
+  try {
+    const res = await fetch(IMPACT_PAGE, { headers: { 'User-Agent': 'sunny-and-ranney-admin' }, signal: AbortSignal.timeout(4000), cf: { cacheTtl: 3600 } } as RequestInit);
+    return res.ok ? impactFromPage(await res.text()) : null;
+  } catch {
+    return null;
+  }
+}
+
+const env = Astro.locals.runtime.env;
+const kit = env.KIT_API_KEY ? kitClient({ key: env.KIT_API_KEY, base: env.KIT_API_BASE || undefined }) : null;
+/** A Kit answer for the page, or null if Kit is slow or says no: the page still works without it. */
+async function fromKit<T>(ask: () => Promise<T>): Promise<T | null> {
+  if (!kit) return null;
+  try {
+    return await Promise.race([ask(), new Promise<null>((done) => setTimeout(() => done(null), 4000))]);
+  } catch {
+    return null;
+  }
+}
+async function kidsNow() {
+  try {
+    return await listRevealedKids(env.SOARD_DB, today);
+  } catch {
+    return [];
+  }
+}
+
+const [upcoming, past, events, testList, library, impact, kids, usual, subscribers] = await Promise.all([
+  weeksBetween(db, sends[0], sends[sends.length - 1]),
+  pastWeeks(db, sends[0], 12),
+  eventsFrom(db, today),
+  listPeople(db),
+  listPhotos(db, 80),
+  impactNow(),
+  kidsNow(),
+  fromKit(() => usualTime(kit!)),
+  fromKit(() => subscriberCount(kit!)),
+]);
+const bySend = new Map(upcoming.map((r) => [r.send, r]));
+const weeks = sends.map((s) => {
+  const r = bySend.get(s);
+  return { send: s, label: sendLabel(s), sale: r?.special ? summary(r.special) : '', products: r?.wall?.picks.length ?? 0 };
+});
+const record = bySend.get(send) ?? null;
+const parts = record?.parts ?? blankParts();
+// The library, plus any older photo this email still uses
+const using = [parts.hero, ...parts.story.photos].filter((id) => id && !library.some((p) => p.id === id));
+const [older, tests] = await Promise.all([photosByIds(db, using), recentTests(db, send)]);
+const photos = [...library, ...older];
+// Where the week's send stands in Kit now: scheduled, sending or sent. One deleted in Kit's own app
+// counts as none, so the email unlocks; if Kit doesn't answer, it stays as it was noted.
+const kitStatus = record?.kit ? await fromKit(() => statusOf(kit!, record.kit!.id)) : null;
+if (record?.kit && kitStatus?.status === 'gone') {
+  await setKit(db, { send, id: null });
+  record.kit = null;
+}
+const kitSend = record?.kit ? { ...record.kit, url: broadcastUrl(record.kit.id), status: kitStatus?.status ?? 'scheduled' } : null;
+// Any other saved special can be a starting point: the coming weeks first, then the last dozen sent.
+const others = [...upcoming.filter((r) => r.send !== send && r.special), ...past].map((r) => ({
+  send: r.send,
+  label: sendLabel(r.send),
+  summary: summary(r.special!),
+  special: r.special!,
+}));
+
+// The shared rules are plain JavaScript; the page's types say what they return
+const props = {
+  send,
+  label: sendLabel(send),
+  today,
+  weeks,
+  record: record ? { special: record.special, wall: record.wall, updatedAt: record.updatedAt, updatedBy: record.updatedBy } : null,
+  others,
+  events,
+  // Who checks each email: the store's list, kept in D1, with whoever is signed in first
+  test: { people: testPeople(testList, admin.email), me: admin.email.toLowerCase() },
+  parts,
+  photos,
+  kitSend,
+  tests,
+  kids,
+  usualTime: usual,
+  subscribers: Number.isFinite(subscribers) ? subscribers : null,
+  impact,
+  local: import.meta.env.DEV,
+} as unknown as AppProps;
+// The page's JSON can't close its own script tag.
+const data = JSON.stringify(props).replace(/</g, '\\u003c');
+---
+
+<AdminBase title="Weekly email">
+  <div id="email-root"><EmailApp {...props} /></div>
+  <script type="application/json" id="email-data" set:html={data} />
+</AdminBase>
+
+<script>
+  // Imports keep this script bundled: the admin's Content-Security-Policy blocks inline scripts.
+  import { mountEmail } from '@/components/email/mount';
+
+  mountEmail();
+</script>

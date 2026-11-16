@@ -89,7 +89,13 @@
           "note": "Plus pictures with Greg, aka Santa&nbsp;Paws",
           "greg": true
         }
-      ]
+      ],
+      "one": {
+        "title": "December at the showroom at Sunny & Ranney",
+        "start": "17:00",
+        "end": "20:00",
+        "ics": "https://sunnyandranney.com/events/holiday-shopping-night-2026"
+      }
     }
   ],
   "mission": {
@@ -115,5 +121,32 @@
     "cta": "See what&#8217;s new",
     "url": "/shop/?collection=new-arrivals"
   },
-  "send_date": "2026-12-01"
+  "send_date": "2026-12-01",
+  "story": {
+    "label": "This week in the showroom",
+    "headline": "New on the floor.",
+    "body": "Three rooms, freshly set.",
+    "cta": [
+      "Plan your visit",
+      "/visit/"
+    ],
+    "photos": [
+      {
+        "src": "cf:sunny-ranney-interior",
+        "alt": "The showroom floor"
+      },
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/255_harperswcloud20room.jpg?v=1776024853",
+        "alt": "A cloud swivel chair"
+      },
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/shopping_1.jpg?v=1776021813",
+        "alt": "An ottoman in a living room"
+      },
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/vitoswivelchairinpebbletan_lifestyle_r1_lp9qm9n7aeyf8bxk.jpg?v=1774477996",
+        "alt": "A swivel chair in pebble"
+      }
+    ]
+  }
 }
