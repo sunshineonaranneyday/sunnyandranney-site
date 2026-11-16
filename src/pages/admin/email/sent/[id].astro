@@ -10,7 +10,7 @@ import AdminBase from '@/layouts/AdminBase.astro';
 import { broadcastUrl, kitClient, sentEmail } from '@/lib/sunny-side/kit.mjs';
 
 const admin = Astro.locals.admin;
-if (admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
+if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
 
 const id = Astro.params.id ?? '';
 if (!/^\d{1,12}$/.test(id)) return Astro.redirect('/admin/email/sent/', 302);

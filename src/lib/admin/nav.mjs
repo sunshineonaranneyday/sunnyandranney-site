@@ -21,7 +21,7 @@
  *     (SIDEBAR.budget).
  */
 
-/** @typedef {'manager' | 'kiosk'} NavRole */
+/** @typedef {'manager' | 'kiosk' | 'email'} NavRole */
 
 /**
  * How often the store does each job, most often first, from its own rhythm on
@@ -76,8 +76,8 @@ export const PHONE_TABS = 4;
 
 /**
  * The pages a signed-in person sees. Managers get the whole admin, the owner
- * also gets Gusto's connection under Payroll, and the store tablet gets the
- * clock and schedule.
+ * also gets Gusto's connection under Payroll, the store tablet gets the clock
+ * and schedule, and an email-only login gets the weekly email alone.
  * @param {{ role?: NavRole, owner?: boolean }} who
  * @returns {Nav}
  */
@@ -93,6 +93,11 @@ export function navFor({ role, owner }) {
           ],
         },
       ],
+    };
+  }
+  if (role === 'email') {
+    return {
+      sections: [{ heading: '', links: [{ href: '/admin/email/', label: 'Weekly email', short: 'Email', icon: 'email', cadence: 'weekly' }] }],
     };
   }
   if (role !== 'manager') return { sections: [] };

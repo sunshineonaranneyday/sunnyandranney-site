@@ -21,6 +21,7 @@ const PEOPLE = {
   owner: { role: 'manager', owner: true },
   manager: { role: 'manager', owner: false },
   'store tablet': { role: 'kiosk', owner: false },
+  'email-only login': { role: 'email', owner: false },
 };
 
 for (const [who, signIn] of Object.entries(PEOPLE)) {
@@ -152,6 +153,10 @@ test('search lists a page by its label, never with the work waiting beside it', 
   const shell = readFileSync(new URL('./shell.ts', import.meta.url), 'utf8');
   assert.match(shell, /querySelector\("\.side-label"\)/);
   assert.equal((LAYOUT.match(/class="side-label"/g) ?? []).length, 3, 'the sidebar page, sub-page and More rows each wrap their label');
+});
+
+test('an email-only login sees the weekly email and nothing else', () => {
+  assert.deepEqual(allLinks(navFor(PEOPLE['email-only login'])).map((link) => link.href), ['/admin/email/']);
 });
 
 test('someone without a role gets no navigation', () => {

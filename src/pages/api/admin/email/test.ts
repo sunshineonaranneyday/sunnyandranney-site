@@ -14,11 +14,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Sends a test of one Tuesday email, as saved, through Kit, to people on the page's list (and the
- * person sending). Managers only. Kit sends it about a minute later, exactly as subscribers will
+ * person sending). Managers and email-only logins. Kit sends it about a minute later, exactly as subscribers will
  * get it, with "[Test]" before the subject.
  */
 export const POST: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
   const env = context.locals.runtime.env;
   if (!env.KIT_API_KEY) return json({ error: 'The site isn’t connected to Kit: KIT_API_KEY isn’t set.' }, 503);

@@ -28,9 +28,10 @@ const moreMark = inSheet.length ? (inSheet.some((mark) => mark.tone === 'alert')
 const spoken = (label: string, mark?: { spoken: string }) => (mark ? `${label}, ${mark.spoken}` : undefined);
 // The sidebar's sizes come from the nav module, whose test holds the sidebar to one screen.
 const sidebarSizes = `--row:${SIDEBAR.row}px;--touch-row:${SIDEBAR.touchRow}px;--heading:${SIDEBAR.heading}px;--section-gap:${SIDEBAR.gap}px`;
-const roleLabel = admin?.owner ? 'Owner' : role === 'manager' ? 'Manager' : role === 'kiosk' ? 'Store tablet' : '';
+const roleLabel = admin?.owner ? 'Owner' : role === 'manager' ? 'Manager' : role === 'kiosk' ? 'Store tablet' : role === 'email' ? 'Weekly email' : '';
 // Ends the Cloudflare Access session, so a shared computer doesn't stay signed in. Not for the store tablet.
 const SIGN_OUT = '/cdn-cgi/access/logout';
+const signsOut = role === 'manager' || role === 'email';
 // The store's logo, from its Cloudflare Images account (allowed by the admin's CSP).
 const LOGO = 'https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ';
 const icon = (name: string) =>
@@ -132,7 +133,7 @@ const icon = (name: string) =>
                   <span class="who-email">{admin.email}</span>
                   <span class="who-role">{roleLabel}</span>
                 </span>
-                {role === 'manager' && (
+                {signsOut && (
                   <a class="who-out" href={SIGN_OUT} aria-label="Sign out" title="Sign out">
                     <Fragment set:html={icon('signout')} />
                   </a>
@@ -171,7 +172,7 @@ const icon = (name: string) =>
               </a>
             );
           })}
-          {(phone.groups.length > 0 || role === 'manager') && (
+          {(phone.groups.length > 0 || signsOut) && (
             <details class="tab-more">
               <summary class:list={['tab', { 'tab-current': phone.moreActive }]} aria-label={moreMark ? 'More, has work waiting' : undefined}>
                 <span class="tab-icon">
@@ -196,7 +197,7 @@ const icon = (name: string) =>
                   </div>
                 ))}
                 {/* Sign out ends the sheet. Never on the store tablet, which stays signed in. */}
-                {role === 'manager' && (
+                {signsOut && (
                   <div class="more-group">
                     <a href={SIGN_OUT} class="more-link">
                       <Fragment set:html={icon('signout')} />

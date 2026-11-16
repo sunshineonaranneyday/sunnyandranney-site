@@ -18,7 +18,7 @@ import { listPeople, recentTests } from '@/lib/sunny-side/test-store.mjs';
 import { localDate } from '@/lib/time-clock/hours.mjs';
 
 const admin = Astro.locals.admin;
-if (admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
+if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
 
 // One email at a time: this week's until it has gone out, then next week's (weekToWorkOn). This
 // week's stays until its Saturday, so one that missed its Tuesday can still go out (sendDays). The

@@ -32,12 +32,12 @@ function conflict(current: { updatedAt: string; updatedBy: string } | null | und
 }
 
 /**
- * Saves the week's special and products. Managers only. Either can be left unset (null) until
+ * Saves the week's special and products. Managers and email-only logins. Either can be left unset (null) until
  * it's ready; what's set has to pass the same checks the page runs. The products' stock is
  * checked in the page against the shop's catalog, and again by the weekly build.
  */
 export const PUT: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
 
   const body = await readJson(context.request);
@@ -73,9 +73,9 @@ export const PUT: APIRoute = async (context) => {
   return json({ ok: true, updatedAt: saved.record!.updatedAt, updatedBy: saved.record!.updatedBy });
 };
 
-/** Takes the week's special and products away. Managers only. */
+/** Takes the week's special and products away. Managers and email-only logins. */
 export const DELETE: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
 
   const body = await readJson(context.request);

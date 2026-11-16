@@ -6,11 +6,11 @@ export const prerender = false;
 
 /**
  * Takes one photo for the weekly email: a JPEG the page has already shrunk to PHOTO_MAX_SIDE
- * pixels or less, with its width and height. Managers only. Goes into the PHOTOS bucket and the
+ * pixels or less, with its width and height. Managers and email-only logins. Goes into the PHOTOS bucket and the
  * library, ready to be the top photo or part of the story's collage.
  */
 export const POST: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
   const bucket = context.locals.runtime.env.PHOTOS;
   if (!bucket) return json({ error: 'Photo uploads aren’t set up yet: the site has no PHOTOS bucket.' }, 503);
@@ -40,9 +40,9 @@ export const POST: APIRoute = async (context) => {
   return json({ ok: true, photo: { id, w, h, alt, uploadedBy: admin.email, uploadedAt: now } });
 };
 
-/** Changes the words saying what's in a photo, for people who can't see images. Managers only. */
+/** Changes the words saying what's in a photo, for people who can't see images. Managers and email-only logins. */
 export const PUT: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
   const body = await readJson(context.request);
   const id = typeof body?.id === 'string' ? body.id : '';
