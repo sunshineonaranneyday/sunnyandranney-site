@@ -20,7 +20,7 @@ import {
 import { impactFromPage } from './impact.mjs';
 
 const SEND = '2026-11-17';
-const TERMS = { where: 'both', ends: '2026-11-29' };
+const TERMS = { ends: '2026-11-29' };
 const tiers = (rows, extra = {}) => clean({ kind: 'tiers', headline: 'The holidays are here. So are the savings.', tiers: rows, ...TERMS, ...extra });
 const percent = (extra = {}) => clean({ kind: 'percent', percent: 20, what: 'everything', ...TERMS, ...extra });
 
@@ -80,7 +80,7 @@ test('the calendar links start at the next date, with only the dates still ahead
   const e = {
     title: 'Kids’ Christmas Saturdays',
     time: '11am&#8211;2pm',
-    calendar: { title: 'Kids at S&R', start: '11:00', end: '14:00', intro: 'Holiday crafts for kids, 11am-2pm:', ics: 'https://sunnyandranney.com/events/x.ics' },
+    calendar: { title: 'Kids at S&R', start: '11:00', end: '14:00', intro: 'Holiday crafts for kids, 11am-2pm:', ics: 'https://sunnyandranney.com/events/x.ics/' },
     items: [
       { date: '2026-11-14', what: 'Build a snowman' },
       { date: '2026-11-21', what: 'Write a letter to Santa' },
@@ -158,13 +158,16 @@ test('the button only goes to pages on the store’s site', () => {
   assert.match(link('https://other.example/x'), /starting with \//);
 });
 
-test('a discount can’t be saved without where it applies and when it ends', () => {
-  for (const s of [tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }], { where: '', ends: '' }), percent({ where: '', ends: '' })]) {
+test('a discount can’t be saved without its last day; where it counts is never asked', () => {
+  for (const s of [tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }], { ends: '' }), percent({ ends: '' })]) {
     const e = check(s, SEND);
-    assert.match(e.where, /where the sale applies/);
+    assert.deepEqual(Object.keys(e), ['ends']);
     assert.match(e.ends, /last day of the sale/);
   }
-  assert.equal(clean({ where: 'everywhere' }).where, '', 'only the three choices count');
+  // A special saved when "where" was a choice: dropped, and the fine print says showroom and online
+  const old = clean({ kind: 'percent', percent: 20, what: 'everything', where: 'store', ends: '2026-11-29' });
+  assert.equal('where' in old, false);
+  assert.equal(termsLine(old), 'In the showroom and online. Ends Sunday, Nov 29.');
 });
 
 test('an end date has to fall after the email goes out, and not too far after', () => {
@@ -221,16 +224,16 @@ test('spend more, save more counts the whole order, so its button opens the whol
 });
 
 test('the fine print gives the terms first, then anything Staci added', () => {
-  assert.equal(termsLine(percent({ where: 'store' })), 'In the showroom only. Ends Sunday, Nov 29.');
-  assert.equal(termsLine(percent({ where: 'online', ends: '2026-11-22' })), 'Online only. Ends Sunday, Nov 22.');
+  assert.equal(termsLine(percent()), 'In the showroom and online. Ends Sunday, Nov 29.');
+  assert.equal(termsLine(percent({ ends: '2026-11-22' })), 'In the showroom and online. Ends Sunday, Nov 22.');
   assert.equal(toSale(percent({ details: 'Can’t be combined with other offers.' })).details, 'In the showroom and online. Ends Sunday, Nov 29. Can’t be combined with other offers.');
   // Old headline specials saved an end date; a headline week has no terms, so it's left out
-  assert.equal(termsLine(clean({ kind: 'headline', headline: 'Hi', where: 'both', ends: '2026-11-22' })), '');
+  assert.equal(termsLine(clean({ kind: 'headline', headline: 'Hi', ends: '2026-11-22' })), '');
 });
 
 test('saving keeps only the kind’s own fields', () => {
   const s = clean({ ...blank('percent'), percent: 20, headline: 'left over from tiers' });
-  assert.deepEqual(Object.keys(forKind(s)).sort(), ['cta', 'details', 'ends', 'kind', 'label', 'link', 'percent', 'what', 'where']);
+  assert.deepEqual(Object.keys(forKind(s)).sort(), ['cta', 'details', 'ends', 'kind', 'label', 'link', 'percent', 'what']);
   assert.deepEqual(Object.keys(forKind(clean({ ...blank('headline'), headline: 'Hi', ends: '2026-11-22' }))).sort(), ['cta', 'details', 'headline', 'kind', 'label', 'link']);
 });
 

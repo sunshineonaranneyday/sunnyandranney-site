@@ -34,6 +34,7 @@
  * Every store link carries its own utm_content, so Kit's click report shows which slot was tapped.
  */
 
+import { icsUrl, photoPath } from './addresses.mjs';
 import { money } from './product.mjs';
 
 // ── Tokens ──────────────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ export const SHOP_FILES = 'https://cdn.shopify.com/s/files/1/0930/2117/6092/';
 // from shop.sunnyandranney.com, the proxied hostname that redirects old shop links.
 export const RESIZE = 'https://shop.sunnyandranney.com/cdn-cgi/image';
 // The store's own uploads (the week's top photo, the story's collage) live on the site, at
-// /media/email/<id>.jpg, and go out through the same resizing, cropped around what's in them.
+// /media/email/<id>.jpg/ (photoPath), and go out through the same resizing, cropped around what's in them.
 let photoOrigin = SITE;
 let photoDirect = false;
 /** For the admin run locally, whose uploads aren't on the live site: show them as they are. */
@@ -285,7 +286,7 @@ export class Email {
 
   static photo(src, w, h) {
     if (src.startsWith('photo:')) {
-      const file = `${photoOrigin}/media/email/${src.slice(6)}.jpg`;
+      const file = `${photoOrigin}${photoPath(src.slice(6))}`;
       return photoDirect ? file : `${RESIZE}/width=${w},height=${h},fit=cover,gravity=auto,quality=64,format=jpeg/${file}`;
     }
     if (src.startsWith('cf:')) return `${CF}/${src.slice(3)}/w=${w},h=${h},fit=cover,gravity=auto,quality=64,format=jpeg`;
@@ -632,7 +633,7 @@ export class Email {
   /**
    * The event's next date on its own, in the card that leads the event: the date people are
    * deciding on now, for any event (a weekly series also gets "every date" below, once there's
-   * more than one). Apple and Outlook get a file with just that date (/events/<event>/<date>.ics).
+   * more than one). Apple and Outlook get a file with just that date (icsUrl).
    */
   addOne(e, it) {
     const c = e.one;
@@ -641,7 +642,7 @@ export class Email {
     return (
       Email.gap(S1) +
       Email.text(`Add ${monthShort(it.d)} ${it.d.getUTCDate()} to your calendar:`, { size: 14, lh: 20 }) +
-      this.calendarLinks(google, `${c.ics}/${date}.ics`, 'next', CHARCOAL)
+      this.calendarLinks(google, icsUrl(c.site, c.id, date), 'next', CHARCOAL)
     );
   }
 

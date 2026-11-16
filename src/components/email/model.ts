@@ -3,10 +3,9 @@
  * ones (src/lib/sunny-side/special.mjs, wall.mjs, events.mjs, catalog.mjs).
  */
 import { Email } from '@/lib/sunny-side/email.mjs';
-import { KINDS, LINKS, WHERE, clean, isDiscount, whole } from '@/lib/sunny-side/special.mjs';
+import { KINDS, LINKS, clean, isDiscount, whole } from '@/lib/sunny-side/special.mjs';
 
 export type Kind = keyof typeof KINDS;
-export type Where = keyof typeof WHERE;
 
 export interface Special {
   kind: Kind | '';
@@ -14,7 +13,6 @@ export interface Special {
   tiers: { spend: number | null; percent: number | null }[];
   percent: number | null;
   what: string;
-  where: Where | '';
   label: string;
   cta: string;
   link: string;
@@ -29,7 +27,6 @@ export interface SaleForm {
   tiers: { spend: string; percent: string }[];
   percent: string;
   what: string;
-  where: Where | '';
   label: string;
   cta: string;
   link: string;
@@ -201,14 +198,13 @@ const twoTiers = () => [
 ];
 
 export function saleFormOf(s: Special | null): SaleForm {
-  if (!s) return { kind: '', headline: '', tiers: twoTiers(), percent: '', what: 'everything', where: '', label: '', cta: '', link: '', linkOther: false, ends: '', details: '' };
+  if (!s) return { kind: '', headline: '', tiers: twoTiers(), percent: '', what: 'everything', label: '', cta: '', link: '', linkOther: false, ends: '', details: '' };
   return {
     kind: s.kind,
     headline: s.headline ?? '',
     tiers: s.tiers?.length ? s.tiers.map((t) => ({ spend: money(t.spend), percent: num(t.percent) })) : twoTiers(),
     percent: num(s.percent ?? null),
     what: s.what || 'everything',
-    where: s.where ?? '',
     label: s.label ?? '',
     cta: s.cta ?? '',
     link: s.link ?? '',
@@ -225,7 +221,7 @@ export function saleSnapshot(f: SaleForm): string {
   const s = specialOf(f);
   if (!s.kind) return '';
   const keep: Record<string, unknown> = { kind: s.kind, label: s.label, cta: s.cta, link: s.link, details: s.details };
-  if (isDiscount(s.kind)) Object.assign(keep, { where: s.where, ends: s.ends });
+  if (isDiscount(s.kind)) keep.ends = s.ends;
   if (s.kind === 'tiers') Object.assign(keep, { headline: s.headline, tiers: s.tiers });
   if (s.kind === 'percent') Object.assign(keep, { percent: s.percent, what: s.what });
   if (s.kind === 'headline') keep.headline = s.headline;

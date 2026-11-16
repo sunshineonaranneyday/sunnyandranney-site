@@ -4,11 +4,12 @@
  * An event is a name, its hours, and its dates, each with what's on that day (Kids' Christmas
  * Saturdays: 11am–2pm; Nov 21, write a letter to Santa; ...). Events belong to the store, not to
  * one email: every email shows the dates still ahead on its send day, and the site serves each
- * event's calendar file (/events/<id>.ics) with only the dates still ahead, so a customer never
+ * event's calendar file (/events/<id>.ics/, icsUrl) with only the dates still ahead, so a customer never
  * adds one that has passed. No Node or browser APIs: the admin, the API, the calendar file and the
  * weekly build share it.
  */
 
+import { icsUrl } from './addresses.mjs';
 import { day, monthShort, weekday } from './email.mjs';
 import { typeset } from './special.mjs';
 
@@ -149,14 +150,14 @@ export function toBriefEvent(ev, send, site) {
   };
   if (isMixed(ahead)) out.when = typeset(ev.when);
   // The next date alone, for the card that leads the event: any event, weekly or not
-  out.one = { title: `${plainTitle} at Sunny & Ranney`, start: ev.start, end: ev.end, ics: `${site}/events/${ev.id}` };
+  out.one = { title: `${plainTitle} at Sunny & Ranney`, start: ev.start, end: ev.end, site, id: ev.id };
   if (isWeekly(all)) {
     out.calendar = {
       title: `${plainTitle} at Sunny & Ranney`,
       start: ev.start,
       end: ev.end,
       intro: `${plainTitle}, ${hours.replace('–', '-')}:`,
-      ics: `${site}/events/${ev.id}.ics`,
+      ics: icsUrl(site, ev.id),
     };
   }
   return out;

@@ -130,14 +130,15 @@
         "start": "11:00",
         "end": "14:00",
         "intro": "Holiday crafts for kids, 11am-2pm:",
-        "ics": "https://sunnyandranney.com/events/kids-christmas-saturdays-2026.ics"
+        "ics": "https://sunnyandranney.com/events/kids-christmas-saturdays-2026.ics/"
       },
       "time": "11am&#8211;2pm",
       "one": {
         "title": "Kids' Christmas Saturdays at Sunny & Ranney",
         "start": "11:00",
         "end": "14:00",
-        "ics": "https://sunnyandranney.com/events/kids-christmas-saturdays-2026"
+        "site": "https://sunnyandranney.com",
+        "id": "kids-christmas-saturdays-2026"
       }
     }
   ],

@@ -41,7 +41,7 @@ import { Subject } from './Subject';
 
 const blankWall = (): Wall => ({ label: '', headline: '', picks: [], arranged: 'auto' });
 /** The order errors are listed in: the page's order, top to bottom. */
-const ORDER = ['kind', 'headline', 'tiers', 'percent', 'what', 'where', 'ends', 'cta', 'link', 'label', 'details', 'picks', 'wall', 'photos', 'story', 'mission', 'subject', 'preheader'];
+const ORDER = ['kind', 'headline', 'tiers', 'percent', 'what', 'ends', 'cta', 'link', 'label', 'details', 'picks', 'wall', 'photos', 'story', 'mission', 'subject', 'preheader'];
 
 /** An event as the preview draws it while it's still being typed: what's missing is filled in or left out. */
 function draftEvent(ev: StoreEvent): StoreEvent | null {

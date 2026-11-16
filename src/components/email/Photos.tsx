@@ -1,5 +1,6 @@
 /** @jsxImportSource preact */
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { photoPath } from '@/lib/sunny-side/addresses.mjs';
 import { COLLAGE_ROWS, Email } from '@/lib/sunny-side/email.mjs';
 import { COLLAGE_MAX, DEFAULT_HERO, arrangeCollage } from '@/lib/sunny-side/parts.mjs';
 import { ALT_DEFAULT, PHOTO_MAX_SIDE } from '@/lib/sunny-side/photo-store.mjs';
@@ -7,7 +8,7 @@ import { type Parts, type Photo, send as call, toast } from './model';
 import { FieldError, useFlip } from './parts';
 
 /** A photo as the page shows it: straight from the site on a developer's machine, else cropped by the resizing. */
-export const photoThumb = (id: string, w: number, h: number, local: boolean) => (local ? `/media/email/${id}.jpg` : Email.photo(`photo:${id}`, w, h));
+export const photoThumb = (id: string, w: number, h: number, local: boolean) => (local ? photoPath(id) : Email.photo(`photo:${id}`, w, h));
 
 /** Shrinks a photo in the browser to a JPEG at most PHOTO_MAX_SIDE across, turned the way it was taken. */
 async function shrink(file: File): Promise<{ blob: Blob; w: number; h: number }> {
@@ -47,15 +48,34 @@ interface Props {
   local: boolean;
 }
 
+/** True when what's being dragged holds files (not text or a link from the page). */
+const holdsFiles = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes('Files'));
+
 /**
- * The week's photos: uploaded from a phone or computer, kept in the store's library, and used as
- * the email's top photo and the story's collage. Each has a few words for people who can't see it.
+ * The week's photos: uploaded from a phone or computer (the button, or dragged onto the section),
+ * kept in the store's library, and used as the email's top photo and the story's collage. Each has
+ * a few words for people who can't see it.
  */
 export function Photos({ photos, setPhotos, parts, setParts, error, local }: Props) {
   const [uploading, setUploading] = useState<{ done: number; of: number } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [alts, setAlts] = useState<Record<string, string>>({});
   const [showAll, setShowAll] = useState(false);
+  // Files held over the section: counted, since dragging over each photo inside enters and leaves it
+  const [dropping, setDropping] = useState(false);
+  const depth = useRef(0);
+  // A photo let go anywhere else on the page would open in its place and lose unsaved work
+  useEffect(() => {
+    const hold = (e: DragEvent) => {
+      if (holdsFiles(e)) e.preventDefault();
+    };
+    window.addEventListener('dragover', hold);
+    window.addEventListener('drop', hold);
+    return () => {
+      window.removeEventListener('dragover', hold);
+      window.removeEventListener('drop', hold);
+    };
+  }, []);
   const byId = new Map(photos.map((p) => [p.id, p]));
   const story = parts.story.photos;
   /** How many photos share photo k's row in the email (COLLAGE_ROWS), so the strip here is laid out the same way. */
@@ -71,10 +91,14 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
   useFlip(collage, story);
   const setStory = (change: (ids: string[]) => string[]) => setParts((p) => ({ ...p, story: { ...p.story, photos: change(p.story.photos) } }));
 
-  async function upload(files: FileList | null) {
+  async function upload(files: FileList | File[] | null) {
     if (!files?.length) return;
     setProblem(null);
-    const list = [...files];
+    const all = [...files];
+    const list = all.filter((f) => f.type.startsWith('image/'));
+    const skipped = all.length - list.length;
+    if (skipped) setProblem(`${skipped === 1 ? `${all.find((f) => !f.type.startsWith('image/'))!.name} isn’t a photo` : `${skipped} of those aren’t photos`}, so ${skipped === 1 ? 'it was' : 'they were'} left out.`);
+    if (!list.length) return;
     let added: Photo[] = [];
     setUploading({ done: 0, of: list.length });
     for (const [k, file] of list.entries()) {
@@ -125,10 +149,42 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
     });
   const shown = showAll ? photos : photos.slice(0, 12);
 
+  const drag = {
+    onDragEnter: (e: DragEvent) => {
+      if (!holdsFiles(e)) return;
+      e.preventDefault();
+      depth.current += 1;
+      setDropping(true);
+    },
+    onDragOver: (e: DragEvent) => {
+      if (!holdsFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = uploading ? 'none' : 'copy';
+    },
+    onDragLeave: (e: DragEvent) => {
+      if (!holdsFiles(e)) return;
+      depth.current = Math.max(0, depth.current - 1);
+      if (!depth.current) setDropping(false);
+    },
+    onDrop: (e: DragEvent) => {
+      if (!holdsFiles(e)) return;
+      e.preventDefault();
+      depth.current = 0;
+      setDropping(false);
+      if (uploading) return toast('Wait for these photos to finish, then add more.');
+      void upload(e.dataTransfer ? [...e.dataTransfer.files] : null);
+    },
+  };
+
   return (
-    <div class="em-photos">
+    <div class={`em-photos${dropping ? ' is-dropping' : ''}`} {...drag}>
+      {dropping && (
+        <div class="em-drop" aria-hidden="true">
+          <span class="em-drop-label">{uploading ? 'Wait for these photos to finish' : 'Drop to add these photos'}</span>
+        </div>
+      )}
       <div class="em-photos-head">
-        <p class="em-hint">The top photo and the story’s collage. Photos from a phone are made smaller before they go up.</p>
+        <p class="em-hint">The top photo and the story’s collage. Drag photos here or add them; photos from a phone are made smaller before they go up.</p>
         <label class={`btn btn-dark em-upload${uploading ? ' is-busy' : ''}`}>
           <input type="file" accept="image/*" multiple disabled={Boolean(uploading)} onChange={(e) => void upload((e.target as HTMLInputElement).files).then(() => ((e.target as HTMLInputElement).value = ''))} />
           {uploading ? `Uploading ${uploading.done + 1 > uploading.of ? uploading.of : uploading.done + 1} of ${uploading.of}…` : 'Add photos'}

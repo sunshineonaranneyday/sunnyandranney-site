@@ -3,7 +3,7 @@
  * ===========================================================================
  * Staff upload the week's photos on the email page; the browser shrinks each to a JPEG of at
  * most PHOTO_MAX_SIDE pixels first, so a phone's 5MB shot goes up as a few hundred KB. The file
- * sits in the PHOTOS bucket at email/<id>.jpg and the site serves it at /media/email/<id>.jpg;
+ * sits in the PHOTOS bucket at email/<id>.jpg and the site serves it at /media/email/<id>.jpg/ (photoPath);
  * the email asks for it through Cloudflare's resizing, cropped to each spot. Here: the row that
  * says what the photo is (its size and the words for people who can't see it), and the library.
  */
