@@ -7,7 +7,7 @@
  *
  * Measured against a judged set of 130 queries by Baymard's query types (see the tests).
  */
-import { CHEAP, COLORS, FAMILIES, FEATURES, KINDS, MATERIALS, PAGES, REAL_WORDS, ROOMS, STOPWORDS, STYLES } from './lexicon.mjs';
+import { CHEAP, COLORS, FAMILIES, FEATURES, KINDS, MATERIALS, PAGES, REAL_WORDS, ROOMS, SALE, STOPWORDS, STYLES } from './lexicon.mjs';
 
 const FAMILY_OF = new Map(Object.entries(FAMILIES).flatMap(([f, ids]) => ids.map((id) => [id, f])));
 
@@ -26,11 +26,14 @@ export function normalize(text) {
     .trim();
 }
 
+/** Words whose plural turns f into ves; any other "-ves" just loses the s ("curves", "loves…"). */
+const VES = { shelves: 'shelf', leaves: 'leaf', halves: 'half', knives: 'knife', scarves: 'scarf', wolves: 'wolf', loaves: 'loaf', calves: 'calf' };
+
 /** Plural to singular, the common English way (shelves → shelf, benches → bench, tables → table). */
 export function stem(word) {
   if (word.length <= 3 || /\d/.test(word)) return word;
   if (/ies$/.test(word) && word.length > 4) return word.slice(0, -3) + 'y';
-  if (/ves$/.test(word)) return word.slice(0, -3) + 'f';
+  if (/ves$/.test(word)) return VES[word] ?? word.slice(0, -1);
   if (/(ches|shes|sses|xes|zes)$/.test(word)) return word.slice(0, -2);
   if (/s$/.test(word) && !/(ss|us|is)$/.test(word)) return word.slice(0, -1);
   return word;
@@ -84,12 +87,17 @@ const GROUPS = [
   ...PAGES.map((p) => ({ kind: 'page', id: p.href, say: p.say, page: p })),
   { kind: 'style', id: 'style', say: STYLES },
   { kind: 'cheap', id: 'cheap', say: CHEAP },
+  { kind: 'sale', id: 'sale', say: SALE },
 ];
 /** Every phrase a shopper might type, longest first, so "dining table" wins over "dining". */
 const SAY = GROUPS.flatMap((g) => g.say.map((s) => ({ g, words: phrase(s).split(' ').filter(Boolean), text: phrase(s) })))
   .filter((s) => s.words.length)
   .sort((a, b) => b.words.length - a.words.length || b.text.length - a.text.length);
 const LEXICON_WORDS = new Set(SAY.flatMap((s) => s.words));
+/** Every group a phrase belongs to: "linen" is a color and a material, "walnut" a color and a wood. */
+const SAY_GROUPS = new Map();
+for (const s of SAY) SAY_GROUPS.set(s.text, [...(SAY_GROUPS.get(s.text) ?? []), s.g]);
+const LOOK_KINDS = ['color', 'material', 'feature'];
 const STOP = new Set([...STOPWORDS].map(stem));
 const REAL = new Set(REAL_WORDS.flatMap((w) => tokens(w)));
 /**
@@ -145,12 +153,13 @@ function spans(field, words) {
 }
 
 /**
- * The kinds a title names. A kind's word inside a longer phrase of another family's kind
- * doesn't count: a "Sofa Table" is a console table, not a sofa. Within a family it does:
- * an "Accent Chair" is a chair too.
+ * The kinds a title or a category names. A kind's word inside a longer phrase of another
+ * family's kind doesn't count: a "Sofa Table" is a console table, not a sofa, and neither is
+ * a piece Shopify files under "Sofa Tables". Within a family it does: an "Accent Chair" is a
+ * chair too.
  */
-function titleKinds(titleT) {
-  const hits = KIND_FIND.flatMap((k) => k.words.flatMap((w) => spans(titleT, w).map(([a, b]) => ({ id: k.id, a, b }))));
+function phraseKinds(fieldT) {
+  const hits = KIND_FIND.flatMap((k) => k.words.flatMap((w) => spans(fieldT, w).map(([a, b]) => ({ id: k.id, a, b }))));
   const inside = (h, o) => o.a <= h.a && h.b <= o.b && o.b - o.a > h.b - h.a;
   return new Set(hits.filter((h) => !hits.some((o) => inside(h, o) && FAMILY_OF.get(o.id) !== FAMILY_OF.get(h.id))).map((h) => h.id));
 }
@@ -164,12 +173,13 @@ function titleKinds(titleT) {
  */
 function deriveKinds(titleT, leafT, collections) {
   const kinds = new Map();
-  for (const id of titleKinds(titleT)) kinds.set(id, 2);
+  for (const id of phraseKinds(titleT)) kinds.set(id, 2);
   const families = new Set([...kinds.keys()].map((id) => FAMILY_OF.get(id)).filter(Boolean));
+  const leafKinds = phraseKinds(leafT);
   for (const k of KIND_FIND) {
     if (kinds.has(k.id)) continue;
     const fits = !families.size || families.has(FAMILY_OF.get(k.id));
-    if ((fits && anyIn(leafT, k.words)) || (k.collection && collections?.includes(k.collection))) kinds.set(k.id, 1);
+    if ((fits && leafKinds.has(k.id)) || (k.collection && collections?.includes(k.collection))) kinds.set(k.id, 1);
   }
   return kinds;
 }
@@ -183,16 +193,19 @@ const leafText = (p) => [p.category?.name ?? p.c, p.productType ?? p.y, ...(p.ta
 
 /**
  * At build time, from the whole product: its kinds ("sofa:2"), colors, materials and
- * features ("c:gray"), inch sizes and rug size. The browser gets these ready-made and only
- * the start of the description, so its download is small and its index builds in a blink.
+ * features ("c:gray"), the colors its title or tags name ("xs": the description's "black
+ * legs" don't make a sofa black), inch sizes and rug size. The browser gets these ready-made
+ * and no description, so its download is small and its index builds in a blink.
  * @param {{ title: string, description?: string, tags?: string[], productType?: string, category?: { name: string } | null, collections?: string[] }} p
  */
 export function enrich(p) {
   const full = `${p.title} ${(p.tags ?? []).join(' ')} ${p.description ?? ''}`;
   const kinds = deriveKinds(tokens(cleanTitle(p.title)), tokens(leafText(p)), p.collections);
+  const named = deriveAttrs(tokens(`${p.title} ${(p.tags ?? []).join(' ')}`)).filter((a) => a.startsWith('c:'));
   return {
     k: [...kinds].map(([id, s]) => `${id}:${s}`),
     x: deriveAttrs(tokens(full)),
+    xs: named,
     z: [...new Set(inchSizes(full))],
     rg: rugSize(full),
   };
@@ -200,9 +213,10 @@ export function enrich(p) {
 
 /**
  * @typedef {{ h: string, t: string, y?: string, c?: string, g?: string[], v?: string, d?: string, p: number,
- *   s: number, i?: string, col?: string[], r: number, k?: string[], x?: string[], z?: number[], rg?: number[] | null }} Doc
- *   h handle · t title · y type · c category · g tags · v vendor · d start of the description · p price
- *   s in stock (1/0) · i image · col collections · r best-seller rank · k, x, z, rg from enrich()
+ *   s: number, i?: string, col?: string[], r: number, k?: string[], x?: string[], xs?: string[], z?: number[], rg?: number[] | null }} Doc
+ *   h handle · t title · y type · c category · g tags · v vendor · d description (tests only; the site's
+ *   index has none) · p price · s in stock (1/0) · i image · col collections · r best-seller rank
+ *   k, x, xs, z, rg from enrich()
  */
 
 /** @param {Doc[]} docs */
@@ -218,9 +232,11 @@ export function buildIndex(docs) {
     const kinds = doc.k ? new Map(doc.k.map((x) => { const [id, s] = x.split(':'); return [id, Number(s)]; })) : deriveKinds(titleT, kindT, doc.col);
     const attrs = new Set(doc.x ?? deriveAttrs([...titleT, ...kindT, ...descT]));
     const pick = (prefix) => new Set([...attrs].filter((a) => a.startsWith(prefix)).map((a) => a.slice(2)));
+    const named = doc.xs ?? deriveAttrs([...titleT, ...tokens((doc.g ?? []).join(' '))]).filter((a) => a.startsWith('c:'));
     const item = {
       doc, title, titleT, kindT, vendorT, descT, kinds,
       colors: pick('c:'), materials: pick('m:'), features: pick('f:'),
+      namedColors: new Set(named.map((a) => a.slice(2))),
       inches: doc.z ?? inchSizes(`${doc.t} ${doc.d ?? ''}`),
       rug: doc.rg !== undefined ? doc.rg : rugSize(`${doc.t} ${doc.d ?? ''}`),
       titleStr: titleT.join(' '),
@@ -261,20 +277,25 @@ const MAX_QUERY = 200;
 
 export function parse(raw, index, { prefix = false } = {}) {
   let text = normalize(String(raw ?? '').slice(0, MAX_QUERY));
-  const price = { min: null, max: null, cheap: false };
+  // How many it seats comes first, so "at least 6 people" is a table size, not a price.
+  // "for 6", "seats 8", "6 people", "3 seater": the catalog doesn't say; with "table" it means a dining table.
+  let seats = null;
+  text = text.replace(/\b(?:for|seat|seats|seating)\s+(?:at least\s+|up to\s+)?(\d{1,2})\b|\b(?:at least\s+|up to\s+)?(\d{1,2})\s*-?\s*(?:people|person|persons|guests|seat|seats|seater|seaters)\b/, (_, a, b) => { seats = parseInt(a ?? b, 10); return ' '; });
+  const price = { min: null, max: null, cheap: false, sale: false };
+  const N = '\\$?([\\d,]+(?:\\.\\d+)?)(k)?';
   const money = (s, k) => parseFloat(s.replace(/,/g, '')) * (k ? 1000 : 1);
-  text = text.replace(/\bbetween\s*\$?([\d,]+)(k)?\s*(?:and|-|to)\s*\$?([\d,]+)(k)?/, (_, a, ak, b, bk) => { price.min = money(a, ak); price.max = money(b, bk); return ' '; });
-  text = text.replace(/\b(?:under|below|less than|cheaper than)\s*\$?([\d,]+)(k)?\b|<\s*\$?([\d,]+)/, (_, a, k, c) => { price.max = money(a ?? c, k) - 0.01; return ' '; });
-  text = text.replace(/\b(?:up to|max(?:imum)?|no more than|at most)\s*\$?([\d,]+)(k)?\b/, (_, a, k) => { price.max = money(a, k); return ' '; });
-  text = text.replace(/\b(?:over|above|more than|min(?:imum)?|at least)\s*\$?([\d,]+)(k)?\b|>\s*\$?([\d,]+)/, (_, a, k, c) => { price.min = money(a ?? c, k); return ' '; });
+  text = text.replace(new RegExp(`\\bbetween\\s*${N}\\s*(?:and|-|to)\\s*${N}`), (_, a, ak, b, bk) => {
+    const [lo, hi] = [money(a, ak), money(b, bk)].sort((x, y) => x - y);
+    price.min = lo; price.max = hi; return ' ';
+  });
+  text = text.replace(new RegExp(`\\b(?:under|below|less than|cheaper than)\\s*${N}(?![\\d.])|<\\s*${N}`), (_, a, k, c, k2) => { price.max = money(a ?? c, k ?? k2) - 0.01; return ' '; });
+  text = text.replace(new RegExp(`\\b(?:up to|max(?:imum)?|no more than|at most)\\s*${N}(?![\\d.])`), (_, a, k) => { price.max = money(a, k); return ' '; });
+  text = text.replace(new RegExp(`\\b(?:over|above|more than|min(?:imum)?|at least)\\s*${N}(?![\\d.])|>\\s*${N}`), (_, a, k, c, k2) => { price.min = money(a ?? c, k ?? k2); return ' '; });
   // Sizes: a rug's feet (5x8, 8' x 10'), or inches (72", 72 inch).
   let rug = null;
   text = text.replace(/\b(\d{1,2})(?:ft)?\s*x\s*(\d{1,2})(?:ft)?\b(?!\s*in)/, (_, a, b) => { rug = [parseFloat(a), parseFloat(b)]; return ' '; });
   const inches = [];
   text = text.replace(/\b(\d+(?:\.\d+)?)in\b/g, (_, n) => { inches.push(parseFloat(n)); return ' '; });
-  // "for 6", "seats 8", "6 people": how many it seats isn't in the catalog's words; it means a dining table.
-  let seats = null;
-  text = text.replace(/\b(?:for|seat|seats|seating)\s+(\d{1,2})\b|\b(\d{1,2})\s+(?:people|person|persons|chairs|guests)\b/, (_, a, b) => { seats = parseInt(a ?? b, 10); return ' '; });
 
   const words = text.split(/[^a-z0-9]+/).filter(Boolean).map(stem);
   const corrections = [];
@@ -287,28 +308,46 @@ export function parse(raw, index, { prefix = false } = {}) {
 
   // Longest lexicon phrases first; what's left are plain words.
   const used = new Array(fixed.length).fill(false);
-  const usedBy = new Array(fixed.length).fill(null); // the group each word was read as
+  const usedBy = new Array(fixed.length).fill(null); // what each word was read as
   const found = [];
+  /** Looks asked for: each is met by any of its meanings ("linen": a beige, or the fabric). */
+  const looks = [];
+  /** Where each kind was named, so "dining table and chairs" lists tables first. */
+  const kindAt = new Map();
   for (const s of SAY) {
     for (let i = 0; i + s.words.length <= fixed.length; i++) {
       if (used.slice(i, i + s.words.length).some(Boolean)) continue;
-      if (s.words.every((w, j) => fixed[i + j] === w)) {
-        found.push(s.g);
-        for (let j = 0; j < s.words.length; j++) { used[i + j] = true; usedBy[i + j] = s.g.kind; }
-      }
+      if (!s.words.every((w, j) => fixed[i + j] === w)) continue;
+      const groups = SAY_GROUPS.get(s.text) ?? [s.g];
+      // A phrase that names a kind of piece is that kind ("rocker" is a glider, not just rocking).
+      const asKind = groups.filter((g) => g.kind === 'kind');
+      const asLook = groups.filter((g) => LOOK_KINDS.includes(g.kind));
+      const read = asKind.length ? [...asKind, ...groups.filter((g) => !LOOK_KINDS.includes(g.kind) && g.kind !== 'kind')] : groups;
+      found.push(...read);
+      if (!asKind.length && asLook.length) looks.push(asLook.map((g) => ({ kind: g.kind, id: g.id })));
+      for (const g of asKind) if (!kindAt.has(g.id)) kindAt.set(g.id, i);
+      const by = asKind.length ? 'kind' : asLook.length ? 'look' : read[0].kind;
+      for (let j = 0; j < s.words.length; j++) { used[i + j] = true; usedBy[i + j] = by; }
     }
   }
-  const rest = fixed.filter((w, i) => !used[i] && !STOP.has(w));
+  let rest = fixed.filter((w, i) => !used[i] && !STOP.has(w));
   const ids = (kind) => [...new Set(found.filter((g) => g.kind === kind).map((g) => g.id))];
-  // The exact shade or material typed ("walnut", "navy") ranks first within its family.
-  const literal = fixed.filter((w, i) => !STOP.has(w) && ['color', 'material', 'feature'].includes(usedBy[i]));
-  const kinds = ids('kind');
+  // The exact shade, material or feature typed ("walnut", "navy", "king") ranks first.
+  const literal = fixed.filter((w, i) => !STOP.has(w) && usedBy[i] === 'look');
+  const kinds = ids('kind').sort((a, b) => (kindAt.get(a) ?? 99) - (kindAt.get(b) ?? 99));
   if (seats && !kinds.includes('dining-table') && /\btable\b/.test(text)) kinds.push('dining-table');
+  // "Table and chairs", "dining table and chairs": a dining set, so its chairs are dining chairs.
+  if (kinds.includes('chair') && (kinds.includes('dining-table') || rest.includes('table'))) {
+    kinds.splice(kinds.indexOf('chair'), 1, 'dining-chair');
+    if (!kinds.includes('dining-table')) kinds.unshift('dining-table');
+    rest = rest.filter((w) => w !== 'table');
+  }
   // A room named with a kind ("living room sofa") narrows nothing the kind doesn't; alone, it's the room.
   const rooms = kinds.length ? [] : ids('room');
   if (found.some((g) => g.kind === 'cheap')) price.cheap = true;
+  if (found.some((g) => g.kind === 'sale')) price.sale = true;
   return {
-    kinds, rooms,
+    kinds, rooms, looks,
     colors: ids('color'), materials: ids('material'), features: ids('feature'),
     styles: found.some((g) => g.kind === 'style'),
     pages: [...new Set(found.filter((g) => g.kind === 'page').map((g) => g.page))],
@@ -341,33 +380,54 @@ export function search(index, raw, { prefix = false, limit = Infinity } = {}) {
   raw = String(raw ?? '').slice(0, MAX_QUERY);
   const q = parse(raw, index, { prefix });
   // A query of style words alone ("modern", "farmhouse") looks for those words.
-  if (q.styles && !q.kinds.length && !q.rooms.length && !q.colors.length && !q.materials.length && !q.features.length && !q.terms.length) {
+  if (q.styles && !q.kinds.length && !q.rooms.length && !q.looks.length && !q.terms.length) {
     q.terms = tokens(raw).filter((w) => STYLES.some((x) => phrase(x).split(' ').includes(w)) && index.df.has(w));
   }
   const last = prefix ? q.terms[q.terms.length - 1] : null;
-  const priced = (item) => (q.price.min === null || item.doc.p >= q.price.min) && (q.price.max === null || (item.doc.p > 0 && item.doc.p <= q.price.max));
+  // "On sale", "clearance": marked-down pieces; when none of what was asked is on sale, all of it (closest matches).
+  let saleOnly = q.price.sale;
+  const priced = (item) => (q.price.min === null || item.doc.p >= q.price.min) && (q.price.max === null || (item.doc.p > 0 && item.doc.p <= q.price.max))
+    && (!saleOnly || (item.doc.cp ?? 0) > item.doc.p);
 
+  // A count ("4 dining chairs", "2 seat") ranks pieces that say it, but never rules one out;
+  // a model number ("926 sofa") must match.
+  const counts = q.terms.filter((w) => /^\d{1,2}$/.test(w));
+  const words = q.terms.filter((w) => !counts.includes(w));
   // Words the catalog doesn't know at all can't be required ("something cozy for a reading nook").
-  const knownTerms = q.terms.filter((w) => (w === last ? [...index.vocab].some((v) => v.startsWith(w)) : index.df.has(w)));
-  const relaxed = q.terms.filter((w) => !knownTerms.includes(w));
+  const knownTerms = words.filter((w) => (w === last ? [...index.vocab].some((v) => v.startsWith(w)) : index.df.has(w)));
+  const relaxed = words.filter((w) => !knownTerms.includes(w));
   // What the piece is (its kind, its name) must match; how it looks (color, material,
   // features, size, room) is given up first when nothing has everything.
-  const core = q.kinds.length + knownTerms.length;
-  const looks = q.rooms.length + q.colors.length + q.materials.length + q.features.length + (q.inches.length ? 1 : 0) + (q.rug ? 1 : 0);
-  if (!core && !looks && q.price.min === null && q.price.max === null && !q.price.cheap) return { items: [], query: q, partial: false, relaxed };
+  const core = (q.kinds.length ? 1 : 0) + knownTerms.length;
+  const looks = q.rooms.length + q.looks.length + (q.inches.length ? 1 : 0) + (q.rug ? 1 : 0);
+  const pricedOnly = !core && !looks && (q.price.min !== null || q.price.max !== null || q.price.cheap || q.price.sale);
+  if (!core && !looks && !pricedOnly) return { items: [], query: q, partial: false, relaxed };
 
+  const score = () => {
   const scored = [];
   for (const item of index.items) {
     if (!priced(item)) continue;
     let score = 0;
-    let missedCore = 0;
+    let missedTerms = 0;
     let missedLooks = 0;
-    for (const k of q.kinds) { const s = item.kinds.get(k); if (s) score += s === 2 ? 5 : 3.5; else missedCore++; }
-    for (const w of knownTerms) { const s = termScore(item, w, index, w === last); if (s) score += s; else missedCore++; }
+    // Two kinds in one search ("dining table and chairs", "bed and nightstand") show both;
+    // a piece that is both ("bookcase headboard") comes first.
+    let kindHits = 0;
+    let firstKind = 99;
+    for (const [n, k] of q.kinds.entries()) { const s = item.kinds.get(k); if (s) { score += s === 2 ? 5 : 3.5; kindHits++; firstKind = Math.min(firstKind, n); } }
+    const missedKind = q.kinds.length && !kindHits ? 1 : 0;
+    for (const w of knownTerms) { const s = termScore(item, w, index, w === last); if (s) score += s; else missedTerms++; }
+    for (const w of counts) if (item.titleT.includes(w)) score += 1;
     for (const r of q.rooms) { const room = ROOMS.find((x) => x.id === r); if (room && item.doc.col?.includes(room.collection)) score += 2; else missedLooks++; }
-    for (const c of q.colors) { if (item.colors.has(c)) score += 2.5; else missedLooks++; }
-    for (const m of q.materials) { if (item.materials.has(m)) score += 2.5; else missedLooks++; }
-    for (const f of q.features) { if (item.features.has(f)) score += 2; else missedLooks++; }
+    let namedLooks = 1;
+    for (const look of q.looks) {
+      const has = (o) => (o.kind === 'color' ? item.colors : o.kind === 'material' ? item.materials : item.features).has(o.id);
+      const hit = look.filter(has);
+      if (!hit.length) { missedLooks++; continue; }
+      score += hit.some((o) => o.kind !== 'feature') ? 2.5 : 2;
+      // A color the title or tags name beats one only the description mentions.
+      if (look.some((o) => o.kind === 'color') && !hit.some((o) => o.kind !== 'color' || item.namedColors.has(o.id))) namedLooks = 0;
+    }
     if (q.inches.length) {
       const near = q.inches.some((n) => item.inches.some((m) => Math.abs(m - n) <= 2));
       if (near) score += q.inches.some((n) => item.inches.includes(n)) ? 4 : 2.5; else missedLooks++;
@@ -375,19 +435,36 @@ export function search(index, raw, { prefix = false, limit = Infinity } = {}) {
     if (q.rug) { if (item.rug && Math.abs(item.rug[0] - q.rug[0]) <= 0.75 && Math.abs(item.rug[1] - q.rug[1]) <= 1.1) score += 3; else missedLooks++; }
     // The exact shade or material typed, in the title or the description.
     for (const w of q.literal) score += item.titleT.includes(w) ? 3 : item.descT.includes(w) ? 1.5 : 0;
-    scored.push({ item, score, missedCore, missedLooks });
+    scored.push({ item, score, missedKind, missedTerms, missedLooks, kindHits, firstKind, namedLooks });
   }
+  return scored;
+  };
+  let scored = score();
 
-  let matches = scored.filter((s) => s.missedCore === 0 && s.missedLooks === 0 && s.score > 0);
+  // Nothing has it all: give up what matters least first. The look ("no white dressers: all
+  // dressers"), then the other words, keeping the kind of piece ("tall bookcase": bookcases).
+  const has = (s) => s.score > 0 || pricedOnly;
+  const steps = [
+    (s) => !s.missedKind && !s.missedTerms && !s.missedLooks,
+    looks && core ? (s) => !s.missedKind && !s.missedTerms : null,
+    q.kinds.length && knownTerms.length ? (s) => !s.missedKind && !s.missedLooks : null,
+    q.kinds.length && (knownTerms.length || looks) ? (s) => !s.missedKind : null,
+  ].filter(Boolean);
+  let matches = [];
   let partial = false;
-  if (!matches.length && looks && core) {
-    // Nothing has it all: what was asked for, without the look ("no white dressers: all dressers").
-    matches = scored.filter((s) => s.missedCore === 0 && s.score > 0);
-    partial = matches.length > 0;
+  for (const [i, ok] of steps.entries()) {
+    matches = scored.filter((s) => ok(s) && has(s));
+    if (matches.length) { partial = i > 0; break; }
   }
   if (!matches.length && !core && looks > 1) {
     const fewest = Math.min(...scored.map((s) => s.missedLooks));
     if (fewest < looks) { matches = scored.filter((s) => s.missedLooks === fewest && s.score > 0); partial = true; }
+  }
+  if (!matches.length && saleOnly && !pricedOnly) {
+    saleOnly = false;
+    scored = score();
+    matches = scored.filter((s) => steps[0](s) && has(s));
+    partial = matches.length > 0;
   }
 
   // Ties go to: the whole query in the title, style words, then best sellers.
@@ -404,9 +481,11 @@ export function search(index, raw, { prefix = false, limit = Infinity } = {}) {
   const exact = q.literal.filter((w) => !BROAD_LOOK.has(w));
   const says = (m) => (exact.length && exact.every((w) => (SAME_FEATURE.get(w) ?? [w]).some((x) => m.item.titleT.includes(x))) ? 1 : 0);
   for (const m of matches) m.exact = says(m);
-  matches.sort((a, b) => b.exact - a.exact || b.item.doc.s - a.item.doc.s || b.score - a.score || a.item.doc.r - b.item.doc.r);
-  // "Cheap": what fits, lowest price first (in stock ahead).
-  if (q.price.cheap) matches.sort((a, b) => b.item.doc.s - a.item.doc.s || (a.item.doc.p || Infinity) - (b.item.doc.p || Infinity));
+  // Pieces that are every kind asked for, then the exact look, then a color the title names,
+  // then in stock; then, for "cheap", the lowest price, otherwise how well each matches.
+  const tiers = (a, b) => b.kindHits - a.kindHits || a.firstKind - b.firstKind || b.exact - a.exact || b.namedLooks - a.namedLooks || b.item.doc.s - a.item.doc.s;
+  const byPrice = (a, b) => (a.item.doc.p || Infinity) - (b.item.doc.p || Infinity);
+  matches.sort((a, b) => tiers(a, b) || (q.price.cheap ? byPrice(a, b) : b.score - a.score) || a.item.doc.r - b.item.doc.r);
   return { items: matches.slice(0, limit).map(({ item, score }) => ({ item, score })), query: q, partial, relaxed };
 }
 
