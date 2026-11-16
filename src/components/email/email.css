@@ -6,7 +6,7 @@
 
 /* ── The bar: which email, and saving. It stays in view, so Save is never a scroll away. ── */
 .em-bar {
-  position: sticky; top: 0; z-index: 20;
+  position: sticky; top: var(--topbar, 0px); z-index: 20;
   display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0.75rem 1.25rem;
   margin: -0.5rem -0.5rem 1rem; padding: 0.5rem 0.5rem 0.875rem;
   background: var(--bg); border-bottom: 1px solid var(--line);
@@ -17,31 +17,32 @@
 .em-which { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 1rem; font-size: 0.9375rem; color: var(--ink-2); }
 .em-which strong { color: var(--ink); font-weight: 700; }
 .em-which a { display: inline-flex; align-items: center; min-height: 44px; margin: -0.75rem 0; font-weight: 600; }
-/* Anything the error list links to, or focus moves to, lands below the sticky bar with its label showing */
-.em [id] { scroll-margin-top: 9rem; }
+/* Anything the error list links to, or focus moves to, lands below the sticky bar with its label showing,
+   and below the admin's top bar on a phone or upright iPad (--topbar, 0 beside a sidebar) */
+.em [id] { scroll-margin-top: calc(var(--topbar, 0px) + 9rem); }
 .em-bar-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem 0.75rem; }
 .em-status { font-size: 0.875rem; font-weight: 600; color: var(--ink-3); }
 
-/* On a phone the bar scrolls away, and Save waits at the bottom, over the tabs, once there's something to save. */
+/* On a phone the bar scrolls away, and Save waits at the bottom of the screen once there's something to save. */
 @container (max-width: 600px) {
   .em-bar { position: static; }
   .em.is-dirty .em-bar-save {
-    position: fixed; left: 0; right: 0; bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)); z-index: 25;
-    justify-content: flex-end; padding: 0.625rem 1rem; background: var(--panel); border-top: 1px solid var(--line); box-shadow: var(--shadow);
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+    justify-content: flex-end; padding: 0.625rem 1rem calc(0.625rem + env(safe-area-inset-bottom, 0px)); background: var(--panel); border-top: 1px solid var(--line); box-shadow: var(--shadow);
   }
   .em.is-dirty .em-status { margin-right: auto; }
-  .em.is-dirty .em-jump { bottom: calc(9rem + env(safe-area-inset-bottom, 0px)); }
+  .em.is-dirty .em-jump { bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* ── Layout: the editor beside the preview once there's room for both, the preview below it until then ── */
 .em-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
 .em-side { min-width: 0; }
-.em .em-jump { position: fixed; right: 1rem; bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); z-index: 15; box-shadow: var(--shadow); transition: opacity var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease), visibility 0s; }
+.em .em-jump { position: fixed; right: 1rem; bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); z-index: 15; box-shadow: var(--shadow); transition: opacity var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease), visibility 0s; }
 /* Once the preview is on screen the button has nowhere to go: it fades down and leaves the tab order */
 .em.sees-preview .em-jump { opacity: 0; transform: translateY(8px); visibility: hidden; pointer-events: none; transition: opacity var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease), visibility 0s linear var(--em-fast); }
 @container (min-width: 940px) {
   .em-grid { grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); }
-  .em-side { position: sticky; top: 7.5rem; max-height: calc(100vh - 8.5rem); overflow-y: auto; overscroll-behavior: contain; border-radius: var(--r-lg); scrollbar-width: thin; }
+  .em-side { position: sticky; top: calc(var(--topbar, 0px) + 7.5rem); max-height: calc(100vh - 8.5rem - var(--topbar, 0px)); overflow-y: auto; overscroll-behavior: contain; border-radius: var(--r-lg); scrollbar-width: thin; }
   .em .em-jump { display: none; }
 }
 @media (min-width: 1024px) { .em .em-jump { bottom: 1.5rem; } }

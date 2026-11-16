@@ -97,7 +97,7 @@ const now = Date.now();
       <section class="card">
         <h2>Each month</h2>
         <div class="table-scroll">
-          <table>
+          <table class="months">
             <thead>
               <tr>
                 <th scope="col">Month</th>
@@ -108,8 +108,8 @@ const now = Date.now();
             <tbody>
               {facts.months.map((m) => (
                 <tr>
-                  <td>{m.state === 'sent' ? <a href={`/admin/sales-tax/${m.month}/`}>{m.name}</a> : m.name}</td>
-                  <td>
+                  <td class="st-month">{m.state === 'sent' ? <a href={`/admin/sales-tax/${m.month}/`}>{m.name}</a> : m.name}</td>
+                  <td class="st-state">
                     {m.state !== 'sent' ? (
                       <span class="badge badge-failed">Not sent</span>
                     ) : m.filed ? (
@@ -120,7 +120,7 @@ const now = Date.now();
                       <span class="badge badge-pending">Ready to file</span>
                     )}
                   </td>
-                  <td class="muted">{dueDay.format(new Date(`${m.due}T12:00:00Z`))}</td>
+                  <td class="muted st-due"><span class="st-due-word" aria-hidden="true">Due </span>{dueDay.format(new Date(`${m.due}T12:00:00Z`))}</td>
                 </tr>
               ))}
             </tbody>
@@ -157,8 +157,22 @@ const now = Date.now();
   /* The shared badge-rejected strikes its text through, which is for a rejected shift */
   .badge-failed { background: var(--red-soft); color: var(--red); }
   td { white-space: nowrap; }
+  .st-due-word { display: none; }
   @media (max-width: 640px) {
     .ready .btn { flex: 1 1 100%; }
+  }
+  /* A phone lists each month as a block: the month and its due day, then where its return is,
+     so the due day is never off the edge of a sideways scroll. */
+  @media (max-width: 480px) {
+    /* The column names stay for screen readers; each fact carries its own on screen. */
+    .months thead tr { display: block; padding: 0; border: 0; }
+    .months th { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; padding: 0; border: 0; }
+    .months tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 0.375rem 1rem; padding: 0.75rem 0; border-bottom: 1px solid var(--line); }
+    .months tbody tr:last-child { border-bottom: 0; padding-bottom: 0; }
+    .months td { display: block; padding: 0; border: 0; white-space: normal; }
+    .st-state { grid-column: 1 / -1; grid-row: 2; }
+    .st-due { text-align: right; }
+    .st-due-word { display: inline; }
   }
   @media (prefers-reduced-motion: reduce) {
     .ready { transition: none; }
