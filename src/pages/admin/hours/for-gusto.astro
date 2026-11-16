@@ -58,7 +58,7 @@ const hours = (minutes: number) => (minutes / 60).toFixed(2);
       <p>Connect it to see Gusto's pay periods here.</p>
       {Astro.locals.admin?.owner && (
         <div class="empty-actions">
-          <a class="btn btn-primary" href="/admin/gusto/"><Fragment set:html={svg('gusto', 18)} />Connect Gusto</a>
+          <a class="btn btn-primary" href="/admin/payroll/gusto/"><Fragment set:html={svg('gusto', 18)} />Connect Gusto</a>
         </div>
       )}
     </div>
