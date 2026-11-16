@@ -113,14 +113,21 @@ function encode(s, keep) {
   }
   return out;
 }
-/** Brief text as plain text, for calendar notes: no tags, entities decoded. */
-const plain = (s) =>
+/**
+ * Brief text as plain text, for anything that isn't HTML: calendar notes, and the subject and preview
+ * line Kit takes as plain text (an inbox shows "Santa&#8217;s" as it's written). No tags, every entity
+ * the email writes decoded, &amp; last so nothing is decoded twice.
+ */
+export const plain = (s) =>
   String(s)
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 /** A form-encoded query string: spaces become +. */
 function formEncode(params) {
   return Object.entries(params).map(([k, v]) => `${encode(k, ' ').replace(/ /g, '+')}=${encode(v, ' ').replace(/ /g, '+')}`).join('&');

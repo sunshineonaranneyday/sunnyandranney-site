@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Miniflare } from 'miniflare';
-import { Email, render, usePhotoOrigin } from './email.mjs';
+import { Email, lines, plain, render, usePhotoOrigin } from './email.mjs';
 import { broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, statusOf, subscriberCount, templateFor, usualTime } from './kit.mjs';
 import { cfIdOf, kidFor, missionOf, photosDate, revealedKids, roomsPhrase } from './kids.mjs';
 import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
-import { DEFAULT_HERO, arrangeCollage, blankParts, checkParts, cleanParts, linesOf } from './parts.mjs';
+import { DEFAULT_HERO, arrangeCollage, blankParts, briefParts, checkParts, cleanParts, linesOf } from './parts.mjs';
 import { addPhoto, isJpeg, listPhotos, newPhotoId, photosByIds, setAlt } from './photo-store.mjs';
 import { check, clean, draftSale, toSale } from './special.mjs';
 import { addPerson, listPeople, logTest, recentTests, removePerson, testsSince } from './test-store.mjs';
@@ -123,6 +123,16 @@ test('an email going later in its week is checked and drawn as of that day', () 
   const problems = (day) => kitProblems({ special: short, wall: wallOf(4), parts: story(1), photos, kids, catalog, send: day, check, checkWall, checkParts, sale: draftSale(short) });
   assert.deepEqual(problems('2026-11-17'), []);
   assert.deepEqual(problems('2026-11-19').map((p) => p.section), ['em-sale']);
+});
+
+test('the subject and preview line go to Kit as plain text, never HTML codes an inbox would show', () => {
+  // As week-email.ts hands them to Kit: an apostrophe is ’, not "&#8217;", and & is &
+  const p = cleanParts({ subject: "Santa's here & so is {upto} off", preheader: "Kids' crafts every Saturday" });
+  const sale = { kind: 'percent', percent: 20, what: 'everything.' };
+  const l = lines({ ...briefParts(p, { sale, photos: new Map(), kids: [] }), sale });
+  assert.match(l.subject, /&#8217;/, 'the brief itself is HTML');
+  assert.deepEqual({ subject: plain(l.subject), preheader: plain(l.preheader) }, { subject: 'Santa’s here & so is 20% off', preheader: 'Kids’ crafts every Saturday' });
+  assert.equal(plain('&lt;3 &amp;amp; &quot;x&quot;&nbsp;y'), '<3 &amp; "x" y', '&amp; last: nothing decoded twice');
 });
 
 test('every address on the store’s own site in an email ends in a slash, or production can’t serve it', () => {
