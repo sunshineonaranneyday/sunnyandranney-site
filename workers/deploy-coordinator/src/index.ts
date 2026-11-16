@@ -24,6 +24,8 @@ interface Env {
   DEPLOY_COORDINATOR: DurableObjectNamespace;
   ADMIN_TOKEN?: string;
   POKE_SECRET?: string;
+  /** The website's full sync (src/pages/api/sync-products.ts), run nightly. */
+  SITE_SYNC_URL?: string;
 }
 
 const DEBOUNCE_MS = 15 * 60 * 1000; // 15 minutes
@@ -189,6 +191,23 @@ export class DeployCoordinator implements DurableObject {
 }
 
 export default {
+  /**
+   * Nightly, even when nothing changed in Shopify: the website's full sync, which puts
+   * every Active product on the website's channel, records what's missing for the
+   * admin's Today page, and pokes this coordinator for a rebuild. POKE_SECRET is the
+   * site's SYNC_SECRET (the same shared secret the sync uses to poke here).
+   */
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+    if (!env.SITE_SYNC_URL || !env.POKE_SECRET) {
+      console.error('[deploy-coordinator] Nightly sync skipped: SITE_SYNC_URL or POKE_SECRET not set');
+      return;
+    }
+    const res = await fetch(env.SITE_SYNC_URL, { method: 'POST', headers: { 'x-sync-secret': env.POKE_SECRET } });
+    const body = await res.text();
+    console.log(`[deploy-coordinator] Nightly sync: ${res.status} ${body.slice(0, 300)}`);
+    if (!res.ok) throw new Error(`Nightly sync failed: ${res.status}`);
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const method = request.method;

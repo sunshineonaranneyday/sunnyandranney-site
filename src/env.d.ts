@@ -6,6 +6,9 @@
 declare namespace Cloudflare {
   interface Env {
     SYNC_SECRET?: string;
+    /** The internal-automation Shopify app (client credentials): products, publications, redirects. */
+    SHOPIFY_CLIENT_ID?: string;
+    SHOPIFY_CLIENT_SECRET?: string;
     CF_DEPLOY_HOOK_URL?: string;
     DEPLOY_COORDINATOR: DurableObjectNamespace;
     KIT_API_KEY?: string;
