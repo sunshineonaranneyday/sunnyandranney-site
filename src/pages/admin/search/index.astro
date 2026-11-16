@@ -1,0 +1,138 @@
+---
+export const prerender = false;
+
+import AdminBase from '@/layouts/AdminBase.astro';
+import { searchReport } from '@/lib/search/log.mjs';
+
+if (Astro.locals.admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
+
+// What shoppers search for on the website, from /api/search-log (src/lib/search/log.mjs).
+const RANGES = [7, 30, 90];
+const asked = Number(Astro.url.searchParams.get('days'));
+const days = RANGES.includes(asked) ? asked : 30;
+
+let report: Awaited<ReturnType<typeof searchReport>> | null = null;
+let problem = '';
+try {
+  report = await searchReport(Astro.locals.runtime.env.DB, { days });
+} catch (err) {
+  console.error('admin/search', err instanceof Error ? err.message : err);
+  problem = 'The search log isn’t set up yet: its table (migration 0013) hasn’t been added to the database.';
+}
+
+const SITE = 'https://sunnyandranney.com';
+const onSite = (q: string) => `${SITE}/shop/?q=${encodeURIComponent(q)}`;
+const day = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+const pct = (part: number, whole: number) => (whole ? `${Math.round((part / whole) * 100)}%` : '—');
+const t = report?.totals;
+---
+
+<AdminBase title="Site search">
+  <div class="page-header">
+    <div>
+      <h1>Site search</h1>
+      <p class="muted">What shoppers type in the search box on the website. A search that found nothing is a word the search doesn’t know yet, or something the store doesn’t carry.</p>
+    </div>
+    <nav class="ranges" aria-label="Time range">
+      {RANGES.map((d) => (
+        <a href={`?days=${d}`} class:list={['range', { on: d === days }]} aria-current={d === days ? 'page' : undefined}>{d} days</a>
+      ))}
+    </nav>
+  </div>
+
+  {problem && <div class="notice"><span>{problem}</span></div>}
+
+  {report && t && (
+    t.searches === 0 ? (
+      <div class="card empty">
+        <h2>No searches in the last {days} days</h2>
+        <p>They show here as shoppers search the website.</p>
+      </div>
+    ) : (
+      <>
+        <div class="stats">
+          <div class="stat">
+            <p class="stat-label">Searches</p>
+            <p class="stat-value">{t.searches.toLocaleString('en-US')}</p>
+            <p class="stat-note">{t.different.toLocaleString('en-US')} different</p>
+          </div>
+          <div class:list={['stat', { 'stat-accent': t.foundNothing > 0 }]}>
+            <p class="stat-label">Found nothing</p>
+            <p class="stat-value">{t.foundNothing.toLocaleString('en-US')}</p>
+            <p class="stat-note">{pct(t.foundNothing, t.searches)} of searches</p>
+          </div>
+          <div class="stat">
+            <p class="stat-label">Pieces opened</p>
+            <p class="stat-value">{t.opened.toLocaleString('en-US')}</p>
+            <p class="stat-note">from search results and suggestions</p>
+          </div>
+        </div>
+
+        <section class="card" aria-labelledby="none-heading">
+          <h2 id="none-heading">Found nothing</h2>
+          {report.foundNothing.length === 0 ? (
+            <p class="muted">Every search in the last {days} days found something.</p>
+          ) : (
+            <div class="table-scroll">
+              <table>
+                <thead><tr><th>Search</th><th class="num">Times</th><th class="num">Last</th></tr></thead>
+                <tbody>
+                  {report.foundNothing.map((row) => (
+                    <tr>
+                      <td><a href={onSite(row.query)} target="_blank" rel="noopener">{row.query}</a></td>
+                      <td class="num">{row.searches}</td>
+                      <td class="num">{day(row.last)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section class="card" aria-labelledby="top-heading">
+          <h2 id="top-heading">Most searched</h2>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Search</th><th class="num">Times</th><th class="num">Pieces found</th><th class="num">Opened</th></tr></thead>
+              <tbody>
+                {report.top.map((row) => (
+                  <tr>
+                    <td><a href={onSite(row.query)} target="_blank" rel="noopener">{row.query}</a></td>
+                    <td class="num">{row.searches}</td>
+                    <td class:list={['num', { nothing: row.results === 0 }]}>{row.results ?? '—'}</td>
+                    <td class="num">{row.opened}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="muted foot">Kept: the words searched, how many pieces they found, and which piece was opened. Nothing about who searched. Rows go after 180 days.</p>
+      </>
+    )
+  )}
+</AdminBase>
+
+<style>
+  .ranges { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+  .range {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--ink-2);
+    text-decoration: none;
+    font-size: 0.875rem;
+  }
+  .range.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  @media (pointer: coarse) { .range { min-height: 44px; } }
+  section.card { margin-bottom: 1.25rem; }
+  section.card h2 { font-size: 1.0625rem; margin-bottom: 0.75rem; }
+  td a { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+  td a:hover { text-decoration-color: currentColor; }
+  td.nothing { color: var(--ink); font-weight: 600; }
+  .foot { font-size: 0.8125rem; margin-top: 0.5rem; }
+</style>

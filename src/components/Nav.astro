@@ -54,25 +54,34 @@ const roomCollections = [
     </div>
   </div>
 
-  <!-- Mobile search bar -->
+  <!-- Mobile search bar: a form, so searching works before (and without) the script -->
   <div class="nav__mobile-topbar">
-    <div class="nav__mobile-search-wrap">
+    <form class="nav__mobile-search-wrap" id="mobile-search-form" role="search" action="/shop/" method="get">
       <div class="nav__mobile-topbar-inner">
-        <svg class="nav__mobile-topbar-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <label for="mobile-topbar-search" class="sr-only">Search products</label>
+        <svg class="nav__mobile-topbar-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <label for="mobile-topbar-search" class="sr-only">Search the shop</label>
         <input
           type="search"
+          name="q"
           id="mobile-topbar-search"
-          placeholder="Search furniture, decor, accessories, gifts..."
+          placeholder="Search sofas, chairs, tables, rugs…"
           autocomplete="off"
-          role="combobox"
-          aria-expanded="false"
-          aria-controls="mobile-search-suggest"
-          aria-autocomplete="list"
+          autocapitalize="off"
+          spellcheck="false"
+          enterkeyhint="search"
+          maxlength="120"
         />
+        <button type="button" class="nav__search-clear" id="mobile-search-clear" aria-label="Clear search" hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+        </button>
       </div>
-      <div class="search-suggest search-suggest--mobile" id="mobile-search-suggest" role="listbox" aria-label="Search suggestions" style="display:none;"></div>
-    </div>
+      <button type="button" class="nav__search-cancel" id="mobile-search-cancel">Cancel</button>
+      <div class="ss-panel ss-panel--sheet" id="mobile-search-panel" data-open="false">
+        <p class="ss-note" id="mobile-search-note" hidden></p>
+        <div class="ss-list" id="mobile-search-suggest" aria-label="Search suggestions"></div>
+      </div>
+      <div class="sr-only" id="mobile-search-status" role="status" aria-live="polite" aria-atomic="true"></div>
+    </form>
   </div>
 
   <!-- Desktop nav row -->
@@ -90,24 +99,34 @@ const roomCollections = [
         />
       </a>
 
-      <!-- Search bar -->
-      <div class="nav__search-bar" id="nav-search-bar">
-        <label for="nav-search-input" class="sr-only">Search products</label>
-        <input
-          type="search"
-          id="nav-search-input"
-          placeholder="Search furniture, decor, accessories, gifts..."
-          autocomplete="off"
-          role="combobox"
-          aria-expanded="false"
-          aria-controls="search-suggest"
-          aria-autocomplete="list"
-        />
-        <button class="nav__search-submit" id="nav-search-submit" aria-label="Search">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        </button>
-        <div class="search-suggest" id="search-suggest" role="listbox" aria-label="Search suggestions" style="display:none;"></div>
-      </div>
+      <!-- Search: a form, so searching works before (and without) the script -->
+      <form class="nav__search" id="nav-search-form" role="search" action="/shop/" method="get">
+        <div class="nav__search-bar" id="nav-search-bar">
+          <label for="nav-search-input" class="sr-only">Search the shop</label>
+          <input
+            type="search"
+            name="q"
+            id="nav-search-input"
+            placeholder="Search sofas, chairs, tables, rugs…"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            enterkeyhint="search"
+            maxlength="120"
+          />
+          <button type="button" class="nav__search-clear" id="nav-search-clear" aria-label="Clear search" hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>
+          </button>
+          <button type="submit" class="nav__search-submit" id="nav-search-submit" aria-label="Search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+        </div>
+        <div class="ss-panel" id="nav-search-panel" data-open="false">
+          <p class="ss-note" id="nav-search-note" hidden></p>
+          <div class="ss-list" id="search-suggest" aria-label="Search suggestions"></div>
+        </div>
+        <div class="sr-only" id="nav-search-status" role="status" aria-live="polite" aria-atomic="true"></div>
+      </form>
 
       <div class="nav__actions">
         <div class="nav__split-pill">
@@ -147,6 +166,8 @@ const roomCollections = [
     </div>
   </nav>
 
+  <!-- Dims the page while the search panel is open (desktop) -->
+  <div class="nav__scrim" aria-hidden="true"></div>
 </header>
 
 <style>
@@ -267,21 +288,29 @@ const roomCollections = [
     pointer-events: auto;
   }
 
+  .nav__mobile-search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
   .nav__mobile-topbar-inner {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     background: var(--color-warm-white);
     border: 1.5px solid var(--color-cream-dark);
     border-radius: 8px;
-    padding: 0 14px;
-    height: 38px;
+    padding: 0 0 0 14px;
+    height: 44px;
     gap: 8px;
-    transition: border-color 0.35s, box-shadow 0.35s;
+    transition: border-color 0.2s, box-shadow 0.2s;
   }
 
   .nav__mobile-topbar-inner:focus-within {
-    border-color: var(--color-gold);
-    box-shadow: 0 0 0 3px rgba(255, 212, 0, 0.1);
+    border-color: var(--color-charcoal);
+    box-shadow: 0 0 0 4px var(--color-gold-soft);
   }
 
   .nav__mobile-topbar-icon {
@@ -291,6 +320,8 @@ const roomCollections = [
 
   .nav__mobile-topbar-inner input {
     flex: 1;
+    min-width: 0;
+    height: 100%;
     background: none;
     border: none;
     outline: none;
@@ -304,19 +335,48 @@ const roomCollections = [
     color: var(--color-stone);
   }
 
-  .nav__mobile-search-wrap {
-    position: relative;
+  /* The browser's own clear button is replaced by one big enough to tap (44px) */
+  .nav__search-bar input::-webkit-search-cancel-button,
+  .nav__mobile-topbar-inner input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
   }
 
-  .search-suggest--mobile {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    margin-top: 4px;
-    border-radius: 12px;
-    z-index: 60;
+  .nav__search-clear {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--color-stone);
+    cursor: pointer;
+    border-radius: 8px;
   }
+  .nav__search-clear[hidden] { display: none; }
+  .nav__search-clear:hover { color: var(--color-charcoal); }
+  .nav__search-clear:focus-visible { outline: 2px solid var(--color-charcoal); outline-offset: -6px; }
+
+  /* Cancel: shown while the search sheet is open, the way a phone's own search works */
+  .nav__search-cancel {
+    display: none;
+    flex-shrink: 0;
+    min-height: 44px;
+    padding: 0 6px 0 8px;
+    border: none;
+    background: none;
+    font-family: var(--font-body);
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--color-link);
+    cursor: pointer;
+  }
+  .nav--searching .nav__search-cancel { display: inline-flex; align-items: center; }
+  .nav__search-cancel:focus-visible { outline: 2px solid var(--color-charcoal); outline-offset: 2px; border-radius: 4px; }
 
   @media (min-width: 768px) {
     .nav__mobile-topbar { display: none; }
@@ -356,149 +416,94 @@ const roomCollections = [
     .nav__logo-img { height: 52px; }
   }
 
-  /* ─── Search Bar (desktop) ─────────────── */
-  .nav__search-bar {
+  /* ─── Search (desktop) ─────────────────── */
+  .nav__search {
     flex: 1;
-    max-width: 560px;
+    max-width: 480px;
+    position: relative;
+    margin: 0;
+  }
+
+  .nav__search-bar {
     display: flex;
     align-items: center;
-    background: var(--color-warm-white);
+    background: var(--color-cream);
     border: 1.5px solid var(--color-cream-dark);
     border-radius: 8px;
-    padding: 0 0 0 0.75rem;
-    transition: border-color 0.35s, box-shadow 0.35s;
-    overflow: hidden;
-    position: relative;
+    padding: 0 0 0 0.85rem;
+    transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
   }
+
+  .nav__search-bar:hover { border-color: #e2dbd0; }
 
   .nav__search-bar:focus-within {
-    border-color: var(--color-gold);
-    box-shadow: 0 0 0 3px rgba(255, 212, 0, 0.1);
+    background: var(--color-warm-white);
+    border-color: var(--color-charcoal);
+    box-shadow: 0 0 0 4px var(--color-gold-soft);
   }
 
-  @media (min-width: 768px) {
-    .nav__search-bar {
-      max-width: 480px;
-      border-radius: 8px;
-      background: var(--color-cream);
-      border-color: var(--color-cream-dark);
-    }
-    .nav__search-submit {
-      border-radius: 0 6px 6px 0;
-    }
+  /* The box around the field shows focus (the site's ring: charcoal edge, soft gold glow), so the field doesn't draw a second one inside it */
+  .nav__search-bar input:focus-visible,
+  .nav__mobile-topbar-inner input:focus-visible {
+    outline: none;
+    box-shadow: none;
   }
 
   .nav__search-bar input {
     flex: 1;
+    min-width: 0;
     background: none;
     border: none;
     outline: none;
     font-family: var(--font-body);
-    font-size: 0.88rem;
+    font-size: 0.95rem;
     color: var(--color-charcoal);
-    padding: 0.55rem 0.6rem;
+    padding: 0.55rem 0.25rem;
   }
 
   .nav__search-bar input::placeholder { color: var(--color-stone); }
 
+  .nav__search-bar .nav__search-clear { width: 36px; height: 36px; }
+
   .nav__search-submit {
-    width: 48px;
-    height: 48px;
+    width: 46px;
+    height: 46px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: transparent;
-    color: var(--color-stone);
+    color: var(--color-slate);
     border: none;
     cursor: pointer;
     transition: color 0.2s;
     flex-shrink: 0;
-    border-radius: 0;
-    margin: 1px;
+    border-radius: 0 6px 6px 0;
   }
 
   .nav__search-submit:hover { color: var(--color-charcoal); }
+  .nav__search-submit:focus-visible { outline: 2px solid var(--color-charcoal); outline-offset: -4px; }
 
-  /* ─── Search Suggestions ────────────────── */
-  .search-suggest {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
-    background: var(--color-warm-white);
-    border: 1px solid var(--color-cream-dark);
-    border-radius: 12px;
-    box-shadow: 0 8px 24px rgba(44, 44, 44, 0.1);
-    z-index: 50;
-    max-height: 360px;
-    overflow-y: auto;
+  /* The page behind the open search panel dims, so the panel reads as the thing to look at */
+  .nav__scrim {
+    display: none;
   }
-
-  .search-suggest__item {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.6rem 0.75rem;
-    text-decoration: none;
-    color: var(--color-charcoal);
-    transition: background 0.3s;
+  @media (min-width: 768px) {
+    .nav__scrim {
+      display: block;
+      position: fixed;
+      inset: var(--ss-scrim-top, var(--nav-height, 120px)) 0 0 0;
+      background: rgba(44, 44, 44, 0.24);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.18s ease-out, visibility 0s linear 0.18s;
+      z-index: 1; /* over the category row, under the panel (60) */
+    }
+    .nav--searching .nav__scrim {
+      opacity: 1;
+      visibility: visible;
+      transition: opacity 0.18s ease-out, visibility 0s;
+    }
   }
-
-  .search-suggest__item:hover,
-  .search-suggest__item[aria-selected="true"] {
-    background: var(--color-cream-dark);
-  }
-
-  .search-suggest__img {
-    width: 40px;
-    height: 40px;
-    border-radius: 0;
-    overflow: hidden;
-    background: var(--color-cream-dark);
-    flex-shrink: 0;
-  }
-
-  .search-suggest__img img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .search-suggest__info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .search-suggest__title {
-    font-size: 0.85rem;
-    font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: block;
-  }
-
-  .search-suggest__price {
-    font-size: 0.75rem;
-    color: var(--color-slate);
-  }
-
-  .search-suggest__all {
-    display: block;
-    padding: 0.6rem 0.75rem;
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--color-gold);
-    text-align: center;
-    border-top: 1px solid var(--color-cream-dark);
-    transition: background 0.3s;
-  }
-
-  .search-suggest__all:hover {
-    background: var(--color-cream-dark);
-    color: var(--color-charcoal);
-  }
-
 
   /* ─── Split Pill (Mission + Golf) ─────────────── */
   .nav__split-pill {
@@ -743,6 +748,144 @@ const roomCollections = [
 
 </style>
 
+<style is:global>
+  /* ─── Search panel (its rows are built by src/lib/search/ui.ts, so these aren't scoped) ─── */
+  .ss-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    /* At least 460px wide, centred under the box when the box is narrower */
+    left: min(0px, calc((100% - 460px) / 2));
+    right: min(0px, calc((100% - 460px) / 2));
+    z-index: 60;
+    background: var(--color-warm-white);
+    border: 1px solid var(--color-cream-dark);
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(44, 44, 44, 0.16), 0 2px 8px rgba(44, 44, 44, 0.06);
+    padding: 6px 0;
+    max-height: calc(100vh - var(--ss-top, 80px) - 24px);
+    max-height: calc(100dvh - var(--ss-top, 80px) - 24px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out), visibility 0s linear 0.15s;
+  }
+  .ss-panel[data-open="true"] {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition: opacity 0.15s var(--ease-out), transform 0.15s var(--ease-out), visibility 0s;
+  }
+
+  /* Phones: the panel is a sheet that fills the screen below the box */
+  .ss-panel--sheet {
+    position: fixed;
+    top: var(--ss-sheet-top, 116px);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: none;
+    border: 0;
+    border-top: 1px solid var(--color-cream-dark);
+    border-radius: 0;
+    box-shadow: none;
+    background: var(--color-cream);
+    padding: 4px 0 calc(24px + env(safe-area-inset-bottom));
+    transform: none;
+  }
+
+  .ss-group { padding: 4px 0; }
+  .ss-group + .ss-group { border-top: 1px solid var(--color-cream-dark); }
+  .ss-group__label {
+    padding: 10px 16px 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-slate);
+  }
+
+  .ss-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 8px 16px;
+    color: var(--color-charcoal);
+    text-decoration: none;
+    font-size: 0.94rem;
+    line-height: 1.3;
+    cursor: pointer;
+  }
+  .ss-option[aria-selected="true"] { background: var(--color-cream-dark); }
+  .ss-panel--sheet .ss-option[aria-selected="true"] { background: #e9e2d7; }
+
+  .ss-icon { flex-shrink: 0; color: var(--color-stone); }
+  .ss-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ss-text strong { font-weight: 600; }
+  .ss-count {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    color: var(--color-slate); /* 6:1 on a highlighted row; stone is 4.4:1 there */
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ss-thumb {
+    flex-shrink: 0;
+    width: 56px;
+    height: 56px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--color-cream-dark);
+  }
+  .ss-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .ss-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ss-title {
+    font-weight: 500;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .ss-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; font-size: 0.84rem; color: var(--color-slate); }
+  .ss-price { font-weight: 600; color: var(--color-charcoal); }
+  .ss-was, .ss-sold { color: var(--color-slate); }
+
+  .ss-option--all {
+    justify-content: space-between;
+    min-height: 48px;
+    margin-top: 2px;
+    border-top: 1px solid var(--color-cream-dark);
+    color: var(--color-link);
+    font-weight: 500;
+  }
+  .ss-option--all .ss-text strong { color: var(--color-link); }
+  .ss-arrow { flex-shrink: 0; }
+
+  .ss-note { margin: 0; padding: 10px 16px 6px; font-size: 0.86rem; color: var(--color-slate); }
+  .ss-note[hidden] { display: none; }
+  .ss-note strong { color: var(--color-charcoal); font-weight: 600; }
+
+  .ss-empty { padding: 14px 16px 8px; }
+  .ss-empty__head { margin: 0; font-size: 0.95rem; color: var(--color-charcoal); }
+  .ss-empty__help { margin: 4px 0 0; font-size: 0.86rem; color: var(--color-slate); }
+
+  @media (pointer: coarse) {
+    .ss-option { min-height: 48px; font-size: 1rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ss-panel { transform: none; transition: opacity 0.1s linear, visibility 0s linear 0.1s; }
+    .ss-panel[data-open="true"] { transition: opacity 0.1s linear, visibility 0s; }
+  }
+
+  /* While the phone sheet is open the page behind it stays put, and the chat button steps aside */
+  html.ss-lock { overflow: hidden; }
+  html.ss-lock #staci-toggle,
+  html.ss-lock #staci-greeting { visibility: hidden; }
+</style>
+
 <script is:inline define:vars={{ enabledCollectionHandles }}>
   window.__ENABLED_COLLECTIONS = enabledCollectionHandles;
 </script>
@@ -756,201 +899,8 @@ const roomCollections = [
 
   // ─── Module-level (persists across navigations) ─────────────
 
-  type Product = { title: string; handle: string; price: string; image: string; type: string };
-  let productIndex: Product[] | null = null;
-  const SEARCH_CACHE_KEY = 'sr_search_idx';
-  const SEARCH_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-  async function loadProductIndex(): Promise<Product[]> {
-    if (productIndex) return productIndex;
-
-    // Check sessionStorage cache first (survives View Transitions)
-    try {
-      const cached = sessionStorage.getItem(SEARCH_CACHE_KEY);
-      if (cached) {
-        const { data, ts } = JSON.parse(cached);
-        if (Date.now() - ts < SEARCH_CACHE_TTL) {
-          productIndex = data;
-          return productIndex!;
-        }
-      }
-    } catch { /* sessionStorage unavailable */ }
-
-    try {
-      const domain = (window as any).__SHOPIFY_DOMAIN || 'sunnyandranney.myshopify.com';
-      const token = (window as any).__SHOPIFY_TOKEN || '';
-      if (!token) return [];
-
-      const enabledHandles: string[] = (window as any).__ENABLED_COLLECTIONS || [];
-
-      const productFragment = `{ title handle productType priceRange { minVariantPrice { amount } } images(first: 1) { edges { node { url } } } }`;
-      let gqlQuery: string;
-      if (enabledHandles.length > 0) {
-        const aliases = enabledHandles
-          .map((h, i) => `c${i}: collection(handle: ${JSON.stringify(h)}) { products(first: 50, sortKey: BEST_SELLING) { edges { node ${productFragment} } } }`)
-          .join(' ');
-        gqlQuery = `{ ${aliases} }`;
-      } else {
-        gqlQuery = `{ products(first: 50, sortKey: BEST_SELLING) { edges { node ${productFragment} } } }`;
-      }
-
-      const res = await fetch(`https://${domain}/api/2025-01/graphql.json`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Shopify-Storefront-Access-Token': token,
-        },
-        body: JSON.stringify({ query: gqlQuery }),
-      });
-      const json = await res.json();
-
-      const seen = new Set<string>();
-      const allEdges: any[] = [];
-      if (enabledHandles.length > 0) {
-        for (let i = 0; i < enabledHandles.length; i++) {
-          const edges = json.data?.[`c${i}`]?.products?.edges || [];
-          for (const e of edges) {
-            if (!seen.has(e.node.handle)) {
-              seen.add(e.node.handle);
-              allEdges.push(e);
-            }
-          }
-        }
-      } else {
-        allEdges.push(...(json.data?.products?.edges || []));
-      }
-
-      productIndex = allEdges.map((e: any) => ({
-        title: e.node.title,
-        handle: e.node.handle,
-        price: e.node.priceRange.minVariantPrice.amount,
-        image: e.node.images.edges[0]?.node?.url || '',
-        type: (e.node.productType || '').toLowerCase(),
-      }));
-
-      try {
-        sessionStorage.setItem(SEARCH_CACHE_KEY, JSON.stringify({ data: productIndex, ts: Date.now() }));
-      } catch { /* quota exceeded */ }
-
-      return productIndex!;
-    } catch {
-      return [];
-    }
-  }
-
-  function renderSuggestions(suggestEl: HTMLElement, query: string, items: Product[]) {
-    const q = query.toLowerCase();
-    const matches = items.filter(p =>
-      p.title.toLowerCase().includes(q) || p.type.includes(q)
-    ).slice(0, 5);
-
-    if (matches.length === 0) {
-      suggestEl.style.display = 'none';
-      return;
-    }
-
-    const frag = document.createDocumentFragment();
-    matches.forEach((p) => {
-      const link = document.createElement('a');
-      link.href = `/shop/${p.handle}/`;
-      link.className = 'search-suggest__item';
-      link.setAttribute('role', 'option');
-
-      if (p.image) {
-        const imgWrap = document.createElement('div');
-        imgWrap.className = 'search-suggest__img';
-        const img = document.createElement('img');
-        img.src = p.image.includes('cdn.shopify.com') ? `${p.image}?width=80` : p.image;
-        img.alt = p.title;
-        img.loading = 'lazy';
-        imgWrap.appendChild(img);
-        link.appendChild(imgWrap);
-      }
-
-      const info = document.createElement('div');
-      info.className = 'search-suggest__info';
-      const title = document.createElement('span');
-      title.className = 'search-suggest__title';
-      title.textContent = p.title;
-      info.appendChild(title);
-      const price = document.createElement('span');
-      price.className = 'search-suggest__price';
-      price.textContent = `$${parseFloat(p.price).toFixed(2)}`;
-      info.appendChild(price);
-      link.appendChild(info);
-      frag.appendChild(link);
-    });
-
-    const allLink = document.createElement('a');
-    allLink.href = `/shop/?q=${encodeURIComponent(query)}`;
-    allLink.className = 'search-suggest__all';
-    allLink.textContent = `View all results for "${query}"`;
-    frag.appendChild(allLink);
-
-    suggestEl.replaceChildren(frag);
-    suggestEl.style.display = 'block';
-  }
-
-  function doSearch(input: HTMLInputElement) {
-    const q = input.value.trim();
-    if (q) window.location.href = `/shop/?q=${encodeURIComponent(q)}`;
-  }
-
-  function setupTypeahead(input: HTMLInputElement, suggestEl: HTMLElement, signal: AbortSignal) {
-    let timer: ReturnType<typeof setTimeout>;
-
-    input.addEventListener('input', () => {
-      const q = input.value.trim();
-      clearTimeout(timer);
-      if (!q || q.length < 2) {
-        suggestEl.style.display = 'none';
-        input.setAttribute('aria-expanded', 'false');
-        return;
-      }
-      timer = setTimeout(async () => {
-        const items = await loadProductIndex();
-        renderSuggestions(suggestEl, q, items);
-        input.setAttribute('aria-expanded', suggestEl.style.display !== 'none' ? 'true' : 'false');
-      }, 300);
-    }, { signal });
-
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        suggestEl.style.display = 'none';
-        input.setAttribute('aria-expanded', 'false');
-        return;
-      }
-      if (suggestEl.style.display === 'none') return;
-      const items = suggestEl.querySelectorAll('.search-suggest__item');
-      if (!items.length) return;
-      const active = suggestEl.querySelector('[aria-selected="true"]') as HTMLElement;
-      let idx = active ? Array.from(items).indexOf(active) : -1;
-
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (active) active.removeAttribute('aria-selected');
-        idx = (idx + 1) % items.length;
-        items[idx].setAttribute('aria-selected', 'true');
-        (items[idx] as HTMLElement).scrollIntoView({ block: 'nearest' });
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (active) active.removeAttribute('aria-selected');
-        idx = idx <= 0 ? items.length - 1 : idx - 1;
-        items[idx].setAttribute('aria-selected', 'true');
-        (items[idx] as HTMLElement).scrollIntoView({ block: 'nearest' });
-      } else if (e.key === 'Enter' && active) {
-        e.preventDefault();
-        (active as HTMLAnchorElement).click();
-      }
-    }, { signal });
-
-    document.addEventListener('click', (e) => {
-      if (!suggestEl.contains(e.target as Node) && e.target !== input) {
-        suggestEl.style.display = 'none';
-        input.setAttribute('aria-expanded', 'false');
-      }
-    }, { signal });
-  }
+  import { mountSearch } from '@/lib/search/ui';
+  import { warmSearchIndex } from '@/lib/search/client';
 
   // ─── Pure helpers (query fresh DOM each call) ───────────────
 
@@ -1049,10 +999,6 @@ const roomCollections = [
     const searchToggle = document.getElementById('mobile-search-toggle');
     const mobileSearchInput = document.getElementById('mobile-topbar-search') as HTMLInputElement | null;
     const searchInput = document.getElementById('nav-search-input') as HTMLInputElement | null;
-    const searchSubmit = document.getElementById('nav-search-submit');
-    const mobileTopbarSearch = document.getElementById('mobile-topbar-search') as HTMLInputElement | null;
-    const suggestEl = document.getElementById('search-suggest');
-    const mobileSuggestEl = document.getElementById('mobile-search-suggest');
 
     // ── Nav height → CSS variable (debounced to avoid CLS) ───────────────
     if (nav) {
@@ -1096,23 +1042,90 @@ const roomCollections = [
       }
     }, { passive: true, signal });
 
+    // ── Search ──────────────────────────────────
+    // On a results page the box holds the search, so it can be changed (Baymard); elsewhere it's empty.
+    const here = new URL(window.location.href);
+    const searched = here.pathname.replace(/\/$/, '') === '/shop' ? (here.searchParams.get('q') ?? '') : '';
+    for (const input of [searchInput, mobileSearchInput]) {
+      if (input && document.activeElement !== input) input.value = searched;
+    }
+    const mainRow = nav?.querySelector('.nav__main') as HTMLElement | null;
+    const desktopForm = document.getElementById('nav-search-form') as HTMLFormElement | null;
+    const mobileForm = document.getElementById('mobile-search-form') as HTMLFormElement | null;
+    if (desktopForm && searchInput) {
+      mountSearch({
+        form: desktopForm,
+        input: searchInput,
+        panel: document.getElementById('nav-search-panel')!,
+        list: document.getElementById('search-suggest')!,
+        note: document.getElementById('nav-search-note')!,
+        status: document.getElementById('nav-search-status')!,
+        clear: document.getElementById('nav-search-clear') as HTMLButtonElement | null,
+        onOpen: () => {
+          const bar = desktopForm.getBoundingClientRect();
+          document.documentElement.style.setProperty('--ss-top', `${Math.round(bar.bottom + 8)}px`);
+          if (mainRow) document.documentElement.style.setProperty('--ss-scrim-top', `${Math.round(mainRow.getBoundingClientRect().bottom)}px`);
+          nav?.classList.add('nav--searching');
+        },
+        onClose: () => nav?.classList.remove('nav--searching'),
+      }, signal);
+    }
+    let mobileBox: { close: () => void } | null = null;
+    if (mobileForm && mobileSearchInput) {
+      mobileBox = mountSearch({
+        form: mobileForm,
+        input: mobileSearchInput,
+        panel: document.getElementById('mobile-search-panel')!,
+        list: document.getElementById('mobile-search-suggest')!,
+        note: document.getElementById('mobile-search-note')!,
+        status: document.getElementById('mobile-search-status')!,
+        clear: document.getElementById('mobile-search-clear') as HTMLButtonElement | null,
+        compact: true,
+        onOpen: () => {
+          const bottom = (mobileSearch?.querySelector('.nav__mobile-topbar-inner') as HTMLElement | null)?.getBoundingClientRect().bottom ?? 116;
+          document.documentElement.style.setProperty('--ss-sheet-top', `${Math.round(bottom + 6)}px`);
+          document.documentElement.classList.add('ss-lock');
+          nav?.classList.add('nav--searching');
+        },
+        onClose: () => {
+          document.documentElement.classList.remove('ss-lock');
+          nav?.classList.remove('nav--searching');
+        },
+      }, signal);
+    }
+    document.getElementById('mobile-search-cancel')?.addEventListener('click', () => {
+      mobileBox?.close();
+      mobileSearchInput?.blur();
+      if (mobileSearchInput) {
+        // What the page shows now: a results page can clear its search without a new page.
+        const now = new URL(window.location.href);
+        mobileSearchInput.value = now.pathname.replace(/\/$/, '') === '/shop' ? (now.searchParams.get('q') ?? '') : '';
+        const x = document.getElementById('mobile-search-clear');
+        if (x) x.hidden = !mobileSearchInput.value;
+      }
+    }, { signal });
+
     // ── Mobile search toggle ────────────────────
+    searchToggle?.addEventListener('pointerenter', warmSearchIndex, { signal, once: true });
     searchToggle?.addEventListener('click', () => {
       if (!mobileSearch) return;
       const isOpen = mobileSearch.classList.contains('is-forced-open');
       if (isOpen) {
+        mobileBox?.close();
         mobileSearch.classList.remove('is-forced-open');
         mobileSearch.classList.add('is-hidden');
       } else {
         mobileSearch.classList.remove('is-hidden');
         mobileSearch.classList.add('is-forced-open');
-        setTimeout(() => mobileSearchInput?.focus(), 260);
+        // In the tap itself, so a phone opens its keyboard (it won't for a focus a moment later).
+        mobileSearchInput?.focus({ preventScroll: true });
       }
     }, { signal });
 
     mobileSearchInput?.addEventListener('blur', () => {
       setTimeout(() => {
-        if (mobileSearch && window.scrollY > 60) {
+        // Not while its suggestions are open: the keyboard was put away to scroll them.
+        if (mobileSearch && window.scrollY > 60 && !nav?.classList.contains('nav--searching')) {
           mobileSearch.classList.remove('is-forced-open');
         }
       }, 300);
@@ -1121,15 +1134,6 @@ const roomCollections = [
     // ── Cart buttons ────────────────────────────
     document.getElementById('cart-trigger')?.addEventListener('click', () => window.openCart?.(), { signal });
     document.getElementById('mobile-cart-trigger')?.addEventListener('click', () => window.openCart?.(), { signal });
-
-    // ── Search submit ───────────────────────────
-    searchInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(searchInput); }, { signal });
-    searchSubmit?.addEventListener('click', () => { if (searchInput) doSearch(searchInput); }, { signal });
-    mobileTopbarSearch?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(mobileTopbarSearch); }, { signal });
-
-    // ── Typeahead ───────────────────────────────
-    if (searchInput && suggestEl) setupTypeahead(searchInput, suggestEl, signal);
-    if (mobileTopbarSearch && mobileSuggestEl) setupTypeahead(mobileTopbarSearch, mobileSuggestEl, signal);
 
     // ── Cart badge: subscribe directly to the store (single source of truth) ──
     // Until the store confirms a real cart (snap.hasLoaded), defer to whatever
