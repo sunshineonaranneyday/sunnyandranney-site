@@ -32,7 +32,7 @@ import {
 } from './model';
 import { Section } from './parts';
 import { Photos } from './Photos';
-import { type Fit, type Focus, Preview } from './Preview';
+import { type Fit, type Focus, type Spill, Preview } from './Preview';
 import { Products } from './Products';
 import { Sale } from './Sale';
 import { Send } from './Send';
@@ -50,6 +50,18 @@ function draftEvent(ev: StoreEvent): StoreEvent | null {
   if (!dates.length) return null;
   return { ...ev, id: ev.id || 'new-event', title: ev.title || 'Your event', when: ev.when || 'What’s on', dates };
 }
+
+/** Where too-wide words are, in the page's words, and what to do: always what and where, never "something". */
+const SPILL_WHERE: Record<Spill['part'], [string, string]> = {
+  offer: ['the sale', 'Shorten it.'],
+  wall: ['a product’s name', 'Give it a shorter name on its tile.'],
+  story: ['the story', 'Shorten it, or break it with a space.'],
+  photos: ['the story', 'Shorten it, or break it with a space.'],
+  events: ['the events', 'Shorten it in the event.'],
+  mission: ['the charity section', 'Those words come from the charity’s site: pick another family, or fix them there.'],
+  layout: ['the email’s own layout', 'That isn’t anything typed here, so it doesn’t stop saving: tell Peter.'],
+};
+const spillMessage = (s: Spill) => `“${s.word}” in ${SPILL_WHERE[s.part][0]} is ${s.over} px too wide for a small phone (320 px). ${SPILL_WHERE[s.part][1]}`;
 
 /** "YYYY-MM-DD" in the store's time zone. */
 const easternDay = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(iso));
@@ -154,16 +166,23 @@ export default function EmailApp(props: AppProps) {
   );
 
   const fold = fit.small && fit.phone ? Math.max(fit.small.buttonAt, fit.phone.buttonAt) : null;
-  const spill = Boolean(fit.small?.spill || fit.phone?.spill);
+  // What's too wide for a small phone, named, with where to fix it (the 320 px phone first: it's the tightest)
+  const spillAt = [...(fit.small?.spills ?? []), ...(fit.phone?.spills ?? [])][0] ?? null;
+  const spill = Boolean(spillAt);
+  const spillWords = spillAt ? spillMessage(spillAt) : null;
   const longNames = useMemo(() => new Set([...(fit.small?.longNames ?? []), ...(fit.phone?.longNames ?? [])]), [fit]);
   const layoutProblem =
     fold !== null && fold > FIRST_SCREEN
       ? `On a phone the sale button lands ${fold - FIRST_SCREEN} px below the first screen. Shorten the headline${form.kind === 'tiers' ? ' or use fewer tiers' : ''}.`
-      : spill
-        ? 'Something is too wide for a small phone. Shorten the longest words.'
+      : spillWords && spillAt!.part !== 'layout'
+        ? spillWords
         : longNames.size
           ? `${longNames.size === 1 ? 'A product name runs' : `${longNames.size} product names run`} past two lines on a small phone. Give ${longNames.size === 1 ? 'it' : 'them'} a shorter name.`
           : null;
+
+  // The section that fixes it, for the error list's link
+  const SECTION: Record<Spill['part'], string> = { offer: 'em-sale', wall: 'em-products', story: 'em-story', photos: 'em-story', events: 'em-events', mission: 'em-charity', layout: 'em-preview' };
+  const layoutSection = layoutProblem === spillWords && spillAt ? SECTION[spillAt.part] : longNames.size && layoutProblem && !(fold !== null && fold > FIRST_SCREEN) ? 'em-products' : 'em-sale';
 
   // ── Saving ──
   const errors = { ...saleErrors, ...wallErrors, ...partsErrors };
@@ -312,7 +331,7 @@ export default function EmailApp(props: AppProps) {
   const storyState = story.headline && story.body ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const } : { state: 'Not written', tone: 'todo' as const };
   const checks = [
     { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` },
-    { ok: fold === null ? null : !spill, text: spill ? 'Something is too wide for a small phone.' : 'Everything fits a small phone (320 px).' },
+    { ok: fold === null ? null : !spill, text: spillWords ?? 'Everything fits a small phone (320 px).' },
     ...(wallReady && fold !== null ? [{ ok: !longNames.size, text: longNames.size ? `${longNames.size} product name${longNames.size === 1 ? '' : 's'} run past two lines.` : 'Every product name fits two lines.' }] : []),
     ...(!wallReady ? [{ ok: null, text: n ? `Pick ${Math.max(PICKS[0] - n, 0) || 'no more than 9'} more to see the products here.` : `The products show here once ${PICKS[0]} are picked.` }] : []),
   ];
@@ -365,7 +384,11 @@ export default function EmailApp(props: AppProps) {
                     <a href={`#${fieldId(key)}`}>{message}</a>
                   </li>
                 ))}
-                {layoutProblem && <li>{layoutProblem}</li>}
+                {layoutProblem && (
+                  <li>
+                    <a href={`#${layoutSection}`}>{layoutProblem}</a>
+                  </li>
+                )}
               </ul>
             </div>
           )}

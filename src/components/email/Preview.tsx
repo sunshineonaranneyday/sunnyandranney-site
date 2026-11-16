@@ -1,12 +1,21 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { FIRST_SCREEN, render } from '@/lib/sunny-side/email.mjs';
+import { FIRST_SCREEN, GOLD, render } from '@/lib/sunny-side/email.mjs';
 import { FONT, FONT_LINK } from './font';
+
+/** Text too wide for a phone: the word that doesn't fit, by how much, and the part of the email it's in. */
+export interface Spill {
+  word: string;
+  over: number;
+  part: Focus | 'layout';
+}
 
 /** What the preview measures at a small phone's and a phone's width, by the rules verify.mjs holds the email to. */
 export interface Fit {
   buttonAt: number;
   spill: boolean;
+  /** What's too wide, so the page can say what and where, never just "something". */
+  spills: Spill[];
   /** Handles of products whose name runs past two lines. */
   longNames: string[];
 }
@@ -62,12 +71,49 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
   await doc.fonts?.ready;
   const button = doc.querySelector('a[href*="utm_content=offer-button"]');
   if (!button) return null;
-  const spill = [...doc.querySelectorAll<HTMLElement>('p,h1,h2')].some((t) => t.getBoundingClientRect().width && t.scrollWidth > t.clientWidth + 1);
+  // Each line of text wider than its column, with its widest word (what to shorten) and the part it's in
+  // The sale's whole gold band, not just the dark cell its button sits in
+  const offer = button.closest(`td[bgcolor="${GOLD}"]`)?.closest('tr');
+  const partOfEl = (el: Element): Spill['part'] => {
+    if (offer?.contains(el)) return 'offer';
+    for (const p of ['wall', 'story', 'events', 'mission'] as const) if (partOf(doc, p)?.contains(el)) return p;
+    return 'layout';
+  };
+  const ruler = doc.createElement('canvas').getContext('2d');
+  /** An element's widest word and its width: what to shorten. */
+  const widestWord = (t: HTMLElement): [string, number] => {
+    const text = (t.textContent ?? '').replace(/\s+/g, ' ').trim();
+    if (!ruler) return [text, 0];
+    ruler.font = win.getComputedStyle(t).font;
+    let best: [string, number] = [text, 0];
+    for (const w of text.split(' ')) {
+      const width = ruler.measureText(w).width;
+      if (width > best[1]) best = [w, width];
+    }
+    return best;
+  };
+  const short = (w: string) => (w.length > 40 ? `${w.slice(0, 39)}…` : w);
+  const spills: Spill[] = [];
+  // The same two rules verify.mjs holds the email to: text spilling out of its own box (a fixed cell,
+  // a tile's name or price), and the email as a whole wider than the phone (a word that holds a cell open)
+  for (const t of doc.querySelectorAll<HTMLElement>('p,h1,h2,.tile-name,.tile-price')) {
+    if (!t.getBoundingClientRect().width || t.scrollWidth <= t.clientWidth + 1) continue;
+    spills.push({ word: short(widestWord(t)[0]), over: t.scrollWidth - t.clientWidth, part: partOfEl(t) });
+  }
+  const wider = doc.documentElement.scrollWidth - win.innerWidth;
+  if (wider > 1 && !spills.length) {
+    const past = [...doc.querySelectorAll<HTMLElement>('body *')].filter(
+      (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent?.trim()) && el.getBoundingClientRect().right > win.innerWidth + 1,
+    );
+    const culprit = past.map((el) => [el, widestWord(el)] as const).sort((a, b) => b[1][1] - a[1][1])[0];
+    spills.push({ word: culprit ? short(culprit[1][0]) : 'Something', over: wider, part: culprit ? partOfEl(culprit[0]) : 'layout' });
+  }
+  const spill = spills.length > 0;
   const longNames = [...doc.querySelectorAll<HTMLElement>('.tile-name')]
     .filter((t) => t.getBoundingClientRect().height > 2 * 20 + 1)
     .map((t) => t.closest('a')?.getAttribute('href')?.match(/\/shop\/([^/?]+)/)?.[1] ?? '')
     .filter(Boolean);
-  return { buttonAt: Math.round(button.getBoundingClientRect().bottom + win.scrollY), spill, longNames };
+  return { buttonAt: Math.round(button.getBoundingClientRect().bottom + win.scrollY), spill, spills, longNames };
 }
 
 /** The part of the email Staci is working on, which the preview keeps in view. */

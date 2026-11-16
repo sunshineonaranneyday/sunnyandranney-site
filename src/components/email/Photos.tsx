@@ -183,13 +183,14 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
           <span class="em-drop-label">{uploading ? 'Wait for these photos to finish' : 'Drop to add these photos'}</span>
         </div>
       )}
-      <div class="em-photos-head">
-        <p class="em-hint">The top photo and the story’s collage. Drag photos here or add them; photos from a phone are made smaller before they go up.</p>
-        <label class={`btn btn-dark em-upload${uploading ? ' is-busy' : ''}`}>
-          <input type="file" accept="image/*" multiple disabled={Boolean(uploading)} onChange={(e) => void upload((e.target as HTMLInputElement).files).then(() => ((e.target as HTMLInputElement).value = ''))} />
-          {uploading ? `Uploading ${uploading.done + 1 > uploading.of ? uploading.of : uploading.done + 1} of ${uploading.of}…` : 'Add photos'}
-        </label>
-      </div>
+      {/* Where photos go, in plain sight (Shopify's drop zone: a dashed box, its button, "or drop files"):
+          drag them onto it, or anywhere on the section, or click anywhere in it to choose them */}
+      <label class={`em-dropzone${uploading ? ' is-busy' : ''}`}>
+        <input type="file" accept="image/*" multiple disabled={Boolean(uploading)} onChange={(e) => void upload((e.target as HTMLInputElement).files).then(() => ((e.target as HTMLInputElement).value = ''))} />
+        <span class="btn btn-dark">{uploading ? `Uploading ${uploading.done + 1 > uploading.of ? uploading.of : uploading.done + 1} of ${uploading.of}…` : 'Add photos'}</span>
+        <span class="em-dropzone-or">or drag them here</span>
+        <span class="em-dropzone-hint">For the top photo and the story’s collage. Photos from a phone are made smaller before they go up.</span>
+      </label>
       {problem && (
         <p class="em-error" role="alert">
           {problem}

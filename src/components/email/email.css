@@ -256,11 +256,21 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-danger { display: flex; justify-content: flex-end; margin: -0.25rem 0 1rem; }
 
 /* ── Photos ── */
-.em-photos-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 1rem; }
-.em-photos-head .em-hint { margin: 0; flex: 1 1 16rem; }
-.em-upload { position: relative; overflow: hidden; cursor: pointer; }
-.em-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-.em-upload.is-busy { opacity: 0.7; cursor: progress; }
+/* The drop zone: a dashed box that takes a click anywhere (its input covers it) or a drop */
+.em-dropzone {
+  position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem 0.875rem;
+  margin-bottom: 1rem; padding: 1.25rem 1rem; border: 2px dashed color-mix(in srgb, var(--ink) 22%, var(--line)); border-radius: var(--r-md);
+  background: var(--panel); text-align: center; cursor: pointer; transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
+  /* a label, but not a field's small-capitals label */
+  font-size: 0.9375rem; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink);
+}
+.em-dropzone input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.em-dropzone:hover, .em-photos.is-dropping .em-dropzone { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 6%, var(--panel)); }
+.em-dropzone:has(input:focus-visible) { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-dropzone-or { font-weight: 600; color: var(--ink-2); }
+.em-dropzone-hint { flex: 1 1 100%; font-size: 0.8125rem; color: var(--ink-3); }
+.em-dropzone.is-busy { cursor: progress; }
+.em-dropzone.is-busy .btn { opacity: 0.7; }
 /* Photos dragged over the section: the whole section takes them, with a label that stays in view */
 .em-photos { position: relative; }
 .em-drop {
