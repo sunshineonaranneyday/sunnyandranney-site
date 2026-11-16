@@ -593,6 +593,7 @@ p {
 
 /* ─── Reduced Motion ───────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; } /* jump links and focus jump, not glide */
   *, *::before, *::after {
     animation: none !important;
     transition-duration: 0.01ms !important;

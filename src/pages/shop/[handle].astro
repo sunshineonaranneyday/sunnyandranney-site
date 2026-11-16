@@ -1666,6 +1666,8 @@ const breadcrumbSchema = {
 
   .sticky-bar__btn {
     flex-shrink: 0;
+    min-height: 48px;
+    justify-content: center;
     padding: 0.75rem 1.5rem;
     font-size: 0.78rem;
   }
@@ -1703,7 +1705,7 @@ const breadcrumbSchema = {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem 0;
+    padding-block: 0.75rem; /* top and bottom only: the container keeps the page's side margins */
     gap: 1rem;
   }
 
@@ -1749,19 +1751,27 @@ const breadcrumbSchema = {
     gap: 1rem;
   }
 
+  /* Focus and jump links land clear of the fixed nav, the sticky header below it (desktop)
+     and the phone bar (WCAG 2.4.11). */
+  :global(html) { scroll-padding-top: 150px; }
+  @media (min-width: 769px) { :global(html) { scroll-padding-top: 230px; } }
+  @media (max-width: 768px) { :global(html) { scroll-padding-bottom: 104px; } }
+
   .sticky-header__urgency {
     display: flex;
     align-items: center;
     gap: 0.35rem;
     font-size: 0.75rem;
     font-weight: 600;
-    color: #e67e22;
+    color: var(--color-charcoal); /* the orange text was 2.67:1 on cream; the dot keeps the orange */
     white-space: nowrap;
   }
 
-  .sticky-header__urgency svg { flex-shrink: 0; }
+  .sticky-header__urgency svg { flex-shrink: 0; color: #e67e22; }
 
   .sticky-header__atc {
+    min-height: 44px;
+    justify-content: center;
     padding: 0.7rem 1.75rem;
     font-size: 0.78rem;
     white-space: nowrap;
@@ -1859,7 +1869,7 @@ const breadcrumbSchema = {
   document.addEventListener('astro:page-load', () => {
   // ─── DOM refs ───────────────────────────────
   const thumbs = document.querySelectorAll('.pdp-thumb');
-  if (!thumbs.length && !document.getElementById('main-product-image')) return;
+  if (!document.getElementById('pdp-price-area')) return; // not a product page
   const mainImg = document.getElementById('main-product-image') as HTMLImageElement;
   const galleryMain = document.getElementById('gallery-main');
   const variantBtns = document.querySelectorAll('.pdp-variant-btn');
@@ -2312,7 +2322,7 @@ const breadcrumbSchema = {
     updateLightbox();
   }
 
-  galleryMain?.addEventListener('click', () => openLightbox(currentImageIdx));
+  galleryMain?.addEventListener('click', () => { if (imageUrls.length) openLightbox(currentImageIdx); });
   lightboxClose?.addEventListener('click', closeLightbox);
   lightbox?.addEventListener('click', (e) => {
     if (e.target === lightbox) closeLightbox();
@@ -2359,15 +2369,24 @@ const breadcrumbSchema = {
 
   // ─── Sticky mobile bar & desktop header ─────
   if (stickyBar || stickyHeader) {
+    const root = document.documentElement;
     const observer = new IntersectionObserver(
       ([entry]) => {
         const isHidden = !entry.isIntersecting;
-        if (stickyBar) stickyBar.classList.toggle('is-visible', isHidden);
-        if (stickyHeader) stickyHeader.setAttribute('aria-hidden', String(!isHidden));
+        if (stickyBar) { stickyBar.classList.toggle('is-visible', isHidden); stickyBar.inert = !isHidden; }
+        if (stickyHeader) {
+          stickyHeader.style.top = `${Math.max(0, document.querySelector('.nav')?.getBoundingClientRect().bottom ?? 0)}px`;
+          stickyHeader.setAttribute('aria-hidden', String(!isHidden));
+          stickyHeader.inert = !isHidden;
+        }
+        // The chat button rides above the phone bar instead of covering its Add to Cart.
+        const barShown = isHidden && stickyBar && getComputedStyle(stickyBar).display !== 'none';
+        root.style.setProperty('--bottom-bar', barShown ? `${stickyBar!.offsetHeight}px` : '0px');
       },
       { threshold: 0 }
     );
     if (addToCartBtn) observer.observe(addToCartBtn);
+    document.addEventListener('astro:before-swap', () => { observer.disconnect(); root.style.removeProperty('--bottom-bar'); }, { once: true });
   }
 
   // Sticky header add to cart
