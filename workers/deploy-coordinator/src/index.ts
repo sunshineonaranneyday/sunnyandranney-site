@@ -1,3 +1,4 @@
+import { nightlySyncRequest } from '../../../src/lib/nightly-sync.mjs';
 /**
  * Durable Object that debounces Cloudflare Pages deploy hook calls.
  *
@@ -202,7 +203,8 @@ export default {
       console.error('[deploy-coordinator] Nightly sync skipped: SITE_SYNC_URL or POKE_SECRET not set');
       return;
     }
-    const res = await fetch(env.SITE_SYNC_URL, { method: 'POST', headers: { 'x-sync-secret': env.POKE_SECRET } });
+    const { url, init } = nightlySyncRequest(env.SITE_SYNC_URL, env.POKE_SECRET);
+    const res = await fetch(url, init);
     const body = await res.text();
     console.log(`[deploy-coordinator] Nightly sync: ${res.status} ${body.slice(0, 300)}`);
     if (!res.ok) throw new Error(`Nightly sync failed: ${res.status}`);
