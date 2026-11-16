@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
 import { broadcastUrl, cancel, kitClient, schedule, statusOf, templateFor } from '@/lib/sunny-side/kit.mjs';
-import { isSendDate, sendLabel } from '@/lib/sunny-side/special.mjs';
+import { isSendDate, isSendDay, sendLabel, sendPassed } from '@/lib/sunny-side/special.mjs';
 import { getWeek, setKit } from '@/lib/sunny-side/week-store.mjs';
 import { weekEmail } from '@/lib/sunny-side/week-email';
 import { localDate, localInputToUtc } from '@/lib/time-clock/hours.mjs';
@@ -14,13 +14,14 @@ const LEAD_MS = 10 * 60 * 1000;
 function sendOf(body: Record<string, unknown> | null): string | Response {
   const send = body?.send;
   if (!isSendDate(send)) return json({ error: 'Pick one of the Tuesday emails.' }, 400);
-  if ((send as string) < localDate(new Date().toISOString())) return json({ error: `The ${sendLabel(send as string)} email has already gone out.` }, 409);
+  if (sendPassed(send, localDate(new Date().toISOString()))) return json({ error: `The days for the ${sendLabel(send as string)} email have passed.` }, 409);
   return send as string;
 }
 
 /**
- * Schedules the week's email, as saved, to every subscriber, through Kit, at a time on its
- * Tuesday (Eastern). Managers only. Kept off the web, and checked with Kit once scheduled.
+ * Schedules the week's email, as saved, to every subscriber, through Kit, on a day of its week
+ * (sendDays; Tuesday is the usual one) at a time, Eastern. Managers only. Built as of that day,
+ * kept off the web, and checked with Kit once scheduled.
  */
 export const PUT: APIRoute = async (context) => {
   const admin = requireRole(context.locals, 'manager');
@@ -30,8 +31,11 @@ export const PUT: APIRoute = async (context) => {
   const body = await readJson(context.request);
   const send = sendOf(body);
   if (send instanceof Response) return send;
+  const today = localDate(new Date().toISOString());
+  const day = typeof body?.day === 'string' ? body.day : send;
+  if (!isSendDay(send, day) || day < today) return json({ error: `Pick a day from today to the end of the ${sendLabel(send)} email’s week.` }, 400);
   const time = typeof body?.time === 'string' && /^\d{2}:\d{2}$/.test(body.time) ? body.time : '';
-  const sendAt = time ? localInputToUtc(`${send}T${time}`) : null;
+  const sendAt = time ? localInputToUtc(`${day}T${time}`) : null;
   if (!sendAt) return json({ error: 'Pick a time for it to go.' }, 400);
   if (Date.parse(sendAt) < Date.now() + LEAD_MS) return json({ error: 'Pick a time at least 10 minutes from now.' }, 400);
 
@@ -44,8 +48,7 @@ export const PUT: APIRoute = async (context) => {
     if (now?.status !== 'gone') return json({ error: 'This email is already scheduled. Cancel it first to change the time.' }, 409);
     await setKit(db, { send, id: null });
   }
-  const today = localDate(new Date().toISOString());
-  const email = await weekEmail(context, send, today);
+  const email = await weekEmail(context, send, today, day);
   if (!email.ok) return json({ error: `Before it can be scheduled: ${email.problems.join(' ')}`, problems: email.problems }, email.status);
 
   try {
@@ -54,7 +57,7 @@ export const PUT: APIRoute = async (context) => {
       subject: email.subject,
       preheader: email.preheader,
       html: email.html,
-      description: `The Sunny Side for ${sendLabel(send)}, from the store admin`,
+      description: `The Sunny Side for ${sendLabel(send)}${day === send ? '' : `, going ${sendLabel(day)}`}, from the store admin`,
       templateId,
       sendAt,
     });

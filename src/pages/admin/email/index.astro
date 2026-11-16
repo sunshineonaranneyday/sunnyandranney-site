@@ -20,13 +20,13 @@ import { localDate } from '@/lib/time-clock/hours.mjs';
 const admin = Astro.locals.admin;
 if (admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
 
-// This week's Tuesday email and the three after it; past ones have already gone out.
+// This week's email and the three after it. This week's stays until its Saturday, so one that
+// missed its Tuesday can still go out (sendDays).
 const db = Astro.locals.runtime.env.DB;
 const today = localDate(new Date().toISOString());
 const sends = upcomingSends(today, 4);
 const asked = Astro.url.searchParams.get('send');
 if (asked && !sends.includes(asked)) return Astro.redirect('/admin/email/', 302);
-const send = asked ?? sends[0];
 
 /** The charity's numbers for the preview's impact strip, cached an hour; the Kit draft reads them fresh. */
 async function impactNow() {
@@ -71,8 +71,11 @@ const [upcoming, past, events, testList, library, impact, kids, usual, subscribe
 const bySend = new Map(upcoming.map((r) => [r.send, r]));
 const weeks = sends.map((s) => {
   const r = bySend.get(s);
-  return { send: s, label: sendLabel(s), sale: r?.special ? summary(r.special) : '', products: r?.wall?.picks.length ?? 0 };
+  return { send: s, label: sendLabel(s), sale: r?.special ? summary(r.special) : '', products: r?.wall?.picks.length ?? 0, kitAt: r?.kit?.sendAt ?? null };
 });
+// Unless one was asked for: the first email that hasn't already gone out
+const gone = (s: string) => Boolean(bySend.get(s)?.kit) && Date.parse(bySend.get(s)!.kit!.sendAt) <= Date.now();
+const send = asked ?? sends.find((s) => !gone(s)) ?? sends[0];
 const record = bySend.get(send) ?? null;
 const parts = record?.parts ?? blankParts();
 // The library, plus any older photo this email still uses

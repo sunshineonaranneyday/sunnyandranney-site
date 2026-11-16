@@ -1,5 +1,6 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { sendLabel } from '@/lib/sunny-side/special.mjs';
 import { checkPerson, cleanPerson, namesOf } from '@/lib/sunny-side/testers.mjs';
 import { type KitSend, type TestPerson, type TestSent, at, send as call, toast, who } from './model';
 import { FieldError } from './parts';
@@ -31,12 +32,27 @@ const TIMES = Array.from({ length: (20 - 6) * 4 + 1 }, (_, k) => {
   return { value: `${hh}:${mm}`, label: `${h12}:${mm} ${m < 12 * 60 ? 'AM' : 'PM'}` };
 });
 const timeLabel = (v: string) => TIMES.find((t) => t.value === v)?.label ?? v;
+const minutesOf = (v: string) => Number(v.slice(0, 2)) * 60 + Number(v.slice(3, 5));
+/** The server takes a send at least this far ahead (send.ts), so today's list starts there. */
+const LEAD_MIN = 10;
+const eastern = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+/** The times a day offers: all of them, or today's still at least LEAD_MIN away. */
+const timesFor = (d: string, today: string) => {
+  if (d !== today) return TIMES;
+  const now = minutesOf(eastern.format(new Date()));
+  return TIMES.filter((t) => minutesOf(t.value) >= now + LEAD_MIN);
+};
 const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const count = (n: number | null) => (n === null || Number.isNaN(n) ? 'every subscriber' : `${n.toLocaleString('en-US')} subscriber${n === 1 ? '' : 's'}`);
 
 interface Props {
   send: string;
   label: string;
+  /** The day it goes, the days it can (its week, from today on), and today. */
+  day: string;
+  days: string[];
+  setDay: (d: string) => void;
+  today: string;
   /** What still has to be done first, each with the section that does it. */
   todo: { text: string; section: string }[];
   dirty: boolean;
@@ -56,11 +72,12 @@ interface Props {
 
 /**
  * Sends the week's email from here, through Kit: a test to whoever's ticked (Kit sends it a minute
- * later, exactly as subscribers get it), then the email itself to every subscriber at the time
- * picked. Once it's scheduled the email is locked until the send is cancelled.
+ * later, exactly as subscribers get it, as of the day picked), then the email itself to every
+ * subscriber on the day and at the time picked. Once it's scheduled the email is locked until the
+ * send is cancelled.
  */
 export function Send(props: Props) {
-  const { send, label, todo, dirty, saving, saveFirst, me, kitSend, setKitSend, subscribers } = props;
+  const { send, label, day, days, setDay, today, todo, dirty, saving, saveFirst, me, kitSend, setKitSend, subscribers } = props;
   const [people, setPeople] = useState(props.people);
   const [chosen, setChosen] = useState<Set<string>>(() => new Set([me]));
   const [busy, setBusy] = useState<'test' | 'schedule' | 'cancel' | null>(null);
@@ -69,7 +86,14 @@ export function Send(props: Props) {
   const [adding, setAdding] = useState({ name: '', email: '' });
   const [addError, setAddError] = useState<string | undefined>();
   const [showAdd, setShowAdd] = useState(false);
-  const [time, setTime] = useState(props.usualTime && TIMES.some((t) => t.value === props.usualTime) ? props.usualTime : '10:00');
+  const [wanted, setTime] = useState(props.usualTime && TIMES.some((t) => t.value === props.usualTime) ? props.usualTime : '10:00');
+  // Today offers only the times still ahead, and a day with none left isn't offered
+  const open = days.filter((d) => timesFor(d, today).length);
+  const times = timesFor(day, today);
+  const time = times.some((t) => t.value === wanted) ? wanted : (times.find((t) => t.value === props.usualTime) ?? times[0])?.value ?? wanted;
+  useEffect(() => {
+    if (!kitSend && open.length && !open.includes(day)) setDay(open[0]);
+  }, [open.join(), day, kitSend]);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
 
@@ -95,7 +119,7 @@ export function Send(props: Props) {
     setSent(null);
     if (dirty && !(await saveFirst())) return;
     setBusy('test');
-    const res = await call<{ test: TestSent; names: string }>('/api/admin/email/test/', 'POST', { send, to });
+    const res = await call<{ test: TestSent; names: string }>('/api/admin/email/test/', 'POST', { send, day, to });
     setBusy(null);
     if (!res.ok) return setProblem(res.error);
     props.onTest(res.body.test);
@@ -112,7 +136,7 @@ export function Send(props: Props) {
 
   async function schedule() {
     setBusy('schedule');
-    const res = await call<{ kit: KitSend }>('/api/admin/email/send/', 'PUT', { send, time });
+    const res = await call<{ kit: KitSend }>('/api/admin/email/send/', 'PUT', { send, day, time });
     setBusy(null);
     dialog.current?.close();
     if (!res.ok) return setProblem(res.error);
@@ -279,23 +303,41 @@ export function Send(props: Props) {
           </div>
         ) : (
           <>
-            <div class="em-when">
-              <span class="em-when-day">{label}</span>
-              <label class="visually-hidden" for="em-send-time">
-                Time
-              </label>
-              <select id="em-send-time" value={time} onChange={(e) => setTime((e.target as HTMLSelectElement).value)}>
-                {TIMES.map((t) => (
-                  <option value={t.value}>{t.label}</option>
-                ))}
-              </select>
-              <span class="em-hint">Eastern, to {count(subscribers)}.</span>
-            </div>
+            {open.length ? (
+              <div class="em-when">
+                <label class="visually-hidden" for="em-send-day">
+                  Day
+                </label>
+                <select id="em-send-day" value={day} onChange={(e) => setDay((e.target as HTMLSelectElement).value)}>
+                  {open.map((d) => (
+                    <option value={d}>
+                      {d === today ? 'Today, ' : ''}
+                      {sendLabel(d)}
+                      {d === send ? ' (usual)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <label class="visually-hidden" for="em-send-time">
+                  Time
+                </label>
+                <select id="em-send-time" value={time} onChange={(e) => setTime((e.target as HTMLSelectElement).value)}>
+                  {times.map((t) => (
+                    <option value={t.value}>
+                      {t.label}
+                      {t.value === props.usualTime ? ' (usual)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <span class="em-hint">Eastern, to {count(subscribers)}.</span>
+              </div>
+            ) : (
+              <p class="em-hint">This email’s week is over, so it can’t be scheduled.</p>
+            )}
             <div class="em-send-row">
-              <button type="button" class="btn btn-primary" onClick={() => void openSchedule()} disabled={!ready || Boolean(busy) || saving}>
+              <button type="button" class="btn btn-primary" onClick={() => void openSchedule()} disabled={!ready || !open.length || Boolean(busy) || saving}>
                 {dirty ? 'Save and schedule…' : 'Schedule…'}
               </button>
-              {props.usualTime === time && <span class="em-hint">The time the store’s emails usually go.</span>}
+              {day !== send && open.length > 0 && <span class="em-hint">The sale, events and date in the email go by {sendLabel(day)}.</span>}
             </div>
           </>
         )}
@@ -306,7 +348,8 @@ export function Send(props: Props) {
         <dl class="em-dialog-facts">
           <dt>When</dt>
           <dd>
-            {label}, {timeLabel(time)} Eastern
+            {day === today ? 'Today, ' : ''}
+            {sendLabel(day)}, {timeLabel(time)} Eastern
           </dd>
           <dt>To</dt>
           <dd>{count(subscribers)}</dd>

@@ -100,6 +100,22 @@ test('the parts are checked: lengths, links, the subject against the sale, alt t
   assert.deepEqual(cleanParts({ hero: '../etc', story: { photos: ['x', ids[0], ids[0]] }, extra: 1 }).story.photos, [ids[0]]);
 });
 
+test('an email going later in its week is checked and drawn as of that day', () => {
+  // The Nov 17 email going Thursday, Nov 19: Wednesday's event date has passed by then
+  const ev = cleanEvent({ id: 'late-nights-2026', title: 'Late shopping nights', start: '17:00', end: '20:00', dates: [{ date: '2026-11-18', what: 'Wine and wrapping' }, { date: '2026-11-25', what: 'Cocoa' }] });
+  const draw = (day) => render(...Object.values((({ brief, sections }) => ({ brief, sections }))(pageEmail({ sale, wall: wallOf(4), parts: story(1), photos, kids, catalog, events: [toBriefEvent(ev, day, SITE)], impact, send: day, site: SITE }))));
+  assert.match(draw('2026-11-17'), /Wine and(&nbsp;| )wrapping/);
+  const thursday = draw('2026-11-19');
+  assert.doesNotMatch(thursday, /Wine and(&nbsp;| )wrapping/);
+  assert.match(thursday, /Cocoa/);
+  assert.match(thursday, /Nov 19, 2026|November 19/); // the masthead's date
+  // A sale that ends Wednesday can go Tuesday, but not Thursday
+  const short = clean({ kind: 'percent', percent: 20, what: 'everything', ends: '2026-11-18' });
+  const problems = (day) => kitProblems({ special: short, wall: wallOf(4), parts: story(1), photos, kids, catalog, send: day, check, checkWall, checkParts, sale: draftSale(short) });
+  assert.deepEqual(problems('2026-11-17'), []);
+  assert.deepEqual(problems('2026-11-19').map((p) => p.section), ['em-sale']);
+});
+
 test('every address on the store’s own site in an email ends in a slash, or production can’t serve it', () => {
   // The site uses trailingSlash: 'always'; in production an on-demand route without its slash gets
   // the 404 page before any middleware runs (addresses.mjs). The first deploy's photos and calendar

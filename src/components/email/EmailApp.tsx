@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FIRST_SCREEN, SITE } from '@/lib/sunny-side/email.mjs';
 import { checkEvent, cleanEvent, sortedDates, toBriefEvent } from '@/lib/sunny-side/events.mjs';
-import { check, draftSale, summary } from '@/lib/sunny-side/special.mjs';
+import { check, draftSale, sendDays, sendLabel, summary } from '@/lib/sunny-side/special.mjs';
 import { kitProblems, pageEmail } from '@/lib/sunny-side/page-email.mjs';
 import { blankParts, checkParts, linesOf } from '@/lib/sunny-side/parts.mjs';
 import { PICKS, checkWall } from '@/lib/sunny-side/wall.mjs';
@@ -19,6 +19,7 @@ import {
   type SaleForm,
   type StoreEvent,
   type Wall,
+  type WeekTab,
   at,
   fieldId,
   partsSnapshot,
@@ -51,6 +52,16 @@ function draftEvent(ev: StoreEvent): StoreEvent | null {
   return { ...ev, id: ev.id || 'new-event', title: ev.title || 'Your event', when: ev.when || 'What’s on', dates };
 }
 
+/** A week tab's line: where its email stands in Kit, else what's set. */
+function weekState(w: WeekTab) {
+  if (w.kitAt) return Date.parse(w.kitAt) <= Date.now() ? 'Sent' : `Scheduled ${tabWhen.format(new Date(w.kitAt))}`;
+  return w.sale || w.products ? [w.sale ? 'Sale' : '', w.products ? `${w.products} products` : ''].filter(Boolean).join(' · ') : 'Not started';
+}
+
+/** "YYYY-MM-DD" in the store's time zone. */
+const easternDay = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(iso));
+const tabWhen = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' });
+
 export default function EmailApp(props: AppProps) {
   const { send, label, today, others } = props;
   // ── The week: sale and products, saved together ──
@@ -62,6 +73,11 @@ export default function EmailApp(props: AppProps) {
   const [tests, setTests] = useState(props.tests);
   // Scheduled (or gone): the email can't change until the send is cancelled
   const locked = Boolean(kitSend);
+  // The day it goes: any day of its week from today on (sendDays), its Tuesday unless that's
+  // passed; once scheduled, Kit's day. The sale's end, the events and the date in the email go by it.
+  const days = useMemo(() => sendDays(send).filter((d: string) => d >= today), [send, today]);
+  const [pickedDay, setDay] = useState(send >= today ? send : today);
+  const day = kitSend ? easternDay(kitSend.sendAt) : pickedDay;
   const [version, setVersion] = useState(props.record ? { updatedAt: props.record.updatedAt, updatedBy: props.record.updatedBy } : null);
   // The week as last saved, to tell changes from it and to go back to it
   const [saved, setSaved] = useState(() => ({ form: saleFormOf(props.record?.special ?? null), wall: props.record?.wall ?? blankWall(), parts: props.parts }));
@@ -98,8 +114,8 @@ export default function EmailApp(props: AppProps) {
   }, []);
 
   const special = useMemo(() => specialOf(form), [form]);
-  const saleErrors = useMemo(() => (form.kind ? check(special, send) : {}), [special, form.kind, send]);
-  const wallErrors = useMemo(() => (wall.picks.length ? checkWall(wall, { catalog: catalog ?? undefined, send }) : {}), [wall, catalog, send]);
+  const saleErrors = useMemo(() => (form.kind ? check(special, day) : {}), [special, form.kind, day]);
+  const wallErrors = useMemo(() => (wall.picks.length ? checkWall(wall, { catalog: catalog ?? undefined, send: day }) : {}), [wall, catalog, day]);
   const dirtySale = saleSnapshot(form) !== saleSnapshot(saved.form);
   const dirtyWall = wallSnapshot(wall) !== wallSnapshot(saved.wall);
   const dirtyParts = partsSnapshot(parts) !== partsSnapshot(saved.parts);
@@ -136,14 +152,14 @@ export default function EmailApp(props: AppProps) {
       .map((ev) => (Object.keys(checkEvent(cleanEvent(ev))).length ? draftEvent(ev) : cleanEvent(ev)))
       .filter((ev): ev is StoreEvent => Boolean(ev))
       .sort((a, b) => (sortedDates(a)[0]?.date ?? '').localeCompare(sortedDates(b)[0]?.date ?? ''))
-      .map((ev) => toBriefEvent(ev, send, SITE))
+      .map((ev) => toBriefEvent(ev, day, SITE))
       .filter(Boolean);
-  }, [events, draft, send]);
+  }, [events, draft, day]);
   const wallReady = Boolean(catalog) && wall.picks.length >= PICKS[0] && wall.picks.length <= PICKS[1];
   // The same email the Kit draft is made from (page-email.mjs), so Kit gets what the page shows
   const { brief, sections } = useMemo(
-    () => pageEmail({ sale, wall, parts, photos: photosById, kids: props.kids, catalog, events: shownEvents, impact: props.impact, send, site: SITE }),
-    [sale, wall, parts, photosById, catalog, shownEvents, send],
+    () => pageEmail({ sale, wall, parts, photos: photosById, kids: props.kids, catalog, events: shownEvents, impact: props.impact, send: day, site: SITE }),
+    [sale, wall, parts, photosById, catalog, shownEvents, day],
   );
 
   const fold = fit.small && fit.phone ? Math.max(fit.small.buttonAt, fit.phone.buttonAt) : null;
@@ -279,15 +295,15 @@ export default function EmailApp(props: AppProps) {
     photos: photosById,
     kids: props.kids,
     catalog,
-    send,
+    send: day,
     check,
     checkWall,
     checkParts,
-    sale: savedSpecial && !Object.keys(check(savedSpecial, send)).length ? draftSale(savedSpecial) : null,
+    sale: savedSpecial && !Object.keys(check(savedSpecial, day)).length ? draftSale(savedSpecial) : null,
   });
   // Unsaved changes are saved first, so what counts is what's on the page once it saves
   const kitTodo = dirty
-    ? kitProblems({ special: form.kind ? special : null, wall: wall.picks.length ? wall : null, parts, photos: photosById, kids: props.kids, catalog, send, check, checkWall, checkParts, sale: saleOk ? sale : null })
+    ? kitProblems({ special: form.kind ? special : null, wall: wall.picks.length ? wall : null, parts, photos: photosById, kids: props.kids, catalog, send: day, check, checkWall, checkParts, sale: saleOk ? sale : null })
     : toKit;
   const story = parts.story;
   const kid = props.kids.find((k) => k.slug === parts.kid) ?? props.kids[0];
@@ -319,7 +335,7 @@ export default function EmailApp(props: AppProps) {
             {tabs.map((w) => (
               <a class="em-week" href={`/admin/email/?send=${w.send}`} aria-current={w.send === send ? 'page' : undefined}>
                 <span class="em-week-day">{w.label}</span>
-                <span class="em-week-state">{w.sale || w.products ? [w.sale ? 'Sale' : '', w.products ? `${w.products} products` : ''].filter(Boolean).join(' · ') : 'Not started'}</span>
+                <span class="em-week-state">{weekState(w.send === send ? { ...w, kitAt: kitSend?.sendAt ?? null } : w)}</span>
               </a>
             ))}
           </nav>
@@ -394,7 +410,7 @@ export default function EmailApp(props: AppProps) {
           </Section>
 
           <Section n={5} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={inEmail ? 'ok' : 'todo'}>
-            <Events events={events} setEvents={setEvents} draft={draft} setDraft={setDraft} sendDate={send} sendLabel={label} today={today} />
+            <Events events={events} setEvents={setEvents} draft={draft} setDraft={setDraft} sendDate={day} sendLabel={sendLabel(day)} today={today} />
           </Section>
 
           <Section n={6} id="em-charity" locked={locked} title="The charity" state={charityState.state} tone={charityState.tone}>
@@ -409,6 +425,10 @@ export default function EmailApp(props: AppProps) {
             <Send
               send={send}
               label={label}
+              day={day}
+              days={days}
+              setDay={setDay}
+              today={today}
               todo={kitTodo}
               dirty={dirty}
               saving={saving}

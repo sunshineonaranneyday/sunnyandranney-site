@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
 import { checkParts, cleanParts } from '@/lib/sunny-side/parts.mjs';
 import { photosByIds } from '@/lib/sunny-side/photo-store.mjs';
-import { check, clean, draftSale, forKind, isSendDate, sendLabel } from '@/lib/sunny-side/special.mjs';
+import { check, clean, draftSale, forKind, isSendDate, sendLabel, sendPassed } from '@/lib/sunny-side/special.mjs';
 import { checkWall, cleanWall } from '@/lib/sunny-side/wall.mjs';
 import { clearWeek, putWeek } from '@/lib/sunny-side/week-store.mjs';
 import { STORE_TIME_ZONE, localDate } from '@/lib/time-clock/hours.mjs';
@@ -16,7 +16,7 @@ const who = (email: string) => email.split('@')[0].replace(/^./, (c) => c.toUppe
 function sendOf(body: Record<string, unknown> | null): string | Response {
   const send = body?.send;
   if (!isSendDate(send)) return json({ error: 'Pick one of the Tuesday emails.' }, 400);
-  if ((send as string) < localDate(new Date().toISOString())) return json({ error: `The ${sendLabel(send as string)} email has already gone out.` }, 409);
+  if (sendPassed(send, localDate(new Date().toISOString()))) return json({ error: `The days for the ${sendLabel(send as string)} email have passed.` }, 409);
   return send as string;
 }
 

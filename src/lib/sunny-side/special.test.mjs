@@ -8,15 +8,20 @@ import {
   draftSale,
   forKind,
   isSendDate,
+  isSendDay,
   nextSend,
   previewBrief,
+  sendDays,
   sendLabel,
+  sendPassed,
   summary,
   termsLine,
   toSale,
+  thisWeeksSend,
   typeset,
   upcomingSends,
 } from './special.mjs';
+import { WORKWEEK_START_DAY } from '../time-clock/hours.mjs';
 import { impactFromPage } from './impact.mjs';
 
 const SEND = '2026-11-17';
@@ -256,11 +261,28 @@ test('the email goes out on Tuesdays', () => {
   assert.equal(nextSend('2026-11-11'), '2026-11-17');
   assert.equal(nextSend('2026-11-17'), '2026-11-17');
   assert.equal(nextSend('2026-11-15'), '2026-11-17');
-  assert.deepEqual(upcomingSends('2026-11-11', 3), ['2026-11-17', '2026-11-24', '2026-12-01']);
+  // The page lists this week's email until its Saturday, so one that missed Tuesday can still go
+  assert.deepEqual(upcomingSends('2026-11-11', 3), ['2026-11-10', '2026-11-17', '2026-11-24']);
+  assert.deepEqual(upcomingSends('2026-11-15', 2), ['2026-11-17', '2026-11-24']);
   assert.equal(isSendDate('2026-11-17'), true);
   assert.equal(isSendDate('2026-11-18'), false);
   assert.equal(isSendDate('2026-13-01'), false);
   assert.equal(sendLabel('2026-11-17'), 'Tue, Nov 17');
+});
+
+test('an email can go any day of its week, Sunday to Saturday like the store’s schedule; Tuesday is the usual one', () => {
+  assert.equal(WORKWEEK_START_DAY, 0, 'the store’s week starts on Sunday (Gusto, the schedule)');
+  assert.deepEqual(sendDays('2026-11-17'), ['2026-11-15', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19', '2026-11-20', '2026-11-21']);
+  // Every day belongs to exactly one email, so they go out in order
+  const days = [...sendDays('2026-11-10'), ...sendDays('2026-11-17'), ...sendDays('2026-11-24')];
+  assert.equal(new Set(days).size, 21);
+  assert.deepEqual([...days].sort(), days);
+  for (const d of days) assert.ok(sendDays(thisWeeksSend(d)).includes(d), d);
+  assert.equal(isSendDay('2026-11-17', '2026-11-21'), true);
+  assert.equal(isSendDay('2026-11-17', '2026-11-22'), false);
+  assert.equal(isSendDay('2026-11-18', '2026-11-18'), false, 'only a Tuesday names an email');
+  assert.equal(sendPassed('2026-11-17', '2026-11-21'), false);
+  assert.equal(sendPassed('2026-11-17', '2026-11-22'), true);
 });
 
 // ─── The charity's section ───────────────────────────────────────────
