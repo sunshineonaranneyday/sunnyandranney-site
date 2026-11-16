@@ -1,4 +1,5 @@
 /** @jsxImportSource preact */
+import { plain } from '@/lib/sunny-side/email.mjs';
 import { PART_LIMITS, linesOf } from '@/lib/sunny-side/parts.mjs';
 import { type Parts, fieldId } from './model';
 import { TextField } from './parts';
@@ -9,7 +10,6 @@ import { TextField } from './parts';
  */
 export function Subject({ parts, setParts, sale, shown }: { parts: Parts; setParts: (change: (p: Parts) => Parts) => void; sale: { kind?: string } | null; shown: (key: string) => string | undefined }) {
   const lines = sale ? linesOf(parts, sale) : null;
-  const clean = (t: string) => t.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
   return (
     <div class="em-subject">
       <TextField
@@ -34,8 +34,8 @@ export function Subject({ parts, setParts, sale, shown }: { parts: Parts; setPar
       {lines && parts.subject && !shown('subject') && !shown('preheader') && (
         <div class="em-inbox" aria-label="How it reads in an inbox">
           <span class="em-inbox-from">Sunny &amp; Ranney</span>
-          <span class="em-inbox-subject">{clean(lines.subject)}</span>
-          <span class="em-inbox-pre">{clean(lines.preheader)}</span>
+          <span class="em-inbox-subject">{plain(lines.subject)}</span>
+          <span class="em-inbox-pre">{plain(lines.preheader)}</span>
         </div>
       )}
     </div>

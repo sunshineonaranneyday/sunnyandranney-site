@@ -6,7 +6,7 @@
  * events still ahead, and the charity's numbers read live. So a test is the email that goes out.
  */
 import type { APIContext } from 'astro';
-import { SITE, lines, render } from './email.mjs';
+import { SITE, lines, plain, render } from './email.mjs';
 import { eventsFrom } from './event-store.mjs';
 import { toBriefEvent } from './events.mjs';
 import { IMPACT_PAGE, impactFromPage } from './impact.mjs';
@@ -69,6 +69,7 @@ export async function weekEmail(context: APIContext, send: string, today: string
   }
   const events = (await eventsFrom(db, today)).map((r) => toBriefEvent(r.event, day, SITE)).filter(Boolean);
   const { brief, sections } = pageEmail({ sale, wall: week.wall, parts, photos, kids, catalog, events, impact, send: day, site: SITE });
+  // Kit takes the subject and preview line as plain text, so they go as characters, not HTML
   const { subject, preheader } = lines(brief);
-  return { ok: true, week, html: render(brief, sections), subject, preheader };
+  return { ok: true, week, html: render(brief, sections), subject: plain(subject), preheader: plain(preheader) };
 }

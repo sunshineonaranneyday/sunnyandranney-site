@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { FIRST_SCREEN, SITE } from '@/lib/sunny-side/email.mjs';
+import { FIRST_SCREEN, SITE, plain } from '@/lib/sunny-side/email.mjs';
 import { checkEvent, cleanEvent, sortedDates, toBriefEvent } from '@/lib/sunny-side/events.mjs';
 import { check, draftSale, sendDays, sendLabel } from '@/lib/sunny-side/special.mjs';
 import { kitProblems, pageEmail } from '@/lib/sunny-side/page-email.mjs';
@@ -316,8 +316,8 @@ export default function EmailApp(props: AppProps) {
       ? { state: `${kitTodo.length} to do`, tone: 'todo' as const }
       : { state: 'Ready', tone: 'ok' as const };
   const lines = saleOk ? linesOf(parts, sale) : { subject: parts.subject, preheader: parts.preheader };
-  const plainLine = (t: string) => t.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#8217;/g, '’');
-  const inbox = { subject: plainLine(lines.subject), preheader: plainLine(lines.preheader) };
+  // Exactly what Kit gets (week-email.ts): the same plain text
+  const inbox = { subject: plain(lines.subject), preheader: plain(lines.preheader) };
   const storyState = story.headline && story.body ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const } : { state: 'Not written', tone: 'todo' as const };
   const checks = [
     { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` },
