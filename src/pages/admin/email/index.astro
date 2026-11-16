@@ -5,9 +5,9 @@ import EmailApp from '@/components/email/EmailApp';
 import type { AppProps } from '@/components/email/model';
 import '@/components/email/email.css';
 import AdminBase from '@/layouts/AdminBase.astro';
-import { sendLabel, summary, upcomingSends } from '@/lib/sunny-side/special.mjs';
+import { emailToWorkOn, sendLabel, summary, upcomingSends } from '@/lib/sunny-side/special.mjs';
 import { eventsFrom } from '@/lib/sunny-side/event-store.mjs';
-import { pastWeeks, setKit, weeksBetween } from '@/lib/sunny-side/week-store.mjs';
+import { pastWeeks, setKit, weeksBetween, wentOut } from '@/lib/sunny-side/week-store.mjs';
 import { IMPACT_PAGE, impactFromPage } from '@/lib/sunny-side/impact.mjs';
 import { broadcastUrl, kitClient, statusOf, subscriberCount, usualTime } from '@/lib/sunny-side/kit.mjs';
 import { listRevealedKids } from '@/lib/sunny-side/kids.mjs';
@@ -73,9 +73,8 @@ const weeks = sends.map((s) => {
   const r = bySend.get(s);
   return { send: s, label: sendLabel(s), sale: r?.special ? summary(r.special) : '', products: r?.wall?.picks.length ?? 0, kitAt: r?.kit?.sendAt ?? null };
 });
-// Unless one was asked for: the first email that hasn't already gone out
-const gone = (s: string) => Boolean(bySend.get(s)?.kit) && Date.parse(bySend.get(s)!.kit!.sendAt) <= Date.now();
-const send = asked ?? sends.find((s) => !gone(s)) ?? sends[0];
+// Unless one was asked for: this week's email, or next week's once this week's has gone out
+const send = asked ?? emailToWorkOn(today, (s) => wentOut(bySend.get(s)));
 const record = bySend.get(send) ?? null;
 const parts = record?.parts ?? blankParts();
 // The library, plus any older photo this email still uses

@@ -287,6 +287,16 @@ export const isSendDay = (send, d) => isSendDate(send) && typeof d === 'string' 
 /** The email whose week today is in: until Saturday, an email can still go out late. */
 export const thisWeeksSend = (today) => addDays(today, -((day(today).getUTCDay() - WORKWEEK_START_DAY + 7) % 7) + ((SEND_WEEKDAY - WORKWEEK_START_DAY + 7) % 7));
 
+/**
+ * The email to work on: this week's, unless it has already gone out, then next week's. The email
+ * page opens on it and the Today page's task is about it, so the two always agree.
+ * @param {string} today @param {(send: string) => boolean} wentOut
+ */
+export function emailToWorkOn(today, wentOut) {
+  const first = thisWeeksSend(today);
+  return wentOut(first) ? addDays(first, 7) : first;
+}
+
 /** True once every day the email could go has passed. */
 export const sendPassed = (send, today) => sendDays(send)[6] < today;
 

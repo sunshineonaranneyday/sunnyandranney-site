@@ -8,6 +8,7 @@ import {
   draftSale,
   forKind,
   isSendDate,
+  emailToWorkOn,
   isSendDay,
   nextSend,
   previewBrief,
@@ -283,6 +284,14 @@ test('an email can go any day of its week, Sunday to Saturday like the store’s
   assert.equal(isSendDay('2026-11-18', '2026-11-18'), false, 'only a Tuesday names an email');
   assert.equal(sendPassed('2026-11-17', '2026-11-21'), false);
   assert.equal(sendPassed('2026-11-17', '2026-11-22'), true);
+});
+
+test('the email to work on is this week’s until it has gone out, then next week’s', () => {
+  const none = () => false;
+  assert.equal(emailToWorkOn('2026-11-16', none), '2026-11-17');
+  assert.equal(emailToWorkOn('2026-11-19', none), '2026-11-17', 'missed its Tuesday: it can still go by Saturday');
+  assert.equal(emailToWorkOn('2026-11-19', (s) => s === '2026-11-17'), '2026-11-24');
+  assert.equal(emailToWorkOn('2026-11-22', none), '2026-11-24');
 });
 
 // ─── The charity's section ───────────────────────────────────────────
