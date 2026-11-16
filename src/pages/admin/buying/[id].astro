@@ -347,7 +347,7 @@ const editable = po?.status === 'draft';
   .receipts li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.75rem 0; border-top: 1px solid var(--line); }
   .receipts li:first-child { border-top: 0; padding-top: 0; }
   @media print {
-    :global(.sidebar), :global(.tabbar), .no-print, .back { display: none !important; }
+    :global(.sidebar), .no-print, .back { display: none !important; }
     :global(.main) { margin: 0 !important; }
     :global(.card), :global(.stat) { box-shadow: none !important; break-inside: avoid; }
   }

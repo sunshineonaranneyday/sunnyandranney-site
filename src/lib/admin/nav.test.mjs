@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
-import { CADENCE, ICONS, PHONE_TABS, SIDEBAR, allLinks, currentHref, navFor, phoneNav, sidebarHeight } from './nav.mjs';
+import * as navModule from './nav.mjs';
+import { CADENCE, ICONS, SIDEBAR, allLinks, currentHref, navFor, sidebarHeight } from './nav.mjs';
 
 const PAGES = new URL('../../pages/', import.meta.url);
 const LAYOUT = readFileSync(new URL('../../layouts/AdminBase.astro', import.meta.url), 'utf8');
@@ -36,10 +37,12 @@ for (const [who, signIn] of Object.entries(PEOPLE)) {
     );
   });
 
-  test(`${who}: every link has its own icon, so the phone's More sheet never shows two alike`, () => {
-    for (const link of links) assert.ok(ICONS[link.icon], `${link.label} uses "${link.icon}", which isn't an icon`);
-    const icons = links.map((link) => link.icon);
-    assert.deepEqual(icons, [...new Set(icons)], `two of the ${who}'s links share an icon`);
+  test(`${who}: every page has its own icon, and a sub-page none, lined up under its page's label`, () => {
+    const pages = nav.sections.flatMap((section) => section.links);
+    for (const page of pages) assert.ok(ICONS[page.icon], `${page.label} uses "${page.icon}", which isn't an icon`);
+    const icons = pages.map((page) => page.icon);
+    assert.deepEqual(icons, [...new Set(icons)], `two of the ${who}'s pages share an icon`);
+    for (const page of pages) for (const child of page.children ?? []) assert.equal(child.icon, undefined, `${child.label} has an icon`);
   });
 
   test(`${who}: no page is listed twice`, () => {
@@ -69,12 +72,6 @@ for (const [who, signIn] of Object.entries(PEOPLE)) {
     assert.deepEqual(Object.keys(nav), ['sections']);
     for (const link of links) for (const child of link.children ?? []) assert.equal(child.children, undefined, `${child.label} has sub-pages`);
   });
-
-  test(`${who}: the phone has at most ${PHONE_TABS} tabs plus More, and every page is on it`, () => {
-    const phone = phoneNav(nav, undefined);
-    assert.ok(phone.tabs.length <= PHONE_TABS, `${phone.tabs.length} tabs`);
-    assert.equal(phone.tabs.length + phone.groups.flat().length, links.length);
-  });
 }
 
 test('every admin page lights up a link in the manager’s navigation', () => {
@@ -91,15 +88,21 @@ test('the layout sizes the sidebar from SIDEBAR, so the height model holds', () 
   }
 });
 
-test('on the phone, a sub-page lights up its page’s tab, or More', () => {
-  const nav = navFor(PEOPLE.owner);
-  assert.deepEqual(pick(phoneNav(nav, '/admin/hours/history/')), { activeTab: '/admin/hours/', moreActive: false });
-  assert.deepEqual(pick(phoneNav(nav, '/admin/payroll/gusto/')), { activeTab: '/admin/payroll/', moreActive: false });
-  assert.deepEqual(pick(phoneNav(nav, '/admin/buying/costs/')), { activeTab: undefined, moreActive: true });
-  assert.deepEqual(pick(phoneNav(nav, '/admin/')), { activeTab: '/admin/', moreActive: false });
+test('a phone gets the same sidebar, slid in from the menu button, not a second list of its own', () => {
+  assert.equal(navModule.phoneNav, undefined, 'nav.mjs still builds a separate phone list');
+  for (const gone of ['tabbar', 'tab-more', 'more-sheet']) assert.ok(!LAYOUT.includes(gone), `the layout still draws the ${gone}`);
+  // The button opens the panel that holds the sidebar's pages and the signed-in row.
+  assert.match(LAYOUT, /<button type="button" class="menu-button" aria-controls="side-menu" aria-expanded="false"/);
+  assert.match(LAYOUT, /<div class="side-menu" id="side-menu">\s*\{\s*sections\.length > 0 && \(\s*<nav class="side-nav"/);
+  // Beside the page on a wide screen, the panel draws no box of its own.
+  assert.match(LAYOUT, /@media \(min-width: 1024px\) \{[\s\S]*?\.side-menu \{ display: contents; \}/);
 });
 
-const pick = ({ activeTab, moreActive }) => ({ activeTab, moreActive });
+test('the closed menu never hides work waiting: the button says so and shows a dot', () => {
+  assert.match(LAYOUT, /const waiting = Object\.values\(marks\);/);
+  assert.match(LAYOUT, /aria-label=\{menuMark \? 'Menu, has work waiting' : 'Menu'\}/);
+  assert.match(LAYOUT, /\{menuMark && <span class="menu-mark" data-tone=\{menuMark\} aria-hidden="true" \/>\}/);
+});
 
 test('a sub-page lives under its parent, so the parent opens on it', () => {
   for (const section of navFor(PEOPLE.owner).sections) {
@@ -152,7 +155,7 @@ test('Gusto’s connection is under Payroll, the owner’s alone, not pinned to 
 test('search lists a page by its label, never with the work waiting beside it', () => {
   const shell = readFileSync(new URL('./shell.ts', import.meta.url), 'utf8');
   assert.match(shell, /querySelector\("\.side-label"\)/);
-  assert.equal((LAYOUT.match(/class="side-label"/g) ?? []).length, 3, 'the sidebar page, sub-page and More rows each wrap their label');
+  assert.equal((LAYOUT.match(/class="side-label"/g) ?? []).length, 2, 'the sidebar page and sub-page rows each wrap their label');
 });
 
 test('an email-only login sees the weekly email and nothing else', () => {

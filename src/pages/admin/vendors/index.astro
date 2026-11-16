@@ -21,7 +21,7 @@ if (!problem) {
 }
 const wholesale = vendors.filter((v) => v.kind === 'wholesale' && v.active);
 const coded = wholesale.filter((v) => v.code);
-const noLead = wholesale.filter((v) => v.lead_days === null);
+const noLead = wholesale.filter((v) => v.lead_days == null);
 const KIND = { wholesale: 'Wholesale', retail: 'Bought retail', house: 'House' } as const;
 ---
 
@@ -89,7 +89,7 @@ const KIND = { wholesale: 'Wholesale', retail: 'Bought retail', house: 'House' }
                   <tr
                     data-edit={v.id}
                     data-search={[v.name, v.code, ...v.aliases, v.contact_name, v.email].filter(Boolean).join(' ').toLowerCase()}
-                    data-missing={v.kind === 'wholesale' && v.active && v.lead_days === null ? '1' : '0'}
+                    data-missing={v.kind === 'wholesale' && v.active && v.lead_days == null ? '1' : '0'}
                     class:list={{ inactive: !v.active }}
                   >
                     <td>
@@ -100,11 +100,11 @@ const KIND = { wholesale: 'Wholesale', retail: 'Bought retail', house: 'House' }
                           .join(' · ')}
                       </div>
                     </td>
-                    <td>{v.code ? <span class="code">{v.code}</span> : <span class="muted">—</span>}</td>
-                    <td class:list={['num', { gap: v.kind === 'wholesale' && v.lead_days === null }]}>{v.lead_days === null ? 'Not set' : `${v.lead_days} days`}</td>
-                    <td class="num">{v.terms_days === null ? '—' : `Net ${v.terms_days}`}</td>
-                    <td class="num">{v.minimum_order_cents === null ? '—' : money(v.minimum_order_cents, { whole: true })}</td>
-                    <td>{v.contact_name || v.email || v.phone || <span class="muted">—</span>}</td>
+                    <td data-label="Code" class:list={{ unset: !v.code }}>{v.code ? <span class="code">{v.code}</span> : <span class="muted">—</span>}</td>
+                    <td data-label="Lead time" class:list={['num', { gap: v.kind === 'wholesale' && v.lead_days == null }]}>{v.lead_days == null ? 'Not set' : `${v.lead_days} days`}</td>
+                    <td data-label="Terms" class:list={['num', { unset: v.terms_days == null }]}>{v.terms_days == null ? '—' : `Net ${v.terms_days}`}</td>
+                    <td data-label="Minimum" class:list={['num', { unset: v.minimum_order_cents == null }]}>{v.minimum_order_cents == null ? '—' : money(v.minimum_order_cents, { whole: true })}</td>
+                    <td data-label="Contact" class:list={{ unset: !(v.contact_name || v.email || v.phone) }}>{v.contact_name || v.email || v.phone || <span class="muted">—</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -245,4 +245,30 @@ const KIND = { wholesale: 'Wholesale', retail: 'Bought retail', house: 'House' }
   dialog { width: min(560px, calc(100vw - 2rem)); }
   .three { grid-template-columns: 1fr 1fr 1fr; }
   @media (max-width: 480px) { .three { grid-template-columns: 1fr; } }
+  /* A phone lists each vendor as a block: the name, then the facts it has, labelled, two to a row,
+     so no column is off the edge of a sideways scroll. Lead time always shows: "Not set" is a job. */
+  @media (max-width: 640px) {
+    /* The column names stay for screen readers; each fact carries its own on screen. */
+    .vendors thead tr { display: block; padding: 0; border: 0; }
+    .vendors th { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; padding: 0; border: 0; }
+    .vendors tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.625rem 1rem; padding: 0.875rem 0; border-bottom: 1px solid var(--line); }
+    .vendors tbody tr:last-child { border-bottom: 0; padding-bottom: 0; }
+    .vendors td { display: block; min-width: 0; padding: 0; border: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+    .vendors td:first-child { grid-column: 1 / -1; }
+    /* Off screen but still in the row, so a screen reader keeps each fact under its own column. */
+    .vendors td.unset { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    /* The label is for eyes; a screen reader already hears the column's name (the empty alt text
+       after the slash keeps it from hearing it twice; a browser without it shows the label alone). */
+    .vendors td[data-label]::before {
+      content: attr(data-label);
+      content: attr(data-label) / '';
+      display: block;
+      margin-bottom: 0.125rem;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+    }
+  }
 </style>
