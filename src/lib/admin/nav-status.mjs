@@ -2,8 +2,9 @@
  * Work waiting, shown on the sidebar link where it's done:
  *
  *  - Hours: shifts to review, counted by the rules the Today page lists them.
- *  - Weekly email: when the coming email still needs its sale or products, how
- *    long until it goes, by the rule the Today page asks it.
+ *  - Weekly email: when the email to work on (this week's until it has gone out,
+ *    then next week's: emailToWorkOn) still needs its sale or products, how long
+ *    until its Tuesday, by the rule the Today page asks it.
  *  - Sales tax: a month ready to file, how long until it's due, by the rule the
  *    Sales tax page shows it.
  *
@@ -18,7 +19,8 @@
  */
 
 import { REMIND_DAYS, RECENT_MONTHS, toFileOf } from '../sales-tax/status.mjs';
-import { emailNeeds, nextSend, sendLabel } from '../sunny-side/special.mjs';
+import { emailNeeds, emailToWorkOn, sendLabel, thisWeeksSend } from '../sunny-side/special.mjs';
+import { wentOut } from '../sunny-side/week-store.mjs';
 import { addDays, localDate, localInputToUtc, workweekStart } from '../time-clock/hours.mjs';
 import { hoursToReview } from './today.mjs';
 
@@ -51,13 +53,14 @@ const days = (from, to) => Math.round((Date.parse(to) - Date.parse(from)) / 864e
  * undefined and gets no mark; a week with no row yet is null and needs everything.
  * @param {object} input
  * @param {Array<object>} [input.entries] open and unapproved shifts (HOURS_SQL)
- * @param {{ special?: unknown, wall?: unknown } | null} [input.week] the coming email's row
+ * @param {{ special?: unknown, wall?: unknown } | null} [input.week] the row of the email to work on
+ * @param {string} [input.send] which email that is (emailToWorkOn); this week's when not given
  * @param {Array<{ month: string, state: string, filed_at: string | null }>} [input.taxMonths] RECENT_MONTHS
  * @param {string} input.now ISO instant
  * @param {string} [input.myEmail]
  * @returns {NavStatus}
  */
-export function navStatus({ entries, week, taxMonths, now, myEmail }) {
+export function navStatus({ entries, week, send, taxMonths, now, myEmail }) {
   /** @type {NavStatus} */
   const marks = {};
 
@@ -81,13 +84,13 @@ export function navStatus({ entries, week, taxMonths, now, myEmail }) {
 
   if (week !== undefined) {
     const today = localDate(now);
-    const send = nextSend(today);
+    const email = send ?? thisWeeksSend(today);
     const needs = emailNeeds(week);
     if (needs.length > 0) {
-      const left = days(today, send);
+      const left = days(today, email);
       marks['/admin/email/'] = {
         text: dueText(left),
-        spoken: `The ${sendLabel(send)} email needs ${needs.join(' and ')}`,
+        spoken: `The ${sendLabel(email)} email needs ${needs.join(' and ')}`,
         tone: left <= REMIND_DAYS ? 'alert' : 'plain',
       };
     }
@@ -136,10 +139,16 @@ export async function loadNavStatus(db, { now, myEmail }) {
         return undefined;
       },
     );
+  const thisWeek = thisWeeksSend(today);
   const [entries, weeks, taxMonths] = await Promise.all([
     read(db.prepare(HOURS_SQL).bind(since)),
-    read(db.prepare('SELECT special, wall FROM email_weeks WHERE send_date = ?').bind(nextSend(today))),
+    // This week's email and next week's in one read; the mark is about the one to work on. Every
+    // column, so a table from before the Kit columns were added still reads.
+    read(db.prepare('SELECT * FROM email_weeks WHERE send_date IN (?, ?)').bind(thisWeek, addDays(thisWeek, 7))),
     read(db.prepare(RECENT_MONTHS)),
   ]);
-  return navStatus({ entries, week: weeks && (weeks[0] ?? null), taxMonths, now, myEmail });
+  const row = (s) => weeks?.find((r) => r.send_date === s) ?? null;
+  const asWeek = (r) => r && { kit: r.kit_id && r.kit_send_at ? { sendAt: r.kit_send_at } : null };
+  const send = emailToWorkOn(today, (s) => wentOut(asWeek(row(s)), Date.parse(now)));
+  return navStatus({ entries, week: weeks && row(send), send, taxMonths, now, myEmail });
 }
