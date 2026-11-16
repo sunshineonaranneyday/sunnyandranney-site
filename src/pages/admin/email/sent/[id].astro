@@ -1,0 +1,94 @@
+---
+export const prerender = false;
+
+/**
+ * One email that went out, read-only, exactly as Kit sent it: its subject and preview line as an
+ * inbox shows them, when it went, and the email itself. Kit's report for it is a link away.
+ */
+
+import AdminBase from '@/layouts/AdminBase.astro';
+import { broadcastUrl, kitClient, sentEmail } from '@/lib/sunny-side/kit.mjs';
+
+const admin = Astro.locals.admin;
+if (admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
+
+const id = Astro.params.id ?? '';
+if (!/^\d{1,12}$/.test(id)) return Astro.redirect('/admin/email/sent/', 302);
+const env = Astro.locals.runtime.env;
+if (!env.KIT_API_KEY) return Astro.redirect('/admin/email/sent/', 302);
+
+let email: Awaited<ReturnType<typeof sentEmail>> = null;
+let problem: string | null = null;
+try {
+  email = await sentEmail(kitClient({ key: env.KIT_API_KEY, base: env.KIT_API_BASE || undefined }), id);
+} catch (err) {
+  problem = `${err instanceof Error ? err.message : 'Kit didn’t answer.'} Reload to try again.`;
+}
+if (!email && !problem) return Astro.redirect('/admin/email/sent/', 302);
+
+const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+// The page's JSON can't close its own script tag.
+const data = email ? JSON.stringify({ html: email.html }).replace(/</g, '\\u003c') : '';
+---
+
+<AdminBase title={email?.subject || 'Sent email'}>
+  <div class="sent-one">
+    <div class="page-header">
+      <div>
+        <p class="crumb"><a href="/admin/email/sent/">Sent emails</a></p>
+        <h1>{email ? email.subject || '(No subject)' : 'Sent email'}</h1>
+        {email && (
+          <p class="muted">
+            {email.status === 'sending' ? 'Sending now, from' : 'Sent'} {when.format(new Date(email.sentAt))}
+          </p>
+        )}
+      </div>
+      {email && (
+        <div class="page-actions">
+          <a class="btn" href={broadcastUrl(email.id)} target="_blank" rel="noopener noreferrer">Open in Kit</a>
+        </div>
+      )}
+    </div>
+
+    {problem && (
+      <div class="notice" role="alert">
+        <div>{problem}</div>
+      </div>
+    )}
+
+    {email && (
+      <>
+        <section class="card inbox" aria-label="How it showed in the inbox">
+          <p class="inbox-from">Sunny &amp; Ranney</p>
+          <p class="inbox-subject">{email.subject || '(No subject)'}</p>
+          {email.preheader && <p class="inbox-pre">{email.preheader}</p>}
+        </section>
+        <section class="card shown">
+          <iframe id="sent-frame" title={`The email: ${email.subject}`} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
+        </section>
+        <script type="application/json" id="sent-data" set:html={data} />
+      </>
+    )}
+  </div>
+</AdminBase>
+
+<script>
+  // Imports keep this script bundled: the admin's Content-Security-Policy blocks inline scripts.
+  import { showSent } from '@/components/email/sent';
+
+  showSent();
+</script>
+
+<style>
+  .sent-one { max-width: 880px; }
+  .crumb { font-size: 0.8125rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .crumb a { color: var(--ink-3); text-decoration: none; }
+  .crumb a:hover { color: var(--ink); text-decoration: underline; }
+  .page-header h1 { overflow-wrap: anywhere; }
+  .inbox { display: grid; gap: 0.125rem; padding: 1rem 1.25rem; }
+  .inbox-from { font-size: 0.8125rem; font-weight: 700; color: var(--ink-3); }
+  .inbox-subject { font-weight: 700; overflow-wrap: anywhere; }
+  .inbox-pre { font-size: 0.9375rem; color: var(--ink-2); overflow-wrap: anywhere; }
+  .shown { padding: 0; overflow: hidden; }
+  .shown iframe { display: block; width: 100%; height: 900px; border: 0; background: #fff; }
+</style>

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { FIRST_SCREEN, SITE } from '@/lib/sunny-side/email.mjs';
 import { checkEvent, cleanEvent, sortedDates, toBriefEvent } from '@/lib/sunny-side/events.mjs';
-import { check, draftSale, sendDays, sendLabel, summary } from '@/lib/sunny-side/special.mjs';
+import { check, draftSale, sendDays, sendLabel } from '@/lib/sunny-side/special.mjs';
 import { kitProblems, pageEmail } from '@/lib/sunny-side/page-email.mjs';
 import { blankParts, checkParts, linesOf } from '@/lib/sunny-side/parts.mjs';
 import { PICKS, checkWall } from '@/lib/sunny-side/wall.mjs';
@@ -19,7 +19,6 @@ import {
   type SaleForm,
   type StoreEvent,
   type Wall,
-  type WeekTab,
   at,
   fieldId,
   partsSnapshot,
@@ -42,7 +41,7 @@ import { Subject } from './Subject';
 
 const blankWall = (): Wall => ({ label: '', headline: '', picks: [], arranged: 'auto' });
 /** The order errors are listed in: the page's order, top to bottom. */
-const ORDER = ['kind', 'headline', 'tiers', 'percent', 'what', 'ends', 'cta', 'link', 'label', 'details', 'picks', 'wall', 'photos', 'story', 'mission', 'subject', 'preheader'];
+const ORDER = ['kind', 'headline', 'tiers', 'percent', 'ends', 'picks', 'wall', 'photos', 'story', 'mission', 'subject', 'preheader'];
 
 /** An event as the preview draws it while it's still being typed: what's missing is filled in or left out. */
 function draftEvent(ev: StoreEvent): StoreEvent | null {
@@ -52,18 +51,11 @@ function draftEvent(ev: StoreEvent): StoreEvent | null {
   return { ...ev, id: ev.id || 'new-event', title: ev.title || 'Your event', when: ev.when || 'What’s on', dates };
 }
 
-/** A week tab's line: where its email stands in Kit, else what's set. */
-function weekState(w: WeekTab) {
-  if (w.kitAt) return Date.parse(w.kitAt) <= Date.now() ? 'Sent' : `Scheduled ${tabWhen.format(new Date(w.kitAt))}`;
-  return w.sale || w.products ? [w.sale ? 'Sale' : '', w.products ? `${w.products} products` : ''].filter(Boolean).join(' · ') : 'Not started';
-}
-
 /** "YYYY-MM-DD" in the store's time zone. */
 const easternDay = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(iso));
-const tabWhen = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', hour: 'numeric', minute: '2-digit' });
 
 export default function EmailApp(props: AppProps) {
-  const { send, label, today, others } = props;
+  const { send, label, today, last } = props;
   // ── The week: sale and products, saved together ──
   const [form, setForm] = useState<SaleForm>(() => saleFormOf(props.record?.special ?? null));
   const [wall, setWallState] = useState<Wall>(() => props.record?.wall ?? blankWall());
@@ -86,7 +78,6 @@ export default function EmailApp(props: AppProps) {
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [tabs, setTabs] = useState(props.weeks);
   // ── The shop's products and the store's events ──
   const [catalog, setCatalog] = useState<Map<string, Product> | null>(null);
   const [collections, setCollections] = useState<Catalog['collections']>([]);
@@ -204,7 +195,6 @@ export default function EmailApp(props: AppProps) {
     }
     setVersion({ updatedAt: res.body.updatedAt, updatedBy: res.body.updatedBy });
     setSaved({ form, wall, parts });
-    setTabs((t) => t.map((w) => (w.send === send ? { ...w, sale: form.kind ? summary(special) : '', products: wall.picks.length } : w)));
     toast(`Saved the ${label} email`);
     return true;
   }
@@ -223,7 +213,6 @@ export default function EmailApp(props: AppProps) {
     setTouched({});
     setAttempted(false);
     setConfirmClear(false);
-    setTabs((t) => t.map((w) => (w.send === send ? { ...w, sale: '', products: 0 } : w)));
     toast(`Cleared the ${label} email`);
   }
 
@@ -236,13 +225,15 @@ export default function EmailApp(props: AppProps) {
     setProblem(null);
   }
 
-  const startFrom = (other: string) => {
-    const o = others.find((x) => x.send === other);
-    if (!o) return;
-    set({ ...saleFormOf(o.special), ends: '' });
+  /** Last week's sale as this week's, with its last day left to set (a sale with no discount has none). */
+  const startFromLast = () => {
+    if (!last) return;
+    set({ ...saleFormOf(last.special), ends: '' });
     setTouched({});
     setAttempted(false);
-    toast(`Copied the ${o.label} special. Set its last day, then save.`);
+    const discount = last.special.kind !== 'headline';
+    window.setTimeout(() => document.getElementById(fieldId(discount ? 'ends' : 'headline'))?.focus(), 0);
+    toast(discount ? `Started from the ${last.label} sale. Set its last day.` : `Started from the ${last.label} headline.`);
   };
 
   // Leaving with unsaved changes asks first; ⌘S / Ctrl+S saves
@@ -320,7 +311,7 @@ export default function EmailApp(props: AppProps) {
   const inbox = { subject: plainLine(lines.subject), preheader: plainLine(lines.preheader) };
   const storyState = story.headline && story.body ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const } : { state: 'Not written', tone: 'todo' as const };
   const checks = [
-    { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen.` },
+    { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` },
     { ok: fold === null ? null : !spill, text: spill ? 'Something is too wide for a small phone.' : 'Everything fits a small phone (320 px).' },
     ...(wallReady && fold !== null ? [{ ok: !longNames.size, text: longNames.size ? `${longNames.size} product name${longNames.size === 1 ? '' : 's'} run past two lines.` : 'Every product name fits two lines.' }] : []),
     ...(!wallReady ? [{ ok: null, text: n ? `Pick ${Math.max(PICKS[0] - n, 0) || 'no more than 9'} more to see the products here.` : `The products show here once ${PICKS[0]} are picked.` }] : []),
@@ -331,14 +322,12 @@ export default function EmailApp(props: AppProps) {
       <div class="em-bar">
         <div class="em-bar-title">
           <h1>Weekly email</h1>
-          <nav class="em-weeks" aria-label="Which email">
-            {tabs.map((w) => (
-              <a class="em-week" href={`/admin/email/?send=${w.send}`} aria-current={w.send === send ? 'page' : undefined}>
-                <span class="em-week-day">{w.label}</span>
-                <span class="em-week-state">{weekState(w.send === send ? { ...w, kitAt: kitSend?.sendAt ?? null } : w)}</span>
-              </a>
-            ))}
-          </nav>
+          <p class="em-which">
+            <span>
+              The <strong>{label}</strong> email
+            </span>
+            <a href="/admin/email/sent/">Sent emails</a>
+          </p>
         </div>
         <div class="em-bar-save">
           <span class="em-status" aria-live="polite">
@@ -394,7 +383,7 @@ export default function EmailApp(props: AppProps) {
           )}
 
           <Section n={1} id="em-sale" locked={locked} title="The sale" state={saleState.state} tone={saleState.tone}>
-            <Sale form={form} special={special} errors={saleErrors} shown={shownSale} set={set} touch={touch} others={others} startFrom={startFrom} />
+            <Sale form={form} special={special} errors={saleErrors} shown={shownSale} set={set} touch={touch} last={last} startFromLast={startFromLast} />
           </Section>
 
           <Section n={2} id="em-products" locked={locked} title="The products" state={wallState.state} tone={wallState.tone}>

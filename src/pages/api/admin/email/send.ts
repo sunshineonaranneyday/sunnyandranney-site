@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
 import { broadcastUrl, cancel, kitClient, schedule, statusOf, templateFor } from '@/lib/sunny-side/kit.mjs';
-import { isSendDate, isSendDay, sendLabel, sendPassed } from '@/lib/sunny-side/special.mjs';
-import { getWeek, setKit } from '@/lib/sunny-side/week-store.mjs';
+import { isSendDate, isSendDay, sendLabel } from '@/lib/sunny-side/special.mjs';
+import { getWeek, otherWeek, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { weekEmail } from '@/lib/sunny-side/week-email';
 import { localDate, localInputToUtc } from '@/lib/time-clock/hours.mjs';
 
@@ -11,11 +11,13 @@ export const prerender = false;
 /** At least this far ahead, so there's time to cancel and Kit has time to queue it. */
 const LEAD_MS = 10 * 60 * 1000;
 
-function sendOf(body: Record<string, unknown> | null): string | Response {
+/** The send date from a request, or a response saying why it can't be sent or cancelled: only the email being worked on can (weekToWorkOn). */
+async function sendOf(db: D1Database, body: Record<string, unknown> | null): Promise<string | Response> {
   const send = body?.send;
-  if (!isSendDate(send)) return json({ error: 'Pick one of the Tuesday emails.' }, 400);
-  if (sendPassed(send, localDate(new Date().toISOString()))) return json({ error: `The days for the ${sendLabel(send as string)} email have passed.` }, 409);
-  return send as string;
+  if (!isSendDate(send)) return json({ error: 'Invalid request' }, 400);
+  const { send: work } = await weekToWorkOn(db, localDate(new Date().toISOString()));
+  const refused = otherWeek(send as string, work);
+  return refused ? json({ error: refused }, 409) : (send as string);
 }
 
 /**
@@ -29,7 +31,8 @@ export const PUT: APIRoute = async (context) => {
   const env = context.locals.runtime.env;
   if (!env.KIT_API_KEY) return json({ error: 'The site isn’t connected to Kit: KIT_API_KEY isn’t set.' }, 503);
   const body = await readJson(context.request);
-  const send = sendOf(body);
+  const db = dbOf(context);
+  const send = await sendOf(db, body);
   if (send instanceof Response) return send;
   const today = localDate(new Date().toISOString());
   const day = typeof body?.day === 'string' ? body.day : send;
@@ -39,7 +42,6 @@ export const PUT: APIRoute = async (context) => {
   if (!sendAt) return json({ error: 'Pick a time for it to go.' }, 400);
   if (Date.parse(sendAt) < Date.now() + LEAD_MS) return json({ error: 'Pick a time at least 10 minutes from now.' }, 400);
 
-  const db = dbOf(context);
   const kit = kitClient({ key: env.KIT_API_KEY, base: env.KIT_API_BASE || undefined });
   const already = (await getWeek(db, send))?.kit;
   if (already) {
@@ -82,9 +84,9 @@ export const DELETE: APIRoute = async (context) => {
   const env = context.locals.runtime.env;
   if (!env.KIT_API_KEY) return json({ error: 'The site isn’t connected to Kit: KIT_API_KEY isn’t set.' }, 503);
   const body = await readJson(context.request);
-  const send = sendOf(body);
-  if (send instanceof Response) return send;
   const db = dbOf(context);
+  const send = await sendOf(db, body);
+  if (send instanceof Response) return send;
   const kitSend = (await getWeek(db, send))?.kit;
   if (!kitSend) return json({ ok: true });
   try {

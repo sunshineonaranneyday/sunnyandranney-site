@@ -1,10 +1,12 @@
 /**
  * The week's special: what Staci types in the admin, and how it becomes the email's offer
  * ===========================================================================
- * Staci picks one of three kinds and fills in only what that kind needs. clean() turns
- * what she typed into a special, check() says what's wrong in words she can act on (the
- * same rules in her browser and on the server), and toSale() makes the email's offer from
- * it, with the store's defaults for anything she left alone. No Node or browser APIs, so
+ * Staci picks one of three kinds and fills in only what changes week to week: the deal, a
+ * headline, the last day. Everything else the offer shows (its small label, the button's
+ * words and page, the fine print) is the store's, by kind (defaults), so there's nothing
+ * else to set (the store, 2026-11-16). clean() turns what she typed into a special, check()
+ * says what's wrong in words she can act on (the same rules in her browser and on the
+ * server), and toSale() makes the email's offer from it. No Node or browser APIs, so
  * the admin page, the API and the weekly build (scripts/sunny-side/build.mjs) share it.
  */
 
@@ -16,8 +18,8 @@ export const SEND_WEEKDAY = 2;
 
 export const KINDS = {
   tiers: { title: 'Spend more, save more', hint: 'Bigger discounts for bigger orders' },
-  percent: { title: 'Percent off', hint: 'One discount, like 20% off everything' },
-  headline: { title: 'A headline instead', hint: 'No discount this week: say what’s new' },
+  percent: { title: 'Percent off everything', hint: 'One discount on the whole order' },
+  headline: { title: 'No sale this week', hint: 'A headline instead, with no discount' },
 };
 
 /** The kinds that are a discount, so the email says where it counts and when it ends. */
@@ -30,26 +32,13 @@ export const isDiscount = (kind) => kind === 'tiers' || kind === 'percent';
  */
 export const EVERYWHERE = 'In the showroom and online.';
 
-/** Where the button can go. Anything else is a path on sunnyandranney.com. */
-export const LINKS = [
-  { path: '/shop/?sale=true', label: 'The sale page' },
-  { path: '/shop/?collection=new-arrivals', label: 'New arrivals' },
-  { path: '/shop/', label: 'The whole shop' },
-  { path: '/visit/', label: 'Plan your visit' },
-];
-
 /**
  * Lengths come from the email's layout: a headline over three lines on a small phone
- * would push the button off the first screen, a longer button label wouldn't fit on one
- * line, and four digits of spend can't be written short exactly unless they're round.
+ * would push the button off the first screen, and four digits of spend can't be written
+ * short exactly unless they're round.
  */
 export const LIMITS = {
   headline: 70,
-  what: 28,
-  label: 32,
-  cta: 22,
-  details: 140,
-  link: 200,
   percent: [1, 90],
   spend: [50, 50000],
   spendStep: 50,
@@ -58,22 +47,20 @@ export const LIMITS = {
 };
 
 /**
- * What each kind says when Staci leaves a field alone. A sale on the whole order (spend more,
- * save more, or a percent off everything) opens the whole shop: the sale page lists only the
- * marked-down items (7 in stock on Nov 11, 2026), so it would hide most of what the sale covers.
+ * What the offer says around the deal, by kind. Both sales count the whole order (spend more,
+ * save more, or a percent off everything), so the button opens the whole shop: the sale page lists
+ * only the marked-down items (7 in stock on Nov 11, 2026), so it would hide most of what the sale
+ * covers. A week with no sale points at what's new.
  */
-export function defaults(kind, what = '') {
-  if (kind === 'percent') {
-    const everything = /^everything\.?$/i.test(what.trim());
-    return { label: everything ? 'Storewide sale' : 'This week’s sale', cta: 'Shop the sale', link: everything ? '/shop/' : '/shop/?sale=true' };
-  }
+export function defaults(kind) {
+  if (kind === 'percent') return { label: 'Storewide sale', cta: 'Shop the sale', link: '/shop/' };
   if (kind === 'headline') return { label: 'This week', cta: 'See what’s new', link: '/shop/?collection=new-arrivals' };
   return { label: 'Spend more, save more', cta: 'Shop the sale', link: '/shop/' };
 }
 
 /** A fresh special of a kind: two empty tiers to start from, everything else blank. */
 export function blank(kind = 'tiers') {
-  return { kind, headline: '', tiers: [{ spend: null, percent: null }, { spend: null, percent: null }], percent: null, what: 'everything', label: '', cta: '', link: '', ends: '', details: '' };
+  return { kind, headline: '', tiers: [{ spend: null, percent: null }, { spend: null, percent: null }], percent: null, ends: '' };
 }
 
 const str = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
@@ -85,15 +72,11 @@ export function whole(v) {
   return /^\d+$/.test(t) ? Number(t) : null;
 }
 
-/** A link as a path on the site: "https://sunnyandranney.com/x" and "/x" both become "/x". */
-export function toPath(v) {
-  let t = str(v);
-  const site = t.match(/^https?:\/\/(www\.)?sunnyandranney\.com(\/.*)?$/i);
-  if (site) t = site[2] || '/';
-  return t;
-}
-
-/** What Staci typed, tidied: strings trimmed, numbers parsed, unknown fields dropped. Keeps every kind's fields. */
+/**
+ * What Staci typed, tidied: strings trimmed, numbers parsed, everything else dropped. Keeps every
+ * kind's fields. A special saved before 2026-11-16 may carry a label, button, link, fine print or
+ * "off what"; they're dropped here, so the email never shows something the page can't.
+ */
 export function clean(input) {
   const i = input && typeof input === 'object' ? input : {};
   const rows = Array.isArray(i.tiers) ? i.tiers : [];
@@ -102,22 +85,15 @@ export function clean(input) {
     headline: str(i.headline),
     tiers: rows.slice(0, 8).map((r) => ({ spend: whole(r?.spend), percent: whole(r?.percent) })),
     percent: whole(i.percent),
-    what: str(i.what),
-    label: str(i.label),
-    cta: str(i.cta),
-    link: toPath(i.link),
     ends: typeof i.ends === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(i.ends) ? i.ends : '',
-    details: str(i.details),
   };
 }
 
 /** Only the fields the special's kind uses, for saving. A headline week has no discount, so no terms. */
 export function forKind(s) {
-  const common = { kind: s.kind, label: s.label, cta: s.cta, link: s.link, details: s.details };
-  const terms = { ends: s.ends };
-  if (s.kind === 'tiers') return { ...common, ...terms, headline: s.headline, tiers: s.tiers };
-  if (s.kind === 'percent') return { ...common, ...terms, percent: s.percent, what: s.what };
-  return { ...common, headline: s.headline };
+  if (s.kind === 'tiers') return { kind: s.kind, headline: s.headline, tiers: s.tiers, ends: s.ends };
+  if (s.kind === 'percent') return { kind: s.kind, percent: s.percent, ends: s.ends };
+  return { kind: s.kind, headline: s.headline };
 }
 
 const money = (n) => '$' + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
@@ -170,15 +146,6 @@ export function check(s, send) {
     const [pLo, pHi] = LIMITS.percent;
     if (s.percent === null) e.percent = 'Add the percent off, like 20.';
     else if (s.percent < pLo || s.percent > pHi) e.percent = `Use a percent from ${pLo} to ${pHi}.`;
-    if (!s.what) e.what = 'Say what it’s off, like “everything” or “all rugs”.';
-    else tooLong('what', 'This');
-  }
-  tooLong('label', 'The small label');
-  tooLong('cta', 'The button');
-  tooLong('details', 'The fine print');
-  if (s.link) {
-    if (s.link.length > LIMITS.link) e.link = 'That link is too long.';
-    else if (!/^\/(?!\/)[^\s<>"]*$/.test(s.link)) e.link = 'Use a page on sunnyandranney.com, starting with /, like /shop/?sale=true.';
   }
   if (isDiscount(s.kind)) {
     if (!s.ends) e.ends = 'Add the last day of the sale. The email tells customers when it ends.';
@@ -215,14 +182,14 @@ export function termsLine(s) {
   return [EVERYWHERE, s.ends ? endsLine(s.ends) : ''].filter(Boolean).join(' ');
 }
 
-/** The email's offer (brief.sale) from a checked special. The fine print is the terms, then anything Staci added. */
+/** The email's offer (brief.sale) from a checked special: the deal, with the store's words around it and the terms as the fine print. */
 export function toSale(s) {
-  const d = defaults(s.kind, s.what);
-  const fine = [termsLine(s), s.details ? typeset(s.details) : ''].filter(Boolean).join(' ');
-  const sale = { kind: s.kind, name: typeset(s.label || d.label), cta: typeset(s.cta || d.cta), url: s.link || d.link };
+  const d = defaults(s.kind);
+  const sale = { kind: s.kind, name: typeset(d.label), cta: typeset(d.cta), url: d.link };
   if (s.kind === 'tiers') Object.assign(sale, { headline: typeset(s.headline), tiers: s.tiers.map((t) => [t.spend, t.percent]) });
-  if (s.kind === 'percent') Object.assign(sale, { percent: s.percent, what: typeset(/[.!?]$/.test(s.what) ? s.what : `${s.what}.`) });
+  if (s.kind === 'percent') Object.assign(sale, { percent: s.percent, what: 'everything.' });
   if (s.kind === 'headline') sale.headline = typeset(s.headline);
+  const fine = termsLine(s);
   if (fine) sale.details = fine;
   return sale;
 }
@@ -235,7 +202,6 @@ export function draftSale(s) {
   const kind = s.kind || 'tiers';
   const filled = { ...s, kind };
   if (kind !== 'percent' && !filled.headline) filled.headline = kind === 'tiers' ? 'Your headline' : 'Your headline goes here';
-  if (kind === 'percent' && !filled.what) filled.what = 'everything';
   if (filled.ends && !isDate(filled.ends)) filled.ends = '';
   const sale = toSale(filled);
   if (kind === 'tiers') {
@@ -250,7 +216,7 @@ export function draftSale(s) {
 /** One line for lists: "10% off $250+ · 15% off $500+" / "20% off everything" / the headline. */
 export function summary(s) {
   if (s.kind === 'tiers') return s.tiers.map((t) => `${t.percent}% off ${money(t.spend)}+`).join(' · ');
-  if (s.kind === 'percent') return `${s.percent}% off ${s.what}`;
+  if (s.kind === 'percent') return `${s.percent}% off everything`;
   return s.headline;
 }
 
@@ -295,15 +261,6 @@ export const thisWeeksSend = (today) => addDays(today, -((day(today).getUTCDay()
 export function emailToWorkOn(today, wentOut) {
   const first = thisWeeksSend(today);
   return wentOut(first) ? addDays(first, 7) : first;
-}
-
-/** True once every day the email could go has passed. */
-export const sendPassed = (send, today) => sendDays(send)[6] < today;
-
-/** This week's email and the ones after it. */
-export function upcomingSends(today, count = 4) {
-  const first = thisWeeksSend(today);
-  return Array.from({ length: count }, (_, k) => addDays(first, 7 * k));
 }
 
 /** "Tue, Nov 17" */

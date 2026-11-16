@@ -2,9 +2,9 @@ import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
 import { checkParts, cleanParts } from '@/lib/sunny-side/parts.mjs';
 import { photosByIds } from '@/lib/sunny-side/photo-store.mjs';
-import { check, clean, draftSale, forKind, isSendDate, sendLabel, sendPassed } from '@/lib/sunny-side/special.mjs';
+import { check, clean, draftSale, forKind, isSendDate } from '@/lib/sunny-side/special.mjs';
 import { checkWall, cleanWall } from '@/lib/sunny-side/wall.mjs';
-import { clearWeek, putWeek } from '@/lib/sunny-side/week-store.mjs';
+import { clearWeek, otherWeek, putWeek, scheduledRefusal, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { STORE_TIME_ZONE, localDate } from '@/lib/time-clock/hours.mjs';
 
 export const prerender = false;
@@ -12,12 +12,16 @@ export const prerender = false;
 const at = new Intl.DateTimeFormat('en-US', { timeZone: STORE_TIME_ZONE, weekday: 'short', hour: 'numeric', minute: '2-digit' });
 const who = (email: string) => email.split('@')[0].replace(/^./, (c) => c.toUpperCase());
 
-/** The send date from a request, or a response saying why it can't be changed. */
-function sendOf(body: Record<string, unknown> | null): string | Response {
+/**
+ * The send date from a request, or a response saying why it can't be changed: only the email being
+ * worked on can (weekToWorkOn), and not while it's scheduled in Kit (scheduledRefusal).
+ */
+async function sendOf(db: D1Database, body: Record<string, unknown> | null): Promise<string | Response> {
   const send = body?.send;
-  if (!isSendDate(send)) return json({ error: 'Pick one of the Tuesday emails.' }, 400);
-  if (sendPassed(send, localDate(new Date().toISOString()))) return json({ error: `The days for the ${sendLabel(send as string)} email have passed.` }, 409);
-  return send as string;
+  if (!isSendDate(send)) return json({ error: 'Invalid request' }, 400);
+  const { send: work, week } = await weekToWorkOn(db, localDate(new Date().toISOString()));
+  const refused = otherWeek(send as string, work) ?? scheduledRefusal(week);
+  return refused ? json({ error: refused }, 409) : (send as string);
 }
 
 function conflict(current: { updatedAt: string; updatedBy: string } | null | undefined) {
@@ -37,7 +41,8 @@ export const PUT: APIRoute = async (context) => {
   if (admin instanceof Response) return admin;
 
   const body = await readJson(context.request);
-  const send = sendOf(body);
+  const db = dbOf(context);
+  const send = await sendOf(db, body);
   if (send instanceof Response) return send;
   const since = body?.since;
   if (since !== null && typeof since !== 'string') return json({ error: 'Invalid request' }, 400);
@@ -45,7 +50,6 @@ export const PUT: APIRoute = async (context) => {
   const special = body?.special == null ? null : clean(body.special);
   const wall = body?.wall == null ? null : cleanWall(body.wall);
   const parts = body?.parts == null ? null : cleanParts(body.parts);
-  const db = dbOf(context);
   const photoIds = parts ? [parts.hero, ...parts.story.photos] : [];
   const photos = new Map((await photosByIds(db, photoIds)).map((p) => [p.id, p]));
   const sale = special && !Object.keys(check(special, send)).length ? draftSale(special) : null;
@@ -75,11 +79,12 @@ export const DELETE: APIRoute = async (context) => {
   if (admin instanceof Response) return admin;
 
   const body = await readJson(context.request);
-  const send = sendOf(body);
+  const db = dbOf(context);
+  const send = await sendOf(db, body);
   if (send instanceof Response) return send;
   if (typeof body?.since !== 'string') return json({ error: 'Invalid request' }, 400);
 
-  const cleared = await clearWeek(dbOf(context), { send, since: body.since });
+  const cleared = await clearWeek(db, { send, since: body.since });
   if (!cleared.ok) return conflict(cleared.current);
   return json({ ok: true });
 };

@@ -5,9 +5,9 @@ import EmailApp from '@/components/email/EmailApp';
 import type { AppProps } from '@/components/email/model';
 import '@/components/email/email.css';
 import AdminBase from '@/layouts/AdminBase.astro';
-import { emailToWorkOn, sendLabel, summary, upcomingSends } from '@/lib/sunny-side/special.mjs';
+import { sendLabel, summary } from '@/lib/sunny-side/special.mjs';
 import { eventsFrom } from '@/lib/sunny-side/event-store.mjs';
-import { pastWeeks, setKit, weeksBetween, wentOut } from '@/lib/sunny-side/week-store.mjs';
+import { pastWeeks, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { IMPACT_PAGE, impactFromPage } from '@/lib/sunny-side/impact.mjs';
 import { broadcastUrl, kitClient, statusOf, subscriberCount, usualTime } from '@/lib/sunny-side/kit.mjs';
 import { listRevealedKids } from '@/lib/sunny-side/kids.mjs';
@@ -20,13 +20,13 @@ import { localDate } from '@/lib/time-clock/hours.mjs';
 const admin = Astro.locals.admin;
 if (admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
 
-// This week's email and the three after it. This week's stays until its Saturday, so one that
-// missed its Tuesday can still go out (sendDays).
+// One email at a time: this week's until it has gone out, then next week's (weekToWorkOn). This
+// week's stays until its Saturday, so one that missed its Tuesday can still go out (sendDays). The
+// ones already sent are read-only, at /admin/email/sent/. An old address naming a week comes here.
+if (Astro.url.searchParams.has('send')) return Astro.redirect('/admin/email/', 302);
 const db = Astro.locals.runtime.env.DB;
 const today = localDate(new Date().toISOString());
-const sends = upcomingSends(today, 4);
-const asked = Astro.url.searchParams.get('send');
-if (asked && !sends.includes(asked)) return Astro.redirect('/admin/email/', 302);
+const { send, week: record } = await weekToWorkOn(db, today);
 
 /** The charity's numbers for the preview's impact strip, cached an hour; the Kit draft reads them fresh. */
 async function impactNow() {
@@ -57,9 +57,8 @@ async function kidsNow() {
   }
 }
 
-const [upcoming, past, events, testList, library, impact, kids, usual, subscribers] = await Promise.all([
-  weeksBetween(db, sends[0], sends[sends.length - 1]),
-  pastWeeks(db, sends[0], 12),
+const [past, events, testList, library, impact, kids, usual, subscribers] = await Promise.all([
+  pastWeeks(db, send, 1),
   eventsFrom(db, today),
   listPeople(db),
   listPhotos(db, 80),
@@ -68,14 +67,6 @@ const [upcoming, past, events, testList, library, impact, kids, usual, subscribe
   fromKit(() => usualTime(kit!)),
   fromKit(() => subscriberCount(kit!)),
 ]);
-const bySend = new Map(upcoming.map((r) => [r.send, r]));
-const weeks = sends.map((s) => {
-  const r = bySend.get(s);
-  return { send: s, label: sendLabel(s), sale: r?.special ? summary(r.special) : '', products: r?.wall?.picks.length ?? 0, kitAt: r?.kit?.sendAt ?? null };
-});
-// Unless one was asked for: this week's email, or next week's once this week's has gone out
-const send = asked ?? emailToWorkOn(today, (s) => wentOut(bySend.get(s)));
-const record = bySend.get(send) ?? null;
 const parts = record?.parts ?? blankParts();
 // The library, plus any older photo this email still uses
 const using = [parts.hero, ...parts.story.photos].filter((id) => id && !library.some((p) => p.id === id));
@@ -89,22 +80,16 @@ if (record?.kit && kitStatus?.status === 'gone') {
   record.kit = null;
 }
 const kitSend = record?.kit ? { ...record.kit, url: broadcastUrl(record.kit.id), status: kitStatus?.status ?? 'scheduled' } : null;
-// Any other saved special can be a starting point: the coming weeks first, then the last dozen sent.
-const others = [...upcoming.filter((r) => r.send !== send && r.special), ...past].map((r) => ({
-  send: r.send,
-  label: sendLabel(r.send),
-  summary: summary(r.special!),
-  special: r.special!,
-}));
+// The sale saved most recently before this one, usually last week's, to start from
+const last = past[0]?.special ? { label: sendLabel(past[0].send), summary: summary(past[0].special), special: past[0].special } : null;
 
 // The shared rules are plain JavaScript; the page's types say what they return
 const props = {
   send,
   label: sendLabel(send),
   today,
-  weeks,
   record: record ? { special: record.special, wall: record.wall, updatedAt: record.updatedAt, updatedBy: record.updatedBy } : null,
-  others,
+  last,
   events,
   // Who checks each email: the store's list, kept in D1, with whoever is signed in first
   test: { people: testPeople(testList, admin.email), me: admin.email.toLowerCase() },

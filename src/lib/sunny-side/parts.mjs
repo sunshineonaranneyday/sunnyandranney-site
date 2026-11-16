@@ -68,9 +68,17 @@ export function checkParts(p, { sale = null, photos = null, kids = null, ready =
   set('preheader', over(p.preheader, PART_LIMITS.preheader, 'The preview line'));
   if (ready && !p.subject) e.subject = 'Write the subject line: it’s what people see first in their inbox.';
   if (sale && !e.subject && !e.preheader) {
-    // The same check the build makes: no promise the offer doesn't give
+    // The same check the build makes: no promise the offer doesn't give. A week with no sale has
+    // nothing for {offer} or {upto} to write, which is said here, beside the field, never thrown.
     for (const [k, line] of [['subject', p.subject], ['preheader', p.preheader]]) {
-      const claims = offerClaims(fill(line, sale), sale, k);
+      let filled;
+      try {
+        filled = fill(line, sale);
+      } catch {
+        e[k] = `This week has no sale, so ${/\{upto\}/.test(line) ? '{upto}' : '{offer}'} has nothing to say. Take it out, or pick a sale.`;
+        continue;
+      }
+      const claims = offerClaims(filled, sale, k);
       if (claims.length) e[k] = `It says ${claims.join(' ')} Change the words, or use {offer} and the email writes the sale for you.`;
     }
   }
@@ -98,9 +106,14 @@ export function checkParts(p, { sale = null, photos = null, kids = null, ready =
 
 const fill = (line, sale) => fillLine(line, sale);
 
-/** The subject and preview line as they'll go out, {offer} and {upto} written from the sale. */
+/**
+ * The subject and preview line as they'll go out, {offer} and {upto} written from the sale. An empty
+ * preview line says the sale; in a week with no sale it stays empty, so the subject still goes out
+ * as written.
+ */
 export function linesOf(p, sale) {
-  const preheader = p.preheader || '{offer}';
+  const discount = sale?.kind === 'tiers' || sale?.kind === 'percent';
+  const preheader = p.preheader || (discount ? '{offer}' : '');
   try {
     return lines({ subject: p.subject, preheader, sale });
   } catch {

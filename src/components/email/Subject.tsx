@@ -7,7 +7,7 @@ import { TextField } from './parts';
  * The subject and preview line: what people see in their inbox before they open it. {offer} and
  * {upto} are written from the sale, so the lines can't promise more than it gives.
  */
-export function Subject({ parts, setParts, sale, shown }: { parts: Parts; setParts: (change: (p: Parts) => Parts) => void; sale: object | null; shown: (key: string) => string | undefined }) {
+export function Subject({ parts, setParts, sale, shown }: { parts: Parts; setParts: (change: (p: Parts) => Parts) => void; sale: { kind?: string } | null; shown: (key: string) => string | undefined }) {
   const lines = sale ? linesOf(parts, sale) : null;
   const clean = (t: string) => t.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
   return (
@@ -29,7 +29,7 @@ export function Subject({ parts, setParts, sale, shown }: { parts: Parts; setPar
         placeholder="{offer}"
         onInput={(v) => setParts((p) => ({ ...p, preheader: v }))}
         error={shown('preheader')}
-        hint="The grey line after the subject in most inboxes. Left empty, it says the sale."
+        hint={sale?.kind === 'headline' ? 'The grey line after the subject in most inboxes. With no sale this week, write one, or inboxes show the email’s first words.' : 'The grey line after the subject in most inboxes. Left empty, it says the sale.'}
       />
       {lines && parts.subject && !shown('subject') && !shown('preheader') && (
         <div class="em-inbox" aria-label="How it reads in an inbox">

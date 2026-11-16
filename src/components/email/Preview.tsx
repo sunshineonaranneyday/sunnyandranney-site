@@ -1,9 +1,7 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { FIRST_SCREEN, render } from '@/lib/sunny-side/email.mjs';
-
-/** The email's own font, served by the admin: its CSP keeps Google Fonts out. */
-const FONT = "<style>@font-face{font-family:'DM Sans';src:url('/fonts/DMSans-Variable.woff2') format('woff2');font-weight:100 1000;font-style:normal;}</style>";
+import { FONT, FONT_LINK } from './font';
 
 /** What the preview measures at a small phone's and a phone's width, by the rules verify.mjs holds the email to. */
 export interface Fit {
@@ -16,7 +14,7 @@ export interface Fit {
 /** The email for this brief and these sections, with the font swapped for the admin's copy. */
 function emailHtml(brief: Record<string, unknown>, sections: string[]): string {
   const html = render(brief, sections);
-  const swapped = html.replace(/<!--\[if !mso\]><!--><link href="https:\/\/fonts\.googleapis\.com[^>]*><!--<!\[endif\]-->/, FONT);
+  const swapped = html.replace(FONT_LINK, FONT);
   if (swapped === html) throw new Error('The email’s font link changed; update the preview’s font swap.');
   return swapped;
 }
@@ -177,12 +175,14 @@ export function Preview({ focus, brief, sections, problem, checks, onFit }: Prop
       </ul>
       {problem && <p class="em-error">{problem}</p>}
       <div class="em-stage" ref={stage}>
-        <div class={`em-device em-${view}`} style={{ width: `${width * scale}px`, height: `${height * scale}px` }}>
-          <iframe ref={frame} title={`The email at ${view} width`} tabIndex={-1} style={{ width: `${width}px`, height: `${height}px`, transform: `scale(${scale})` }} />
+        <div class="em-frame" style={{ width: `${width * scale}px`, height: `${height * scale}px` }}>
+          <div class={`em-device em-${view}`}>
+            <iframe ref={frame} title={`The email at ${view} width`} tabIndex={-1} style={{ width: `${width}px`, height: `${height}px`, transform: `scale(${scale})` }} />
+          </div>
           {view === 'phone' && (
-            <div class="em-fold" style={{ top: `${FIRST_SCREEN * scale}px` }} aria-hidden="true">
-              <span>A phone shows this much before scrolling</span>
-            </div>
+            // Where a phone's first screen ends, marked on the phone's edges: a line across would strike through
+            // whatever words of the email sit there. The check above names the marks.
+            <div class="em-fold" style={{ top: `${FIRST_SCREEN * scale}px` }} aria-hidden="true" />
           )}
         </div>
       </div>

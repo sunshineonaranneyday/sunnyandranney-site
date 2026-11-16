@@ -12,7 +12,7 @@
  */
 
 import { cleanParts } from './parts.mjs';
-import { clean } from './special.mjs';
+import { clean, emailToWorkOn, sendLabel, thisWeeksSend } from './special.mjs';
 import { cleanWall } from './wall.mjs';
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS email_weeks (
@@ -71,15 +71,37 @@ export async function getWeek(db, send) {
   return r ? fromRow(r) : null;
 }
 
-/** Every week from one send date to another, inclusive, oldest first. @returns {Promise<Week[]>} */
-export async function weeksBetween(db, from, to) {
-  await ensureTable(db);
-  const { results } = await db.prepare('SELECT * FROM email_weeks WHERE send_date BETWEEN ? AND ? ORDER BY send_date').bind(from, to).all();
-  return (results || []).map(fromRow);
-}
-
 /** True when a week's email has gone out through Kit: it was scheduled for a time now past. @param {Week | null | undefined} w */
 export const wentOut = (w, now = Date.now()) => Boolean(w?.kit) && Date.parse(w.kit.sendAt) <= now;
+
+/**
+ * The one email the admin works on, as the database has it: this week's until it has gone out,
+ * then next week's (emailToWorkOn). Every other week is read-only: one that went out is checked in
+ * Sent emails, and the next one opens once this one goes.
+ * @returns {Promise<{ send: string, week: Week | null }>}
+ */
+export async function weekToWorkOn(db, today, now = Date.now()) {
+  const first = thisWeeksSend(today);
+  const week = await getWeek(db, first);
+  const send = emailToWorkOn(today, () => wentOut(week, now));
+  return { send, week: send === first ? week : await getWeek(db, send) };
+}
+
+/** Why a change to `send` is refused while `work` is the email being worked on, or null when it's the one. */
+export function otherWeek(send, work) {
+  if (send === work) return null;
+  return send < work
+    ? `The ${sendLabel(send)} email has gone out, so it can’t change. Reload to work on the ${sendLabel(work)} email.`
+    : `Only the ${sendLabel(work)} email can be worked on until it goes out. Reload to see it.`;
+}
+
+/**
+ * Why a week can't change while it's scheduled, or null. Kit sends the email it was given, so a change
+ * now would leave the page showing one email while another goes out. The page locks itself; this
+ * holds for a page opened before it was scheduled, too.
+ * @param {Week | null | undefined} w
+ */
+export const scheduledRefusal = (w) => (w?.kit ? 'This email is scheduled in Kit, so it can’t change. Cancel the send first, then change it and schedule it again.' : null);
 
 /** The most recent weeks with a special before a send date, newest first: the specials Staci can start from. @returns {Promise<Week[]>} */
 export async function pastWeeks(db, before, limit = 12) {

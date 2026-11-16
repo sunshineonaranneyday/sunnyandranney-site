@@ -1,7 +1,8 @@
 import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
 import { kitClient, readyTester, sendTest, templateFor } from '@/lib/sunny-side/kit.mjs';
-import { isSendDate, isSendDay, sendLabel, sendPassed } from '@/lib/sunny-side/special.mjs';
+import { isSendDate, isSendDay, sendLabel } from '@/lib/sunny-side/special.mjs';
+import { otherWeek, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { TEST_MAX, TESTS_PER_DAY, namesOf, testPeople, testRecipients } from '@/lib/sunny-side/testers.mjs';
 import { listPeople, logTest, testsSince } from '@/lib/sunny-side/test-store.mjs';
 import { weekEmail } from '@/lib/sunny-side/week-email';
@@ -24,15 +25,17 @@ export const POST: APIRoute = async (context) => {
 
   const body = await readJson(context.request);
   const send = body?.send;
-  if (!isSendDate(send)) return json({ error: 'Pick one of the Tuesday emails.' }, 400);
+  if (!isSendDate(send)) return json({ error: 'Invalid request' }, 400);
   const now = new Date();
   const today = localDate(now.toISOString());
-  if (sendPassed(send, today)) return json({ error: `The days for the ${sendLabel(send as string)} email have passed.` }, 409);
+  const db = dbOf(context);
+  // Only the email being worked on can be tested (weekToWorkOn)
+  const refused = otherWeek(send as string, (await weekToWorkOn(db, today, now.getTime())).send);
+  if (refused) return json({ error: refused }, 409);
   // The day it'll go, so the test is the email as it'll be that day
   const day = typeof body?.day === 'string' ? body.day : (send as string);
   if (!isSendDay(send, day)) return json({ error: `Pick a day in the ${sendLabel(send as string)} email’s week.` }, 400);
 
-  const db = dbOf(context);
   const people = testPeople(await listPeople(db), admin.email);
   const chosen = testRecipients(body?.to, people);
   if ('error' in chosen) return json({ error: chosen.error }, 400);

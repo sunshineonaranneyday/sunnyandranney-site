@@ -2,13 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Miniflare } from 'miniflare';
 import { Email, render, usePhotoOrigin } from './email.mjs';
-import { broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, statusOf, subscriberCount, templateFor, usualTime } from './kit.mjs';
+import { broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, statusOf, subscriberCount, templateFor, usualTime } from './kit.mjs';
 import { cfIdOf, kidFor, missionOf, photosDate, revealedKids, roomsPhrase } from './kids.mjs';
 import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
 import { DEFAULT_HERO, arrangeCollage, blankParts, checkParts, cleanParts, linesOf } from './parts.mjs';
 import { addPhoto, isJpeg, listPhotos, newPhotoId, photosByIds, setAlt } from './photo-store.mjs';
-import { check, clean, draftSale } from './special.mjs';
+import { check, clean, draftSale, toSale } from './special.mjs';
 import { addPerson, listPeople, logTest, recentTests, removePerson, testsSince } from './test-store.mjs';
 import { TEST_MAX, checkPerson, cleanPerson, namesOf, testPeople, testRecipients } from './testers.mjs';
 import { checkWall, cleanWall } from './wall.mjs';
@@ -96,6 +96,15 @@ test('the parts are checked: lengths, links, the subject against the sale, alt t
   assert.match(checkParts(cleanParts({ kid: 'zed' }), { kids }).kid, /isn’t on the charity’s site anymore/);
   assert.match(checkParts(blankParts(), { kids: [] }).kid, /didn’t load/);
   assert.deepEqual(linesOf(cleanParts({ subject: 'Save {upto}', preheader: '' }), sale), { subject: 'Save 20%', preheader: '20% off everything.' });
+  // A week with no sale: {upto} or {offer} is a field to fix, never a crash; an empty preview line
+  // stays empty, so the subject goes out as written
+  const quiet = toSale(clean({ kind: 'headline', headline: 'Christmas décor is in.' }));
+  assert.match(checkParts(cleanParts({ subject: 'Save up to {upto}' }), { sale: quiet }).subject, /no sale, so \{upto\} has nothing to say/);
+  assert.match(checkParts(cleanParts({ subject: 'Hi', preheader: '{offer} today' }), { sale: quiet }).preheader, /no sale, so \{offer\} has nothing to say/);
+  assert.deepEqual(checkParts(cleanParts({ subject: 'Christmas décor is in' }), { sale: quiet }), {});
+  assert.deepEqual(linesOf(cleanParts({ subject: 'Christmas décor is in', preheader: '' }), quiet), { subject: 'Christmas décor is in', preheader: '' });
+  const quietEmail = pageEmail({ sale: quiet, wall: null, parts: cleanParts({ subject: 'Christmas décor is in' }), photos: new Map(), kids, catalog: null, events: [], impact: null, send: '2026-11-17', site: 'https://sunnyandranney.com' });
+  assert.equal(quietEmail.brief.subject, 'Christmas décor is in', 'the subject as written, not the fallback');
   // Only known fields, photo ids shaped like ids
   assert.deepEqual(cleanParts({ hero: '../etc', story: { photos: ['x', ids[0], ids[0]] }, extra: 1 }).story.photos, [ids[0]]);
 });
@@ -167,6 +176,9 @@ function fakeKit(routes) {
   return { kit: kitClient({ key: 'k', base: 'https://kit.test/v4', get }), calls };
 }
 const msg = { subject: 'S', preheader: 'P', html: '<html></html>', description: 'D', templateId: 7 };
+/** Kit's list of sent emails is read for the year before now. */
+const NOW = Date.parse('2026-11-16T17:00:00Z');
+const SENT_AFTER = '2025-11-15';
 
 test('a test goes through Kit to just the testers, a minute later, never published', async () => {
   const { kit, calls } = fakeKit({
@@ -234,7 +246,7 @@ test('a scheduled send can be cancelled until it goes; the template, count and u
   const info = fakeKit({
     'GET /email_templates?per_page=100': { email_templates: [{ id: 1, category: 'Classic' }, { id: 5, category: 'Starting point' }] },
     'GET /subscribers?status=active&include_total_count=true&per_page=1&slim=true': { subscribers: [], pagination: { total_count: 4812 } },
-    'GET /broadcasts?status=completed&per_page=30&slim=true': {
+    [`GET /broadcasts?status=completed&sent_after=${SENT_AFTER}&per_page=1000&slim=true`]: {
       broadcasts: [
         { subject: 'A', send_at: '2026-11-10T15:00:00Z' },
         { subject: 'B', send_at: '2026-11-03T15:00:00Z' },
@@ -246,8 +258,40 @@ test('a scheduled send can be cancelled until it goes; the template, count and u
   assert.equal(await templateFor(info.kit, null), 5);
   assert.equal(await templateFor(info.kit, '9'), 9);
   assert.equal(await subscriberCount(info.kit), 4812);
-  assert.equal(await usualTime(info.kit), '10:00'); // 15:00 UTC in November is 10 AM Eastern; the test is left out
+  assert.equal(await usualTime(info.kit, NOW), '10:00'); // 15:00 UTC in November is 10 AM Eastern; the test is left out
   assert.equal(broadcastUrl(5), 'https://app.kit.com/campaigns/5/draft');
+});
+
+test('sent emails: what went to subscribers, newest first, tests left out, read-only from Kit', async () => {
+  const list = `GET /broadcasts?status=completed&sent_after=${SENT_AFTER}&per_page=1000&slim=true`;
+  const k = fakeKit({
+    // Kit's list has no stated order, so it's sorted here
+    [list]: {
+      broadcasts: [
+        { id: 2, subject: 'Nov 3', preview_text: 'P2', send_at: '2026-11-03T14:00:00Z', status: 'completed' },
+        { id: 3, subject: '[Test] Nov 10', preview_text: null, send_at: '2026-11-09T20:00:00Z', status: 'completed' },
+        { id: 1, subject: 'Nov 10', preview_text: null, send_at: '2026-11-10T14:00:00Z', status: 'completed' },
+      ],
+    },
+    'GET /broadcasts/1': { broadcast: { id: 1, subject: 'Nov 10', preview_text: 'P1', send_at: '2026-11-10T14:00:00Z', status: 'completed', content: '<html>sent</html>' } },
+    'GET /broadcasts/3': { broadcast: { id: 3, subject: '[Test] Nov 10', send_at: '2026-11-09T20:00:00Z', status: 'completed', content: '<p>t</p>' } },
+    'GET /broadcasts/4': { broadcast: { id: 4, subject: 'Next week', send_at: '2026-11-24T14:00:00Z', status: 'scheduled', content: '<p>later</p>' } },
+    'GET /broadcasts/6': { broadcast: { id: 6, subject: 'Draft', send_at: null, status: 'draft', content: '<p>d</p>' } },
+  });
+  assert.deepEqual(await sentEmails(k.kit, { now: NOW }), [
+    { id: 1, subject: 'Nov 10', preheader: '', sentAt: '2026-11-10T14:00:00Z' },
+    { id: 2, subject: 'Nov 3', preheader: 'P2', sentAt: '2026-11-03T14:00:00Z' },
+  ]);
+  assert.deepEqual(await sentEmails(k.kit, { now: NOW, limit: 1 }).then((r) => r.map((e) => e.id)), [1]);
+  assert.deepEqual(await sentEmail(k.kit, 1), { id: 1, subject: 'Nov 10', preheader: 'P1', sentAt: '2026-11-10T14:00:00Z', html: '<html>sent</html>', status: 'completed' });
+  // A test, one still scheduled, a draft, or one deleted in Kit isn't a sent email
+  for (const id of [3, 4, 6, 99]) assert.equal(await sentEmail(k.kit, id), null, `broadcast ${id}`);
+  // Only reads: nothing is ever created, changed or deleted
+  assert.ok(k.calls.every((c) => c.key.startsWith('GET ')));
+  // Any other refusal is said, not hidden as "nothing sent"
+  const down = kitClient({ key: 'k', base: 'https://kit.test/v4', get: async () => new Response('{}', { status: 500 }) });
+  await assert.rejects(sentEmails(down, { now: NOW }), /Kit said no \(500\)/);
+  await assert.rejects(sentEmail(down, 1), /Kit said no \(500\)/);
 });
 
 test('the charity’s kids: the most recent reveal first, by its recorded date, else the day its photos went up', () => {

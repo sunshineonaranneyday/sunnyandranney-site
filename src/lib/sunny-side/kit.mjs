@@ -134,14 +134,54 @@ export async function subscriberCount(kit) {
   return Number(data?.pagination?.total_count ?? NaN);
 }
 
-/** The time of day the store's emails usually go, from its last sent broadcasts (tests left out), as "HH:MM" Eastern, or null. */
-export async function usualTime(kit) {
-  const { broadcasts = [] } = await kit.call('/broadcasts?status=completed&per_page=30&slim=true');
+/** A test, not a real send: the admin's tests go out with "[Test]" before the subject (sendTest). */
+const isTest = (b) => /^\[Test\]/.test(b?.subject || '');
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * @typedef {{ id: number, subject: string, preheader: string, sentAt: string }} SentEmail
+ */
+
+/**
+ * What has gone out to subscribers, newest first: Kit's completed broadcasts from the last year,
+ * tests left out. Kit's list has no stated order, so the year is read whole (up to Kit's 1,000 a
+ * page, slim: no bodies) and sorted here.
+ * @returns {Promise<SentEmail[]>}
+ */
+export async function sentEmails(kit, { limit = 52, now = Date.now() } = {}) {
+  const since = new Date(now - 366 * DAY_MS).toISOString().slice(0, 10);
+  const { broadcasts = [] } = await kit.call(`/broadcasts?status=completed&sent_after=${since}&per_page=1000&slim=true`);
+  return broadcasts
+    .filter((b) => b.send_at && !isTest(b))
+    .sort((a, b) => Date.parse(b.send_at) - Date.parse(a.send_at))
+    .slice(0, limit)
+    .map((b) => ({ id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at }));
+}
+
+/**
+ * One email as Kit sent it, with its HTML, or null when it isn't one that went to subscribers: a
+ * draft, one still scheduled, a test, or one deleted in Kit.
+ * @returns {Promise<(SentEmail & { html: string, status: string }) | null>}
+ */
+export async function sentEmail(kit, id) {
+  let b;
+  try {
+    ({ broadcast: b } = await kit.call(`/broadcasts/${id}`));
+  } catch (err) {
+    if (/** @type {{ status?: number }} */ (err).status === 404) return null;
+    throw err;
+  }
+  if (!b?.send_at || isTest(b) || !['completed', 'sending'].includes(b.status)) return null;
+  return { id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at, html: b.content || '', status: b.status };
+}
+
+/** The time of day the store's emails usually go, from what it has sent (tests left out), as "HH:MM" Eastern, or null. */
+export async function usualTime(kit, now = Date.now()) {
+  const sent = await sentEmails(kit, { limit: 30, now });
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const counts = new Map();
-  for (const b of broadcasts) {
-    if (!b.send_at || /^\[Test\]/.test(b.subject || '')) continue;
-    const t = fmt.format(new Date(b.send_at));
+  for (const b of sent) {
+    const t = fmt.format(new Date(b.sentAt));
     counts.set(t, (counts.get(t) ?? 0) + 1);
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
