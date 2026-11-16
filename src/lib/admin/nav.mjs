@@ -1,14 +1,36 @@
 /**
- * The admin's navigation: which pages each role sees, how they nest, and how
+ * The admin's navigation: which pages each role sees, in what order, and how
  * tall the desktop sidebar is. AdminBase draws the sidebar and phone tab bar
- * from it, and nav.test.mjs keeps the sidebar on one screen as pages are added.
+ * from it, nav-status.mjs puts the work waiting on its links, and nav.test.mjs
+ * holds these rules as pages are added:
  *
- * The layout follows Shopify's admin, measured on the store's own account on
- * 2026-11-12: 30px rows, a page's sub-pages listed under it only while you're
- * in that part of the admin, Settings pinned to the foot.
+ *  1. Today comes first, with no heading. It's home and the list of what needs
+ *     you, like Stripe's Home and Linear's Inbox.
+ *  2. Sections are the store's jobs, ordered by how often the store does them:
+ *     the daily ones at the top, and the rarely used last in each section
+ *     (Material: "Put the most frequent destinations at the top"; NN/g:
+ *     "place less-important ones at the bottom"). Each page says how often in
+ *     `cadence`. The order never changes by itself, so it can be learned
+ *     (NN/g: reordering on its own "break[s] users' ability to build spatial memory").
+ *  3. A setting lives under the page it sets, as in Lightspeed (Sell > Settings)
+ *     and Toast (setup "shouldn't need to be accessed on a regular basis"), not
+ *     pinned at the foot: Gusto's connection is under Payroll.
+ *  4. Work waiting shows on the link where it's done (nav-status.mjs), instead
+ *     of on a bell or only on the home page as Gusto and Stripe do.
+ *  5. No more than two levels (Apple, GitLab), and every link on one screen
+ *     (SIDEBAR.budget).
  */
 
 /** @typedef {'manager' | 'kiosk'} NavRole */
+
+/**
+ * How often the store does each job, most often first, from its own rhythm on
+ * 2026-11-16: shifts and the clock every day, orders and receiving as
+ * deliveries come, the email every Tuesday, payroll every other Friday (Aug 14
+ * to Nov 6 in Gusto), sales tax by the 20th, and staff, vendors, donations and
+ * the Gusto connection now and then.
+ */
+export const CADENCE = /** @type {const} */ (['daily', 'deliveries', 'weekly', 'biweekly', 'monthly', 'rarely']);
 
 /**
  * @typedef {object} NavLink
@@ -16,12 +38,13 @@
  * @property {string} label
  * @property {string} short Label under the icon on the phone tab bar.
  * @property {string} icon A key of ICONS. Sub-pages show theirs only in the phone's More sheet.
+ * @property {typeof CADENCE[number]} [cadence] How often it's used; every page in a section has one.
  * @property {boolean} [tab] False keeps a page off the phone tab bar; it's under More instead.
  * @property {NavLink[]} [children] Pages under this one, listed beneath it while you're in it.
  */
 
-/** @typedef {{ heading: string, links: NavLink[] }} NavSection */
-/** @typedef {{ sections: NavSection[], settings?: NavLink }} Nav */
+/** @typedef {{ heading: string, links: NavLink[] }} NavSection An empty heading draws none. */
+/** @typedef {{ sections: NavSection[] }} Nav */
 
 /**
  * Feather line icons (MIT), drawn inline so the page needs no image requests.
@@ -52,7 +75,8 @@ export const PHONE_TABS = 4;
 
 /**
  * The pages a signed-in person sees. Managers get the whole admin, the owner
- * also gets Gusto settings, and the store tablet gets the clock and schedule.
+ * also gets Gusto's connection under Payroll, and the store tablet gets the
+ * clock and schedule.
  * @param {{ role?: NavRole, owner?: boolean }} who
  * @returns {Nav}
  */
@@ -63,8 +87,8 @@ export function navFor({ role, owner }) {
         {
           heading: 'Store',
           links: [
-            { href: '/admin/clock/', label: 'Time clock', short: 'Clock', icon: 'clock' },
-            { href: '/admin/schedule/', label: 'Schedule', short: 'Schedule', icon: 'schedule' },
+            { href: '/admin/clock/', label: 'Time clock', short: 'Clock', icon: 'clock', cadence: 'daily' },
+            { href: '/admin/schedule/', label: 'Schedule', short: 'Schedule', icon: 'schedule', cadence: 'daily' },
           ],
         },
       ],
@@ -73,20 +97,21 @@ export function navFor({ role, owner }) {
   if (role !== 'manager') return { sections: [] };
   return {
     sections: [
+      { heading: '', links: [{ href: '/admin/', label: 'Today', short: 'Today', icon: 'today', cadence: 'daily' }] },
       {
         heading: 'Team',
         links: [
-          { href: '/admin/', label: 'Today', short: 'Today', icon: 'today' },
-          { href: '/admin/schedule/', label: 'Schedule', short: 'Schedule', icon: 'schedule' },
+          { href: '/admin/schedule/', label: 'Schedule', short: 'Schedule', icon: 'schedule', cadence: 'daily' },
           {
             href: '/admin/hours/',
             label: 'Hours',
             short: 'Hours',
             icon: 'hours',
+            cadence: 'daily',
             children: [{ href: '/admin/hours/history/', label: 'Gusto history', short: 'History', icon: 'history', tab: false }],
           },
-          { href: '/admin/clock/', label: 'Time clock', short: 'Clock', icon: 'clock', tab: false },
-          { href: '/admin/staff/', label: 'Staff', short: 'Staff', icon: 'staff', tab: false },
+          { href: '/admin/clock/', label: 'Time clock', short: 'Clock', icon: 'clock', cadence: 'daily', tab: false },
+          { href: '/admin/staff/', label: 'Staff', short: 'Staff', icon: 'staff', cadence: 'rarely', tab: false },
         ],
       },
       {
@@ -97,38 +122,47 @@ export function navFor({ role, owner }) {
             label: 'Purchase orders',
             short: 'Buying',
             icon: 'buying',
+            cadence: 'deliveries',
             tab: false,
             children: [{ href: '/admin/buying/costs/', label: 'Costs to match', short: 'Costs', icon: 'costs', tab: false }],
           },
-          { href: '/admin/receiving/', label: 'Receiving', short: 'Receive', icon: 'receive', tab: false },
-          { href: '/admin/vendors/', label: 'Vendors', short: 'Vendors', icon: 'vendors', tab: false },
+          { href: '/admin/receiving/', label: 'Receiving', short: 'Receive', icon: 'receive', cadence: 'deliveries', tab: false },
+          { href: '/admin/vendors/', label: 'Vendors', short: 'Vendors', icon: 'vendors', cadence: 'rarely', tab: false },
         ],
       },
       {
-        heading: 'Email',
-        links: [{ href: '/admin/email/', label: 'Weekly email', short: 'Email', icon: 'email', tab: false }],
+        // What customers see and give: the email they read, the round-ups they add at checkout.
+        heading: 'Customers',
+        links: [
+          { href: '/admin/email/', label: 'Weekly email', short: 'Email', icon: 'email', cadence: 'weekly', tab: false },
+          { href: '/admin/donations/', label: 'Donations', short: 'Giving', icon: 'giving', cadence: 'rarely', tab: false },
+        ],
       },
       {
         heading: 'Pay',
         links: [
-          { href: '/admin/payroll/', label: 'Payroll', short: 'Payroll', icon: 'payroll' },
-          { href: '/admin/sales-tax/', label: 'Sales tax', short: 'Tax', icon: 'tax', tab: false },
-          { href: '/admin/donations/', label: 'Donations', short: 'Giving', icon: 'giving', tab: false },
+          {
+            href: '/admin/payroll/',
+            label: 'Payroll',
+            short: 'Payroll',
+            icon: 'payroll',
+            cadence: 'biweekly',
+            children: owner ? [{ href: '/admin/payroll/gusto/', label: 'Gusto connection', short: 'Gusto', icon: 'settings', tab: false }] : undefined,
+          },
+          { href: '/admin/sales-tax/', label: 'Sales tax', short: 'Tax', icon: 'tax', cadence: 'monthly', tab: false },
         ],
       },
     ],
-    settings: owner ? { href: '/admin/gusto/', label: 'Gusto settings', short: 'Gusto', icon: 'settings', tab: false } : undefined,
   };
 }
 
 /**
- * Every link in sidebar order: each page followed by its sub-pages, then settings.
+ * Every link in sidebar order: each page followed by its sub-pages.
  * @param {Nav} nav
  * @returns {NavLink[]}
  */
 export function allLinks(nav) {
-  const links = nav.sections.flatMap((section) => section.links.flatMap((link) => [link, ...(link.children ?? [])]));
-  return nav.settings ? [...links, nav.settings] : links;
+  return nav.sections.flatMap((section) => section.links.flatMap((link) => [link, ...(link.children ?? [])]));
 }
 
 /**
@@ -155,14 +189,13 @@ export function phoneNav(nav, current) {
   const pages = nav.sections.flatMap((section) => section.links);
   const tabs = pages.filter((link) => link.tab !== false);
   // A sub-page follows its page in the sheet, or ends its group when its page is a tab.
-  const groups = [
-    ...nav.sections.map((section) => {
+  const groups = nav.sections
+    .map((section) => {
       const inSheet = section.links.filter((link) => link.tab === false).flatMap((link) => [link, ...(link.children ?? [])]);
       const underTabs = section.links.filter((link) => link.tab !== false).flatMap((link) => link.children ?? []);
       return [...inSheet, ...underTabs];
-    }),
-    nav.settings ? [nav.settings] : [],
-  ].filter((group) => group.length > 0);
+    })
+    .filter((group) => group.length > 0);
   const parent = pages.find((link) => link.children?.some((child) => child.href === current));
   const activeTab = tabs.find((tab) => tab.href === current || tab === parent)?.href;
   const moreActive = !activeTab && groups.flat().some((link) => link.href === current);
@@ -172,9 +205,9 @@ export function phoneNav(nav, current) {
 /**
  * Desktop sidebar sizes in CSS px. AdminBase's CSS takes row, heading, gap and
  * touch row from here, so this model and the page can't drift apart. The frame
- * (padding, logo, search, signed-in row) and the settings row were measured in
- * Chrome on 2026-11-12, when the model matched the page to the pixel; a change
- * to the logo, search or footer needs them measured again.
+ * (padding, logo, search, signed-in row) was measured in Chrome on 2026-11-12
+ * and again on 2026-11-16, when the model matched the page to the pixel; a
+ * change to the logo, search or footer needs it measured again.
  */
 export const SIDEBAR = {
   /** One link with a mouse. Shopify's admin uses 30. */
@@ -191,8 +224,6 @@ export const SIDEBAR = {
   gap: 12,
   /** Everything that isn't the link list. */
   frame: 156,
-  /** The pinned settings link and the space above it. */
-  settings: 34,
   /**
    * The shortest window every link must fit in, with no scrollbar. A 13-inch
    * MacBook Air shows about 747px of page in Chrome with the Dock; the
@@ -207,15 +238,10 @@ export const SIDEBAR = {
  * @returns {number}
  */
 export function sidebarHeight(nav) {
-  const { sections, settings } = nav;
+  const { sections } = nav;
   if (sections.length === 0) return SIDEBAR.frame;
   const rows = sections.reduce((sum, section) => sum + section.links.length, 0);
   const mostChildren = Math.max(...sections.flatMap((section) => section.links.map((link) => link.children?.length ?? 0)));
-  return (
-    SIDEBAR.frame +
-    (settings ? SIDEBAR.settings : 0) +
-    (rows + mostChildren) * SIDEBAR.row +
-    sections.length * SIDEBAR.heading +
-    (sections.length - 1) * SIDEBAR.gap
-  );
+  const headings = sections.filter((section) => section.heading).length;
+  return SIDEBAR.frame + (rows + mostChildren) * SIDEBAR.row + headings * SIDEBAR.heading + (sections.length - 1) * SIDEBAR.gap;
 }

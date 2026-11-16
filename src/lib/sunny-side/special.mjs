@@ -262,6 +262,14 @@ export function nextSend(today) {
   return addDays(today, (SEND_WEEKDAY - d + 7) % 7);
 }
 
+/**
+ * What a week's email still needs before it can go: the sale, the products, or both.
+ * Today lists it and the sidebar dates it on Weekly email, from this one rule.
+ * @param {{ special?: unknown, wall?: unknown } | null | undefined} week a saved week, or its row
+ * @returns {string[]}
+ */
+export const emailNeeds = (week) => [week?.special ? '' : 'the sale', week?.wall ? '' : 'the products'].filter(Boolean);
+
 /** This week's email and the ones after it. */
 export function upcomingSends(today, count = 4) {
   const first = nextSend(today);

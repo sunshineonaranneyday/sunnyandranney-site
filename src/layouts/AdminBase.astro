@@ -1,6 +1,7 @@
 ---
 import type { AdminRole } from '@/lib/admin-auth';
 import { ICONS, SIDEBAR, allLinks, currentHref as findCurrentHref, navFor, phoneNav } from '@/lib/admin/nav.mjs';
+import { loadNavStatus } from '@/lib/admin/nav-status.mjs';
 
 interface Props {
   title: string;
@@ -12,10 +13,19 @@ const role: AdminRole | undefined = admin?.role;
 const path = Astro.url.pathname;
 
 const nav = navFor({ role, owner: admin?.owner });
-const { sections, settings: settingsLink } = nav;
+const { sections } = nav;
 const links = allLinks(nav);
 const currentHref = findCurrentHref(path, links);
 const phone = phoneNav(nav, currentHref);
+// Work waiting, on the link where it's done. Managers only: the store tablet's two pages have none.
+const marks =
+  role === 'manager' && admin ? await loadNavStatus(Astro.locals.runtime.env.DB, { now: new Date().toISOString(), myEmail: admin.email }) : {};
+// The phone's More tab gets a dot when a page under it has work, so the sheet never hides it.
+const inSheet = phone.groups.flat().map((link) => marks[link.href]).filter(Boolean);
+const moreMark = inSheet.length ? (inSheet.some((mark) => mark.tone === 'alert') ? 'alert' : 'plain') : null;
+// A marked link is heard with its work: "Hours, 1 shift missing a clock-out". It starts with the
+// label you see, so voice control still finds it by name (WCAG 2.5.3).
+const spoken = (label: string, mark?: { spoken: string }) => (mark ? `${label}, ${mark.spoken}` : undefined);
 // The sidebar's sizes come from the nav module, whose test holds the sidebar to one screen.
 const sidebarSizes = `--row:${SIDEBAR.row}px;--touch-row:${SIDEBAR.touchRow}px;--heading:${SIDEBAR.heading}px;--section-gap:${SIDEBAR.gap}px`;
 const roleLabel = admin?.owner ? 'Owner' : role === 'manager' ? 'Manager' : role === 'kiosk' ? 'Store tablet' : '';
@@ -73,9 +83,14 @@ const icon = (name: string) =>
           sections.length > 0 && (
             <nav class="side-nav" aria-label="Admin">
               {sections.map((section) => (
-                <div class="side-section" role="group" aria-labelledby={`side-${section.heading.toLowerCase()}`}>
-                  <p class="side-heading" id={`side-${section.heading.toLowerCase()}`}>{section.heading}</p>
+                <div
+                  class="side-section"
+                  role={section.heading ? 'group' : undefined}
+                  aria-labelledby={section.heading ? `side-${section.heading.toLowerCase()}` : undefined}
+                >
+                  {section.heading && <p class="side-heading" id={`side-${section.heading.toLowerCase()}`}>{section.heading}</p>}
                   {section.links.map((link) => {
+                    const mark = marks[link.href];
                     // Sub-pages show under their page while you're anywhere in it, as in Shopify's admin.
                     const inChild = link.children?.some((child) => child.href === currentHref) ?? false;
                     return (
@@ -84,15 +99,17 @@ const icon = (name: string) =>
                           href={link.href}
                           class:list={['side-link', { 'side-parent-current': inChild }]}
                           aria-current={link.href === currentHref ? 'page' : undefined}
+                          aria-label={spoken(link.label, mark)}
                         >
                           <Fragment set:html={icon(link.icon)} />
-                          <span>{link.label}</span>
+                          <span class="side-label">{link.label}</span>
+                          {mark && <span class="nav-mark" data-tone={mark.tone} title={mark.spoken} aria-hidden="true">{mark.text}</span>}
                         </a>
                         {link.children && (
                           <div class:list={['side-children', { 'side-children-open': inChild || link.href === currentHref }]}>
                             {link.children.map((child) => (
                               <a href={child.href} class="side-link side-child" aria-current={child.href === currentHref ? 'page' : undefined}>
-                                <span>{child.label}</span>
+                                <span class="side-label">{child.label}</span>
                               </a>
                             ))}
                           </div>
@@ -109,12 +126,6 @@ const icon = (name: string) =>
         {
           admin && (
             <div class="side-foot">
-              {settingsLink && (
-                <a href={settingsLink.href} class="side-link" aria-current={settingsLink.href === currentHref ? 'page' : undefined}>
-                  <Fragment set:html={icon(settingsLink.icon)} />
-                  <span>{settingsLink.label}</span>
-                </a>
-              )}
               <div class="who">
                 <span class="who-avatar" aria-hidden="true">{admin.email.slice(0, 1).toUpperCase()}</span>
                 <span class="who-text">
@@ -142,40 +153,57 @@ const icon = (name: string) =>
     {
       links.length > 0 && (
         <nav class="tabbar" aria-label="Admin">
-          {phone.tabs.map((link) => (
-            <a
-              href={link.href}
-              class="tab"
-              aria-current={link.href === currentHref ? 'page' : link.href === phone.activeTab ? 'true' : undefined}
-            >
-              <Fragment set:html={icon(link.icon)} />
-              <span>{link.short}</span>
-            </a>
-          ))}
+          {phone.tabs.map((link) => {
+            const mark = marks[link.href];
+            return (
+              <a
+                href={link.href}
+                class="tab"
+                aria-current={link.href === currentHref ? 'page' : link.href === phone.activeTab ? 'true' : undefined}
+                aria-label={spoken(link.short, mark)}
+              >
+                <span class="tab-icon">
+                  <Fragment set:html={icon(link.icon)} />
+                  {/* A count on the icon, as iOS does; a due date is a dot, since it won't fit. */}
+                  {mark && <span class="tab-mark" data-tone={mark.tone} aria-hidden="true">{mark.count ? mark.text : ''}</span>}
+                </span>
+                <span>{link.short}</span>
+              </a>
+            );
+          })}
           {(phone.groups.length > 0 || role === 'manager') && (
             <details class="tab-more">
-              <summary class:list={['tab', { 'tab-current': phone.moreActive }]}>
-                <Fragment set:html={icon('more')} />
+              <summary class:list={['tab', { 'tab-current': phone.moreActive }]} aria-label={moreMark ? 'More, has work waiting' : undefined}>
+                <span class="tab-icon">
+                  <Fragment set:html={icon('more')} />
+                  {moreMark && <span class="tab-mark" data-tone={moreMark} aria-hidden="true" />}
+                </span>
                 <span>More</span>
               </summary>
               <div class="more-sheet">
-                {[...phone.groups, ...(role === 'manager' && !settingsLink ? [[]] : [])].map((group, index, all) => (
+                {phone.groups.map((group) => (
                   <div class="more-group">
-                    {group.map((link) => (
-                      <a href={link.href} class="more-link" aria-current={link.href === currentHref ? 'page' : undefined}>
-                        <Fragment set:html={icon(link.icon)} />
-                        <span>{link.label}</span>
-                      </a>
-                    ))}
-                    {/* Sign out ends the sheet, with Gusto settings when there is one. */}
-                    {role === 'manager' && index === all.length - 1 && (
-                      <a href={SIGN_OUT} class="more-link">
-                        <Fragment set:html={icon('signout')} />
-                        <span>Sign out</span>
-                      </a>
-                    )}
+                    {group.map((link) => {
+                      const mark = marks[link.href];
+                      return (
+                        <a href={link.href} class="more-link" aria-current={link.href === currentHref ? 'page' : undefined} aria-label={spoken(link.label, mark)}>
+                          <Fragment set:html={icon(link.icon)} />
+                          <span class="side-label">{link.label}</span>
+                          {mark && <span class="nav-mark" data-tone={mark.tone} aria-hidden="true">{mark.text}</span>}
+                        </a>
+                      );
+                    })}
                   </div>
                 ))}
+                {/* Sign out ends the sheet. Never on the store tablet, which stays signed in. */}
+                {role === 'manager' && (
+                  <div class="more-group">
+                    <a href={SIGN_OUT} class="more-link">
+                      <Fragment set:html={icon('signout')} />
+                      <span>Sign out</span>
+                    </a>
+                  </div>
+                )}
               </div>
             </details>
           )}
@@ -505,6 +533,45 @@ const icon = (name: string) =>
   .more-link svg { color: var(--ink-3); }
   .more-link:hover, .more-link[aria-current='page'] { background: var(--sunk); }
 
+  /* Work waiting (lib/admin/nav-status.mjs), at the end of its link. Plain is a quiet
+     count or date; alert, when something's wrong or due soon, is a clay pill. */
+  .nav-mark {
+    flex: none;
+    margin-left: auto;
+    padding: 0 0.125rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.125rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--ink-3);
+  }
+  .nav-mark[data-tone='alert'] { padding: 0 0.4375rem; border-radius: 999px; background: var(--clay-soft); color: var(--clay); }
+  /* A label never wraps, so every row keeps the height nav.mjs counts on. */
+  .side-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* On a tab, a count sits on the icon's corner as in iOS; a due date is a dot. */
+  .tab-icon { position: relative; display: grid; place-items: center; }
+  .tab-mark {
+    position: absolute;
+    top: -5px;
+    left: calc(50% + 4px);
+    min-width: 17px;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--ink-2);
+    box-shadow: 0 0 0 2px var(--panel);
+    color: #fff;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 17px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .tab-mark[data-tone='alert'] { background: var(--clay); }
+  .tab-mark:empty { top: -2px; left: calc(50% + 6px); width: 9px; min-width: 0; height: 9px; padding: 0; }
+
   @media (min-width: 1024px) {
     .shell { display: grid; grid-template-columns: var(--sidebar) 1fr; }
     .tabbar { display: none; }
@@ -589,6 +656,7 @@ const icon = (name: string) =>
     .side-child[aria-current='page'] { background: none; box-shadow: none; }
     .side-link[aria-current='page']::after {
       content: '';
+      flex: none;
       margin-left: auto;
       width: 6px;
       height: 6px;
@@ -596,6 +664,8 @@ const icon = (name: string) =>
       background: var(--teal);
       box-shadow: 0 0 0 3px var(--teal-soft);
     }
+    /* Work waiting takes the place of the current-page dot. */
+    .side-link[aria-current='page']:has(.nav-mark)::after { display: none; }
 
     .side-foot {
       display: flex;

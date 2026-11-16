@@ -188,7 +188,7 @@ off it. Other clock choices a manager makes stay. People who leave stay store
 staff, so their past pay stays on Payroll, but Staff hides them unless "Show
 all" is on.
 
-An owner connects Gusto once at `/admin/gusto/`. After that, Staff and Payroll
+An owner connects Gusto once at `/admin/payroll/gusto/`. After that, Staff and Payroll
 check Gusto for changes each time they open, and update in place if there were any. There are two routes, and the MCP settings win if both
 are present.
 

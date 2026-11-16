@@ -5,7 +5,7 @@ import AdminBase from '@/layouts/AdminBase.astro';
 import { loadToday } from '@/lib/admin/today.mjs';
 import { initials, svg, tone } from '@/lib/admin-ui';
 import { STORE_TIME_ZONE, workweekStart, localDate, utcToLocalInput } from '@/lib/time-clock/hours.mjs';
-import { nextSend, sendLabel } from '@/lib/sunny-side/special.mjs';
+import { emailNeeds, nextSend, sendLabel } from '@/lib/sunny-side/special.mjs';
 import { getWeek } from '@/lib/sunny-side/week-store.mjs';
 
 const admin = Astro.locals.admin;
@@ -17,10 +17,7 @@ const t = await loadToday(Astro.locals.runtime.env.DB, { now, myEmail: admin.ema
 
 // The coming Tuesday email needs its special and its products. If the check itself fails, Today still loads without it.
 const emailSend = nextSend(localDate(now));
-const emailMissing = await getWeek(Astro.locals.runtime.env.DB, emailSend).then(
-  (w) => [w?.special ? '' : 'the sale', w?.wall ? '' : 'the products'].filter(Boolean),
-  () => [],
-);
+const emailMissing = await getWeek(Astro.locals.runtime.env.DB, emailSend).then(emailNeeds, () => []);
 const specialMissing = emailMissing.length > 0;
 const emailDays = Math.round((Date.parse(emailSend) - Date.parse(localDate(now))) / 86400000);
 const emailWhen = emailDays === 0 ? 'It goes out today' : emailDays === 1 ? 'It goes out tomorrow' : `It goes out in ${emailDays} days`;

@@ -95,7 +95,7 @@ export async function salesTaxFacts(DB, { now = Date.now() } = {}) {
   if (DB) {
     try {
       await ensureTable(DB);
-      list = (await DB.prepare('SELECT month, state, tries, last_try_at, sent_at, error, filed_at, filed_by, confirmation FROM sales_tax_months ORDER BY month DESC LIMIT 12').all()).results || [];
+      list = (await DB.prepare(RECENT_MONTHS).all()).results || [];
     } catch (err) {
       // Said plainly on the page, rather than looking like nothing has been tried
       console.error('Sales tax status:', err);
@@ -123,14 +123,26 @@ export async function salesTaxFacts(DB, { now = Date.now() } = {}) {
   // A month from before that never went (the worker keeps trying it for two more months): shown until it goes
   const late = !out.problem ? list.find((r) => r.state !== 'sent' && r.error && due && r.month < due) : null;
   if (late) out.problem = { month: late.month, name: monthName(late.month), error: late.error, tries: late.tries, at: late.last_try_at };
-  // The newest month sent and not yet filed
-  const unfiled = list.find((r) => r.state === 'sent' && !r.filed_at);
-  if (unfiled) {
-    const d = dueDate(unfiled.month);
-    out.toFile = { month: unfiled.month, name: monthName(unfiled.month), due: d.iso, dueWords: d.words, daysLeft: daysUntil(d.iso, now) };
-  }
+  out.toFile = toFileOf(list, now);
   return out;
 }
+
+/** Days before the due date that the worker reminds the store, and the admin's sidebar turns the month clay. */
+export const REMIND_DAYS = 3;
+
+/** The month to file: the newest sent and not yet marked filed. The Sales tax page and the sidebar both ask this.
+ * @param {Array<{ month: string, state: string, filed_at: string | null }>} rows newest first
+ * @param {number} now ms
+ * @returns {SalesTaxFacts['toFile']} */
+export function toFileOf(rows, now) {
+  const unfiled = rows.find((r) => r.state === 'sent' && !r.filed_at);
+  if (!unfiled) return null;
+  const d = dueDate(unfiled.month);
+  return { month: unfiled.month, name: monthName(unfiled.month), due: d.iso, dueWords: d.words, daysLeft: daysUntil(d.iso, now) };
+}
+
+/** The rows toFileOf reads, as salesTaxFacts reads them. */
+export const RECENT_MONTHS = 'SELECT month, state, tries, last_try_at, sent_at, error, filed_at, filed_by, confirmation FROM sales_tax_months ORDER BY month DESC LIMIT 12';
 
 /**
  * One month for its filing page: the figures sent, whether the PDF and spreadsheet are kept, and the filing record.

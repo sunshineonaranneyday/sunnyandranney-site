@@ -74,7 +74,8 @@ function pageCommands(): Command[] {
   return [...document.querySelectorAll<HTMLAnchorElement>(".side-link")]
     .filter((link) => !seen.has(link.href) && seen.add(link.href))
     .map((link) => ({
-      label: link.textContent?.trim() ?? "",
+      // The label alone, not the work waiting beside it.
+      label: link.querySelector(".side-label")?.textContent?.trim() ?? "",
       hint: "Page",
       href: link.href,
     }));

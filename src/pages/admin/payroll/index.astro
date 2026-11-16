@@ -82,7 +82,7 @@ const lastImport = rows.reduce((latest, row) => (row.imported_at > latest ? row.
           {gusto.state === 'ready' ? (
             <a class="btn" href="/admin/staff/"><Fragment set:html={svg('staff', 18)} />Staff</a>
           ) : (
-            Astro.locals.admin?.owner && <a class="btn btn-primary" href="/admin/gusto/"><Fragment set:html={svg('gusto', 18)} />Connect Gusto</a>
+            Astro.locals.admin?.owner && <a class="btn btn-primary" href="/admin/payroll/gusto/"><Fragment set:html={svg('gusto', 18)} />Connect Gusto</a>
           )}
         </div>
       </div>

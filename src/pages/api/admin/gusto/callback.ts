@@ -15,7 +15,7 @@ export const GET: APIRoute = async (context) => {
   const config = gustoConfig(context.locals.runtime.env);
   if (!config) return json({ error: 'Gusto is not set up.' }, 409);
 
-  const back = (error?: string) => context.redirect(`/admin/gusto/${error ? `?error=${error}` : ''}`);
+  const back = (error?: string) => context.redirect(`/admin/payroll/gusto/${error ? `?error=${error}` : ''}`);
   const params = context.url.searchParams;
   const expected = context.cookies.get(STATE_COOKIE)?.value;
   const codeVerifier = context.cookies.get(VERIFIER_COOKIE)?.value;
