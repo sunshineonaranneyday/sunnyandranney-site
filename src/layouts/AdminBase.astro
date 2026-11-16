@@ -1,6 +1,6 @@
 ---
 import type { AdminRole } from '@/lib/admin-auth';
-import { ICONS, SIDEBAR, allLinks, currentHref as findCurrentHref, navFor, phoneNav } from '@/lib/admin/nav.mjs';
+import { ICONS, SIDEBAR, allLinks, currentHref as findCurrentHref, navFor, phoneNav, viewFor } from '@/lib/admin/nav.mjs';
 import { loadNavStatus } from '@/lib/admin/nav-status.mjs';
 
 interface Props {
@@ -9,10 +9,12 @@ interface Props {
 
 const { title } = Astro.props;
 const admin = Astro.locals.admin;
-const role: AdminRole | undefined = admin?.role;
+// On the email address everyone sees what an email-only login sees: the email is all that opens there.
+const view = viewFor(admin, Astro.url.hostname.toLowerCase());
+const role: AdminRole | undefined = view.role;
 const path = Astro.url.pathname;
 
-const nav = navFor({ role, owner: admin?.owner });
+const nav = navFor(view);
 const { sections } = nav;
 const links = allLinks(nav);
 const currentHref = findCurrentHref(path, links);
@@ -28,7 +30,7 @@ const moreMark = inSheet.length ? (inSheet.some((mark) => mark.tone === 'alert')
 const spoken = (label: string, mark?: { spoken: string }) => (mark ? `${label}, ${mark.spoken}` : undefined);
 // The sidebar's sizes come from the nav module, whose test holds the sidebar to one screen.
 const sidebarSizes = `--row:${SIDEBAR.row}px;--touch-row:${SIDEBAR.touchRow}px;--heading:${SIDEBAR.heading}px;--section-gap:${SIDEBAR.gap}px`;
-const roleLabel = admin?.owner ? 'Owner' : role === 'manager' ? 'Manager' : role === 'kiosk' ? 'Store tablet' : role === 'email' ? 'Weekly email' : '';
+const roleLabel = view.owner ? 'Owner' : role === 'manager' ? 'Manager' : role === 'kiosk' ? 'Store tablet' : role === 'email' ? 'Weekly email' : '';
 // Ends the Cloudflare Access session, so a shared computer doesn't stay signed in. Not for the store tablet.
 const SIGN_OUT = '/cdn-cgi/access/logout';
 const signsOut = role === 'manager' || role === 'email';

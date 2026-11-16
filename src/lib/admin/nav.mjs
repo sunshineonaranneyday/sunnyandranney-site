@@ -21,6 +21,8 @@
  *     (SIDEBAR.budget).
  */
 
+import { EMAIL_HOST } from '../admin-host.mjs';
+
 /** @typedef {'manager' | 'kiosk' | 'email'} NavRole */
 
 /**
@@ -73,6 +75,19 @@ export const ICONS = {
 
 /** Apple allows five tab bar items on iPhone, and More takes one. */
 export const PHONE_TABS = 4;
+
+/**
+ * Who the sidebar is drawn for at this address. Only the weekly email opens on
+ * the email address, for anyone (inScope in admin-host.mjs), so everyone there
+ * gets the email-only view; a sidebar never lists a page its address won't open.
+ * @param {{ role?: NavRole, owner?: boolean } | undefined} who
+ * @param {string} host lower case
+ * @returns {{ role?: NavRole, owner: boolean }}
+ */
+export function viewFor(who, host) {
+  if (!who?.role) return { role: undefined, owner: false };
+  return host === EMAIL_HOST ? { role: 'email', owner: false } : { role: who.role, owner: Boolean(who.owner) };
+}
 
 /**
  * The pages a signed-in person sees. Managers get the whole admin, the owner

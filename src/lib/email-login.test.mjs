@@ -11,6 +11,7 @@ import test from 'node:test';
 import { verifyAccessJwt } from './access-jwt.mjs';
 import { ADMIN_HOST, EMAIL_HOST, adminHostRedirect, inScope, isEmailPath } from './admin-host.mjs';
 import { audienceFor, identityFrom } from './admin-identity.mjs';
+import { allLinks, navFor, viewFor } from './admin/nav.mjs';
 
 const PAGES = new URL('../pages/', import.meta.url);
 const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/i;
@@ -211,4 +212,24 @@ test('the admin’s sign-in code uses these same steps', () => {
   const auth = readFileSync(new URL('./admin-auth.ts', import.meta.url), 'utf8');
   assert.match(auth, /const audience = audienceFor\(host, env\);/);
   assert.match(auth, /return identityFrom\(verified, host, env\);/);
+});
+
+test('the sidebar never lists a page its address won’t open, for any login at any address', () => {
+  const logins = { owner: { role: 'manager', owner: true }, manager: { role: 'manager', owner: false }, tablet: { role: 'kiosk', owner: false }, email: { role: 'email', owner: false } };
+  for (const [name, who] of Object.entries(logins)) {
+    for (const host of HOSTS) {
+      const links = allLinks(navFor(viewFor(who, host))).flatMap((l) => [l, ...(l.children ?? [])]);
+      for (const link of links) assert.ok(inScope(who, host, link.href), `${name} at ${host} is shown ${link.href}, which won’t open there`);
+    }
+    // At the email address everyone sees exactly what Mike sees
+    assert.deepEqual(navFor(viewFor(who, EMAIL_HOST)), navFor({ role: 'email' }), `${name} at the email address`);
+    assert.equal(viewFor(who, EMAIL_HOST).owner, false);
+  }
+});
+
+test('the layout draws the sidebar for the address, not just the role', () => {
+  const layout = readFileSync(new URL('../layouts/AdminBase.astro', import.meta.url), 'utf8');
+  assert.match(layout, /const view = viewFor\(admin, Astro\.url\.hostname\.toLowerCase\(\)\);/);
+  assert.match(layout, /const nav = navFor\(view\);/);
+  assert.match(layout, /const role: AdminRole \| undefined = view\.role;/);
 });
