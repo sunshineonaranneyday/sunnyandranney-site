@@ -3,7 +3,7 @@
  * ones (src/lib/sunny-side/special.mjs, wall.mjs, events.mjs, catalog.mjs).
  */
 import { Email } from '@/lib/sunny-side/email.mjs';
-import { KINDS, LINKS, clean, isDiscount, whole } from '@/lib/sunny-side/special.mjs';
+import { KINDS, clean, isDiscount, whole } from '@/lib/sunny-side/special.mjs';
 
 export type Kind = keyof typeof KINDS;
 
@@ -12,12 +12,7 @@ export interface Special {
   headline: string;
   tiers: { spend: number | null; percent: number | null }[];
   percent: number | null;
-  what: string;
-  label: string;
-  cta: string;
-  link: string;
   ends: string;
-  details: string;
 }
 
 /** The sale as typed: numbers stay text until they're read, so "1,0" isn't fought while typing. */
@@ -26,13 +21,7 @@ export interface SaleForm {
   headline: string;
   tiers: { spend: string; percent: string }[];
   percent: string;
-  what: string;
-  label: string;
-  cta: string;
-  link: string;
-  linkOther: boolean;
   ends: string;
-  details: string;
 }
 
 export interface Pick {
@@ -89,28 +78,20 @@ export interface EventRecord {
   updatedBy: string;
 }
 
-export interface WeekTab {
-  send: string;
-  label: string;
-  sale: string;
-  products: number;
-  /** When it's set to go (or went) through Kit, or null. */
-  kitAt: string | null;
-}
-export interface Other {
-  send: string;
+/** The most recent sale saved before this email's, to start from. */
+export interface LastSale {
   label: string;
   summary: string;
   special: Special;
 }
 
 export interface AppProps {
+  /** The one email being worked on (weekToWorkOn): this week's until it goes out, then next week's. */
   send: string;
   label: string;
   today: string;
-  weeks: WeekTab[];
   record: { special: Special | null; wall: Wall | null; updatedAt: string; updatedBy: string } | null;
-  others: Other[];
+  last: LastSale | null;
   events: EventRecord[];
   test: { people: TestPerson[]; me: string };
   /** The rest of the email (parts.mjs), as saved, or blank. */
@@ -200,19 +181,13 @@ const twoTiers = () => [
 ];
 
 export function saleFormOf(s: Special | null): SaleForm {
-  if (!s) return { kind: '', headline: '', tiers: twoTiers(), percent: '', what: 'everything', label: '', cta: '', link: '', linkOther: false, ends: '', details: '' };
+  if (!s) return { kind: '', headline: '', tiers: twoTiers(), percent: '', ends: '' };
   return {
     kind: s.kind,
     headline: s.headline ?? '',
     tiers: s.tiers?.length ? s.tiers.map((t) => ({ spend: money(t.spend), percent: num(t.percent) })) : twoTiers(),
     percent: num(s.percent ?? null),
-    what: s.what || 'everything',
-    label: s.label ?? '',
-    cta: s.cta ?? '',
-    link: s.link ?? '',
-    linkOther: Boolean(s.link) && !LINKS.some((l) => l.path === s.link),
     ends: s.ends ?? '',
-    details: s.details ?? '',
   };
 }
 
@@ -222,10 +197,10 @@ export const specialOf = (f: SaleForm): Special => clean(f) as Special;
 export function saleSnapshot(f: SaleForm): string {
   const s = specialOf(f);
   if (!s.kind) return '';
-  const keep: Record<string, unknown> = { kind: s.kind, label: s.label, cta: s.cta, link: s.link, details: s.details };
+  const keep: Record<string, unknown> = { kind: s.kind };
   if (isDiscount(s.kind)) keep.ends = s.ends;
   if (s.kind === 'tiers') Object.assign(keep, { headline: s.headline, tiers: s.tiers });
-  if (s.kind === 'percent') Object.assign(keep, { percent: s.percent, what: s.what });
+  if (s.kind === 'percent') keep.percent = s.percent;
   if (s.kind === 'headline') keep.headline = s.headline;
   return JSON.stringify(keep);
 }

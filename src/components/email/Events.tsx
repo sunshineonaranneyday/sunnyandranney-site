@@ -29,6 +29,22 @@ const dayLabel = (iso: string) => {
   return `${weekday(d).slice(0, 3)}, ${monthShort(d)} ${d.getUTCDate()}`;
 };
 
+/**
+ * "Saturdays, Nov 21 to Dec 19 · 11am–2pm", broken only where it reads: a date ("Dec 19") and the
+ * hours ("11am–2pm") are never split, and the dot stays at the end of a line.
+ */
+function whenLine(summary: string) {
+  const [all, hours] = summary.split(' · ');
+  const dates = all.replace(/([A-Z][a-z]{2}) (\d{1,2})/g, '$1\u00a0$2');
+  return hours ? (
+    <>
+      {dates}{'\u00a0'}· <span class="em-nowrap">{hours}</span>
+    </>
+  ) : (
+    dates
+  );
+}
+
 export function Events({ events, setEvents, draft, setDraft, sendDate, sendLabel, today }: Props) {
   const ahead = (r: EventRecord) => sortedDates(r.event).some((d: { date: string }) => d.date >= sendDate);
   return (
@@ -54,7 +70,7 @@ export function Events({ events, setEvents, draft, setDraft, sendDate, sendLabel
             <li class="em-event">
               <div class="em-event-main">
                 <p class="em-event-title">{r.event.title}</p>
-                <p class="em-event-when">{eventSummary(r.event, today)}</p>
+                <p class="em-event-when">{whenLine(eventSummary(r.event, today))}</p>
                 <p class="em-event-tags">
                   <span class={`badge ${ahead(r) ? 'badge-open' : ''}`}>{ahead(r) ? `In the ${sendLabel} email` : `Over before ${sendLabel}`}</span>
                   {isWeekly(sortedDates(r.event)) && <span class="badge">Calendar links</span>}

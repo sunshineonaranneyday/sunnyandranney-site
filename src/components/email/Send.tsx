@@ -76,6 +76,11 @@ interface Props {
  * subscriber on the day and at the time picked. Once it's scheduled the email is locked until the
  * send is cancelled.
  */
+/** An address that breaks, when it must, only after its "@" or before a ".": "holly@" over "soardcharity.com", never "soardcharit" over "y.com". */
+function breakable(email: string) {
+  return email.split(/(?<=@)|(?=\.)/).flatMap((part, k) => (k ? [<wbr />, part] : [part]));
+}
+
 export function Send(props: Props) {
   const { send, label, day, days, setDay, today, todo, dirty, saving, saveFirst, me, kitSend, setKitSend, subscribers } = props;
   const [people, setPeople] = useState(props.people);
@@ -207,7 +212,7 @@ export function Send(props: Props) {
               <label class="check">
                 <input type="checkbox" checked={chosen.has(p.email)} onChange={(e) => choose(p.email, (e.target as HTMLInputElement).checked)} />
                 <span class="em-test-name">{p.you ? 'You' : p.name}</span>
-                <span class="em-test-email">{p.email}</span>
+                <span class="em-test-email">{breakable(p.email)}</span>
               </label>
               {!p.you && (
                 <button type="button" class="btn btn-ghost btn-icon em-remove" aria-label={`Take ${p.name} off the list`} onClick={() => void remove(p)}>

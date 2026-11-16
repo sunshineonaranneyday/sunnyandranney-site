@@ -58,14 +58,14 @@ Photo `src` is either a full image URL or `cf:<id>` for Cloudflare Images, which
 
 ## The weekly email in the admin
 
-`/admin/email/` is for managers. Staci picks this Tuesday's email or one of the next three, and sets up the whole email beside a live preview of it, drawn by the same code that builds it, then sends tests and schedules it to subscribers through Kit from the page. The preview follows the part she's working on. One Save keeps the sale and the products together; either can be saved before the other is ready. Saving checks the version the page loaded, so two managers can't overwrite each other. The Today page shows a task when the coming Tuesday's email has no sale or no products. `/admin/special/`, the page's old address, redirects here.
+`/admin/email/` is for managers, and it's about one email: this week's until it has gone out, then next week's (`weekToWorkOn` in `week-store.mjs`; the Today task and the sidebar mark follow the same rule). The server refuses a save, test, send or cancel for any other week. Emails already sent are read-only at `/admin/email/sent/`, read from Kit exactly as Kit sent them (tests left out), each one drawn in a script-free frame with a link to Kit's report. Staci sets up the whole email beside a live preview of it, drawn by the same code that builds it, then sends tests and schedules it to subscribers through Kit from the page. The preview follows the part she's working on. One Save keeps the sale and the products together; either can be saved before the other is ready. Saving checks the version the page loaded, so two managers can't overwrite each other. The Today page shows a task when that email has no sale or no products. `/admin/special/`, the page's old address, redirects here.
 
-1. **The sale.** One of three kinds, and only what that kind needs:
-   - spend more, save more: 2 to 4 tiers;
-   - percent off;
-   - no discount, a headline instead.
+1. **The sale.** Only what changes week to week (the store, 2026-11-16). One of three kinds:
+   - spend more, save more: a headline and 2 to 4 tiers;
+   - percent off everything: the percent;
+   - no sale: a headline.
 
-   A discount can't be saved without its last day. Every sale counts in the showroom and online, so that's never asked: the fine print under the button always starts "In the showroom and online. Ends Sunday, Nov 29.", then anything else she adds. The button, the small label and more fine print have good defaults, so they're folded away with what they say now. The button opens the whole shop by default for spend more, save more and for a percent off everything, since both count the whole order and the sale page lists only marked-down items.
+   A discount also needs its last day. Until the week has a sale, the most recent one saved is offered to use again, with its last day left to set. Everything around the deal is the store's for each kind (`defaults` in `special.mjs`) and can't be set: the small label, the button's words, and its page (the whole shop for both discounts, since both count the whole order and the sale page lists only marked-down items; new arrivals for a week with no sale). The fine print is the terms alone: "In the showroom and online. Ends Sunday, Nov 29." A special saved before then keeps none of its old label, button, link, fine print or "off what": they're dropped when it's read.
 
 2. **The products.** She browses the shop's own catalog (`/shop/catalog.json`, published with every deploy by `src/pages/shop/catalog.json.ts`): every product the shop lists, with its stock count and its photos' sizes. The picker works like Shopify's own: search by name, room or kind; narrow to new arrivals, staff picks or what's on sale, or by room; sort by best selling (Shopify's own ranking), newest or price; scroll through all of them; tap to add or take out. Products that are sold out show only when asked. One in stock with no photo at all shows greyed. Any photo can be picked: the email sends every one as a JPEG.
 
@@ -89,6 +89,8 @@ Photo `src` is either a full image URL or `cf:<id>` for Cloudflare Images, which
    - It goes on a Kit "Starting point" template, where the content is the whole email (`KIT_TEMPLATE_ID`, or the account's first). `kit.mjs` has the calls; `week-email.ts` builds the email for both, from what's saved, so a test is what goes out.
 
 The rules are shared by her browser, the server and the build: `src/lib/sunny-side/special.mjs` (the sale), `wall.mjs` (the products), `events.mjs` (events and their calendar file), `catalog.mjs` (the picker's catalog). The page measures what `verify.mjs` would at 320 and 390 px (the sale button on the first screen, nothing spilling, every product name within two lines) and won't save an email that fails. The weeks live in D1 table `email_weeks` (`week-store.mjs`), the events in `store_events` (`event-store.mjs`). Both create themselves; the first use of `email_weeks` moves any special saved in the page's older `email_specials` table over and drops that table.
+
+The admin page itself is checked with `node scripts/check-admin-boxes.mjs <page>` against a local dev server, at eight widths from 320 to 1440 px, with every folded part open: every piece of text and every control has to stay on the box it's drawn on, no fieldset's legend may sit across its box's edge, and no text may touch the inside edge of a filled panel. A check that only asks whether the page scrolls sideways missed the story's collage label sitting half off its panel, so run this one after any change to how the page looks, once with a section empty and once full. It also fails anything past the side of the screen, and `--click "<selector>"` opens a dialog first: the product picker ran off a phone, unmeasured, until it was checked open (`--click "#em-products .em-section-tools .btn-dark"`).
 
 ## The standard
 

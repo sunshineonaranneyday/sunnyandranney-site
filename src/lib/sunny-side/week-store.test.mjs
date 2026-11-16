@@ -4,7 +4,7 @@ import { Miniflare } from 'miniflare';
 import { clean, forKind } from './special.mjs';
 import { cleanWall } from './wall.mjs';
 import { cleanEvent } from './events.mjs';
-import { clearWeek, getWeek, pastWeeks, putWeek, weeksBetween, wentOut } from './week-store.mjs';
+import { clearWeek, getWeek, otherWeek, pastWeeks, putWeek, scheduledRefusal, setKit, weekToWorkOn, wentOut } from './week-store.mjs';
 import { deleteEvent, eventsFrom, getEvent, putEvent } from './event-store.mjs';
 
 // Real D1 (Miniflare's local SQLite)
@@ -54,13 +54,12 @@ test('specials saved before the page had products move over once, and the old ta
   }
 });
 
-test('past weeks with a special come newest first; a range comes in order', async () => {
+test('past weeks with a special come newest first', async () => {
   const { DB, mf } = await freshDb();
   try {
     for (const send of ['2026-11-03', '2026-11-10', '2026-11-17', '2026-11-24']) await putWeek(DB, { send, special, wall: null, by: 'staci@x', now: send, since: null });
     await putWeek(DB, { send: '2026-10-27', special: null, wall, by: 'staci@x', now: 'x', since: null });
     assert.deepEqual((await pastWeeks(DB, '2026-11-17')).map((r) => r.send), ['2026-11-10', '2026-11-03']);
-    assert.deepEqual((await weeksBetween(DB, '2026-11-10', '2026-11-24')).map((r) => r.send), ['2026-11-10', '2026-11-17', '2026-11-24']);
   } finally {
     await mf.dispose();
   }
@@ -96,4 +95,37 @@ test('a week has gone out once Kit’s send time has passed; scheduled ahead or 
   assert.equal(wentOut(at('2026-11-19T15:00:00Z'), now), false);
   assert.equal(wentOut({ kit: null }, now), false);
   assert.equal(wentOut(null, now), false);
+});
+
+test('one email is worked on: this week’s until it has gone out, then next week’s; every other week is refused', async () => {
+  const { DB, mf } = await freshDb();
+  try {
+    const MON = '2026-11-16';
+    const SAT = '2026-11-21';
+    const NEXT = '2026-11-24';
+    // Nothing saved: this week's
+    assert.equal((await weekToWorkOn(DB, MON, Date.parse('2026-11-16T17:00:00Z'))).send, SEND);
+    await putWeek(DB, { send: SEND, special, wall, by: 'staci@x', now: 't1', since: null });
+    await putWeek(DB, { send: NEXT, special, wall: null, by: 'staci@x', now: 't1', since: null });
+    // Scheduled for Tuesday morning: still this week's until it goes, then next week's, with that week's row
+    await setKit(DB, { send: SEND, id: 77, at: 't2', by: 'staci@x', sendAt: '2026-11-17T14:00:00Z' });
+    const before = await weekToWorkOn(DB, MON, Date.parse('2026-11-17T13:59:00Z'));
+    assert.deepEqual([before.send, before.week?.kit?.id], [SEND, '77']);
+    const after = await weekToWorkOn(DB, '2026-11-17', Date.parse('2026-11-17T14:00:00Z'));
+    assert.deepEqual([after.send, after.week?.wall], [NEXT, null]);
+    // Missed its Tuesday and never scheduled: still this week's, through Saturday
+    await setKit(DB, { send: SEND, id: null });
+    assert.equal((await weekToWorkOn(DB, SAT, Date.parse('2026-11-21T20:00:00Z'))).send, SEND);
+    // Sunday starts the next week
+    assert.equal((await weekToWorkOn(DB, '2026-11-22', Date.parse('2026-11-22T15:00:00Z'))).send, NEXT);
+  } finally {
+    await mf.dispose();
+  }
+  assert.equal(otherWeek(SEND, SEND), null);
+  // Scheduled in Kit: no change until the send is cancelled
+  assert.match(scheduledRefusal({ kit: { id: '77', sendAt: '2026-11-17T14:00:00Z' } }), /scheduled in Kit, so it can’t change. Cancel the send first/);
+  assert.equal(scheduledRefusal({ kit: null }), null);
+  assert.equal(scheduledRefusal(null), null);
+  assert.match(otherWeek('2026-11-10', SEND), /Nov 10 email has gone out, so it can’t change. Reload to work on the Tue, Nov 17 email/);
+  assert.match(otherWeek('2026-11-24', SEND), /Only the Tue, Nov 17 email can be worked on until it goes out/);
 });

@@ -5,6 +5,7 @@ import {
   blank,
   check,
   clean,
+  defaults,
   draftSale,
   forKind,
   isSendDate,
@@ -14,13 +15,11 @@ import {
   previewBrief,
   sendDays,
   sendLabel,
-  sendPassed,
   summary,
   termsLine,
   toSale,
   thisWeeksSend,
   typeset,
-  upcomingSends,
 } from './special.mjs';
 import { WORKWEEK_START_DAY } from '../time-clock/hours.mjs';
 import { impactFromPage } from './impact.mjs';
@@ -28,7 +27,9 @@ import { impactFromPage } from './impact.mjs';
 const SEND = '2026-11-17';
 const TERMS = { ends: '2026-11-29' };
 const tiers = (rows, extra = {}) => clean({ kind: 'tiers', headline: 'The holidays are here. So are the savings.', tiers: rows, ...TERMS, ...extra });
-const percent = (extra = {}) => clean({ kind: 'percent', percent: 20, what: 'everything', ...TERMS, ...extra });
+const percent = (extra = {}) => clean({ kind: 'percent', percent: 20, ...TERMS, ...extra });
+/** A special as saved before 2026-11-16, when it had its own label, button, link, fine print and "off what". */
+const OLD_EXTRAS = { label: 'Our label', cta: 'Click here', link: '//evil.example/x', details: 'Old fine print.', what: 'all rugs' };
 
 // ─── The email's building blocks ─────────────────────────────────────
 test('escape covers the five characters HTML cares about', () => {
@@ -124,8 +125,8 @@ test('clean reads numbers the way people type them and drops anything unknown', 
   assert.deepEqual(s.tiers, [{ spend: 1000, percent: 20 }, { spend: null, percent: null }]);
   assert.equal('hack' in s, false);
   assert.equal(clean({ kind: 'nope' }).kind, '');
-  assert.equal(clean({ link: 'https://www.sunnyandranney.com/shop/?sale=true' }).link, '/shop/?sale=true');
-  assert.equal(clean({ link: 'https://sunnyandranney.com' }).link, '/');
+  // Only the deal, the headline and the last day are Staci's: anything an old special saved besides is dropped
+  assert.deepEqual(Object.keys(clean({ kind: 'percent', percent: 20, ...TERMS, ...OLD_EXTRAS })).sort(), ['ends', 'headline', 'kind', 'percent', 'tiers']);
 });
 
 test('a good tiered special has nothing wrong with it', () => {
@@ -147,8 +148,9 @@ test('tiers need round, growing amounts and growing percents, 2 to 4 of them', (
 
 test('each kind asks only for what it needs', () => {
   assert.match(check(percent({ percent: '' }), SEND).percent, /Add the percent/);
-  assert.match(check(percent({ what: '' }), SEND).what, /what it’s off/);
   assert.deepEqual(check(percent(), SEND), {});
+  // Nothing else is asked of any kind, so nothing else can be wrong
+  for (const s of [percent(OLD_EXTRAS), tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }], OLD_EXTRAS), clean({ kind: 'headline', headline: 'Hi', ...OLD_EXTRAS })]) assert.deepEqual(check(s, SEND), {});
   assert.match(check(clean({ kind: 'headline' }), SEND).headline, /Add the headline/);
   // A headline week has no discount, so it has no terms to give
   assert.deepEqual(check(clean({ kind: 'headline', headline: 'Hi' }), SEND), {});
@@ -156,12 +158,15 @@ test('each kind asks only for what it needs', () => {
   assert.match(check(clean({ kind: 'headline', headline: 'x'.repeat(71) }), SEND).headline, /70 characters at most. This one is 71/);
 });
 
-test('the button only goes to pages on the store’s site', () => {
-  const link = (l) => check(clean({ kind: 'headline', headline: 'Hi', link: l }), SEND).link;
-  assert.equal(link('/shop/?sale=true'), undefined);
-  assert.match(link('//evil.example'), /starting with \//);
-  assert.match(link('javascript:alert(1)'), /starting with \//);
-  assert.match(link('https://other.example/x'), /starting with \//);
+test('the words around the deal are always the store’s, whatever an old special saved', () => {
+  for (const kind of ['tiers', 'percent', 'headline']) {
+    const s = clean({ kind, headline: 'Hi', tiers: [{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }], percent: 20, ...TERMS, ...OLD_EXTRAS });
+    const sale = toSale(s);
+    const d = defaults(kind);
+    assert.deepEqual([sale.name, sale.cta, sale.url], [d.label, d.cta, d.link], kind);
+    assert.ok(!JSON.stringify(sale).includes('evil') && !JSON.stringify(sale).includes('Old fine print') && !JSON.stringify(sale).includes('rugs'), kind);
+    assert.ok(sale.url.startsWith('/') && !sale.url.startsWith('//'), kind);
+  }
 });
 
 test('a discount can’t be saved without its last day; where it counts is never asked', () => {
@@ -187,12 +192,9 @@ test('an end date has to fall after the email goes out, and not too far after', 
 test('the offer gets the store’s defaults, curly quotes and safe HTML', () => {
   const sale = toSale(percent());
   assert.deepEqual(sale, { kind: 'percent', name: 'Storewide sale', cta: 'Shop the sale', url: '/shop/', percent: 20, what: 'everything.', details: 'In the showroom and online. Ends Sunday, Nov 29.' });
-  assert.equal(toSale(percent({ percent: 15, what: 'all rugs!' })).name, 'This week’s sale');
-  assert.equal(toSale(percent({ percent: 15, what: 'all rugs!' })).what, 'all rugs!');
-  assert.equal(toSale(percent({ percent: 15, what: 'all rugs!' })).url, '/shop/?sale=true');
-  const h = toSale(clean({ kind: 'headline', headline: `Kids' crafts & "Santa Paws" <3`, details: 'Free gift wrap all week.' }));
+  const h = toSale(clean({ kind: 'headline', headline: `Kids' crafts & "Santa Paws" <3` }));
   assert.equal(h.headline, 'Kids&#8217; crafts &amp; &#8220;Santa Paws&#8221; &lt;3');
-  assert.equal(h.details, 'Free gift wrap all week.');
+  assert.equal(h.details, undefined, 'a week with no sale has no fine print');
   assert.equal(h.url, '/shop/?collection=new-arrivals');
   assert.equal(h.cta, 'See what’s new');
   assert.equal(typeset("'Tis the season"), '&#8216;Tis the season');
@@ -226,21 +228,22 @@ test('the subject and preheader can only promise what the offer gives', () => {
 test('spend more, save more counts the whole order, so its button opens the whole shop', () => {
   const t = toSale(tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }]));
   assert.equal(t.url, '/shop/');
-  assert.equal(toSale(tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }], { link: '/shop/?sale=true' })).url, '/shop/?sale=true', 'Staci can still pick another page');
+  assert.equal(toSale(tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }], { link: '/shop/?sale=true' })).url, '/shop/', 'a link saved before is ignored');
 });
 
-test('the fine print gives the terms first, then anything Staci added', () => {
+test('the fine print is the terms, and only the terms', () => {
   assert.equal(termsLine(percent()), 'In the showroom and online. Ends Sunday, Nov 29.');
   assert.equal(termsLine(percent({ ends: '2026-11-22' })), 'In the showroom and online. Ends Sunday, Nov 22.');
-  assert.equal(toSale(percent({ details: 'Can’t be combined with other offers.' })).details, 'In the showroom and online. Ends Sunday, Nov 29. Can’t be combined with other offers.');
+  assert.equal(toSale(percent({ details: 'Can’t be combined with other offers.' })).details, 'In the showroom and online. Ends Sunday, Nov 29.');
   // Old headline specials saved an end date; a headline week has no terms, so it's left out
   assert.equal(termsLine(clean({ kind: 'headline', headline: 'Hi', ends: '2026-11-22' })), '');
 });
 
 test('saving keeps only the kind’s own fields', () => {
   const s = clean({ ...blank('percent'), percent: 20, headline: 'left over from tiers' });
-  assert.deepEqual(Object.keys(forKind(s)).sort(), ['cta', 'details', 'ends', 'kind', 'label', 'link', 'percent', 'what']);
-  assert.deepEqual(Object.keys(forKind(clean({ ...blank('headline'), headline: 'Hi', ends: '2026-11-22' }))).sort(), ['cta', 'details', 'headline', 'kind', 'label', 'link']);
+  assert.deepEqual(Object.keys(forKind(s)).sort(), ['ends', 'kind', 'percent']);
+  assert.deepEqual(Object.keys(forKind(clean({ ...blank('tiers'), headline: 'Hi', percent: 20 }))).sort(), ['ends', 'headline', 'kind', 'tiers']);
+  assert.deepEqual(Object.keys(forKind(clean({ ...blank('headline'), headline: 'Hi', ends: '2026-11-22' }))).sort(), ['headline', 'kind']);
 });
 
 test('the preview draws an unfinished special without breaking', () => {
@@ -262,9 +265,10 @@ test('the email goes out on Tuesdays', () => {
   assert.equal(nextSend('2026-11-11'), '2026-11-17');
   assert.equal(nextSend('2026-11-17'), '2026-11-17');
   assert.equal(nextSend('2026-11-15'), '2026-11-17');
-  // The page lists this week's email until its Saturday, so one that missed Tuesday can still go
-  assert.deepEqual(upcomingSends('2026-11-11', 3), ['2026-11-10', '2026-11-17', '2026-11-24']);
-  assert.deepEqual(upcomingSends('2026-11-15', 2), ['2026-11-17', '2026-11-24']);
+  // This week's email stays this week's until its Saturday, so one that missed Tuesday can still go
+  assert.equal(thisWeeksSend('2026-11-11'), '2026-11-10');
+  assert.equal(thisWeeksSend('2026-11-14'), '2026-11-10');
+  assert.equal(thisWeeksSend('2026-11-15'), '2026-11-17');
   assert.equal(isSendDate('2026-11-17'), true);
   assert.equal(isSendDate('2026-11-18'), false);
   assert.equal(isSendDate('2026-13-01'), false);
@@ -282,8 +286,6 @@ test('an email can go any day of its week, Sunday to Saturday like the store’s
   assert.equal(isSendDay('2026-11-17', '2026-11-21'), true);
   assert.equal(isSendDay('2026-11-17', '2026-11-22'), false);
   assert.equal(isSendDay('2026-11-18', '2026-11-18'), false, 'only a Tuesday names an email');
-  assert.equal(sendPassed('2026-11-17', '2026-11-21'), false);
-  assert.equal(sendPassed('2026-11-17', '2026-11-22'), true);
 });
 
 test('the email to work on is this week’s until it has gone out, then next week’s', () => {
