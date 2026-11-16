@@ -4,6 +4,7 @@ import { batchSetProductAvailability, pruneStaleAvailability, batchSetInventoryI
 import { ensureProductRedirect } from '@/lib/shopify-redirects';
 import { viaGateway, aiCapped } from '@/lib/ai';
 import collectionsConfig from '@/content/settings/collections.json';
+import { coverage, ensureWebsiteChannels, sweepWebsiteChannels } from '@/lib/website-channel.mjs';
 
 export const prerender = false;
 
@@ -114,14 +115,54 @@ async function fetchInventoryItemMap(
   return results;
 }
 
-// Publication GIDs to auto-publish new products to (Headless, POS, Google & YouTube).
-// Online Store is intentionally excluded — sunnyandranney.com is the public storefront,
-// shop.sunnyandranney.com is being phased out via /products/{handle} redirects.
-const AUTOPUBLISH_PUBLICATIONS = [
-  'gid://shopify/Publication/284019392796', // Sunny & Ranney Headless
-  'gid://shopify/Publication/270874607900', // Point of Sale
-  'gid://shopify/Publication/280934121756', // Google & YouTube
-];
+/** Admin GraphQL as a function of (query, variables) → JSON body, for src/lib/website-channel.mjs. */
+function adminGraphql(domain: string, adminToken: string) {
+  return async (query: string, variables?: object): Promise<any> => {
+    const res = await fetch(`https://${domain}/admin/api/2025-01/graphql.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
+      body: JSON.stringify({ query, variables }),
+    });
+    if (!res.ok) return { errors: [{ message: `HTTP ${res.status}` }] };
+    return res.json();
+  };
+}
+
+const COVERAGE_KEY = 'settings:website_coverage';
+const WEBSITE_COLLECTIONS: string[] = collectionsConfig.filter((c: any) => c.enabled).map((c: any) => c.handle);
+/** How long a sweep inside a webhook's spare time may spend fixing; the rest waits for the next. */
+const SWEEP_FIX_MS = 10_000;
+
+/**
+ * Every product in the website's collections put on its sales channels (website, Point of
+ * Sale, Google; off Online Store: src/lib/website-channel.mjs), then the in-stock ones
+ * still missing from the live site recorded for the admin's Today page. Never fails the
+ * sync: a failed check is recorded as one. Fixes left for lack of time are owed to the
+ * next full sync, so one is asked for.
+ */
+async function sweepAndRecordCoverage(domain: string, origin: string) {
+  const previous = await env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(COVERAGE_KEY).first<{ value: string }>()
+    .then((r) => (r?.value ? JSON.parse(r.value) : null)).catch(() => null);
+  let record: Record<string, unknown>;
+  try {
+    if (!env.SHOPIFY_CLIENT_ID || !env.SHOPIFY_CLIENT_SECRET) throw new Error('SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET aren’t set.');
+    const adminToken = await getAdminAccessToken(domain, env.SHOPIFY_CLIENT_ID, env.SHOPIFY_CLIENT_SECRET);
+    const site = await fetch(`${origin}/shop/data.json`, { signal: AbortSignal.timeout(15000) }).then((r) => (r.ok ? r.json() : null)) as { productDataMap?: Record<string, unknown> } | null;
+    if (!site?.productDataMap) throw new Error('The live site’s product list couldn’t be read.');
+    const sweep = await sweepWebsiteChannels(adminGraphql(domain, adminToken), WEBSITE_COLLECTIONS, new Set(Object.keys(site.productDataMap)), { deadline: Date.now() + SWEEP_FIX_MS });
+    const cov = coverage(sweep.missing, previous?.firstSeen ?? {}, new Date());
+    record = { ...cov, checked: sweep.checked, fixed: sweep.fixed, failed: sweep.failed, pending: sweep.pending, error: null };
+    if (sweep.fixed.length || sweep.failed.length || sweep.pending) console.log(JSON.stringify({ at: 'website-sweep', fixed: sweep.fixed.length, failed: sweep.failed, pending: sweep.pending }));
+    if (sweep.pending || sweep.failed.length) await markCatalogChanged();
+  } catch (err: any) {
+    console.error('Website sweep failed:', err?.message);
+    record = { ...(previous ?? {}), checkedAt: new Date().toISOString(), error: err?.message || 'unknown' };
+  }
+  await env.DB.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).bind(COVERAGE_KEY, JSON.stringify(record)).run();
+}
 
 /** Exchange client credentials for a 24h Admin API access token. */
 async function getAdminAccessToken(domain: string, clientId: string, clientSecret: string): Promise<string> {
@@ -137,41 +178,6 @@ async function getAdminAccessToken(domain: string, clientId: string, clientSecre
   if (!res.ok) throw new Error(`Token exchange failed: ${res.status}`);
   const data = await res.json() as { access_token: string };
   return data.access_token;
-}
-
-/** Publish a product to the configured sales channels via Admin GraphQL. */
-async function publishProductToChannels(
-  domain: string,
-  adminToken: string,
-  productGid: string,
-): Promise<{ errors: string[] }> {
-  const mutation = `
-    mutation publishablePublish($id: ID!, $input: [PublicationInput!]!) {
-      publishablePublish(id: $id, input: $input) {
-        userErrors { field message }
-      }
-    }
-  `;
-  const res = await fetch(`https://${domain}/admin/api/2025-01/graphql.json`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': adminToken,
-    },
-    body: JSON.stringify({
-      query: mutation,
-      variables: {
-        id: productGid,
-        input: AUTOPUBLISH_PUBLICATIONS.map(publicationId => ({ publicationId })),
-      },
-    }),
-  });
-  if (!res.ok) return { errors: [`HTTP ${res.status}`] };
-  const json: any = await res.json();
-  const userErrors = json.data?.publishablePublish?.userErrors || [];
-  // "already published" errors are benign — treat as success
-  const fatal = userErrors.filter((e: any) => !/already/i.test(e.message || ''));
-  return { errors: fatal.map((e: any) => `${e.field?.join('.')}: ${e.message}`) };
 }
 
 /** Text used to generate the embedding — rich enough for semantic search */
@@ -491,6 +497,10 @@ async function runFullSync({ ai, vectorize, domain, token, origin, syncSecret }:
     console.error('Deploy coordinator error:', err);
   }
 
+  // Sales channels put right, and what's missing from the site recorded. After the rebuild
+  // is asked for: the rebuild waits 15 minutes, so what this publishes still makes it in.
+  await sweepAndRecordCoverage(domain, origin);
+
   // A change noted while this ran is left for the next sync.
   await env.DB.prepare('DELETE FROM settings WHERE key = ? AND updated_at < ?')
     .bind(CHANGED_KEY, startedAt).run();
@@ -557,10 +567,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const domain = env.PUBLIC_SHOPIFY_STORE_DOMAIN || 'sunnyandranney.myshopify.com';
   const token = env.PUBLIC_SHOPIFY_STOREFRONT_TOKEN || '';
 
-  // Admin-API-dependent side effects (auto-publish, redirect ensure) share a
+  // Admin-API-dependent side effects (sales channels, redirect ensure) share a
   // single token exchange. Non-fatal on failure — a miss gets caught on the
-  // next products/update webhook or manual sync.
-  let autoPublishResult: { productId?: string; errors: string[] } | null = null;
+  // next products/update webhook or the next full sync's sweep.
+  let channelResult: { published?: string[]; unpublished?: string[]; error?: string } | null = null;
   let redirectResult: { handle?: string; action?: string; error?: string } | null = null;
 
   const needsAdminApi =
@@ -579,16 +589,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
       console.error('Admin token exchange failed (non-critical):', err?.message);
     }
 
-    // Auto-publish: only on products/create (existing behavior).
-    if (adminToken && product && shopifyTopic === 'products/create') {
+    // Sales channels (src/lib/website-channel.mjs): on both create and update, so a product
+    // made Active later (created as a Draft) reaches the website, Point of Sale and Google too.
+    if (adminToken && product?.id) {
       try {
-        const productGid = `gid://shopify/Product/${product.id}`;
-        const { errors } = await publishProductToChannels(domain, adminToken, productGid);
-        autoPublishResult = { productId: productGid, errors };
-        if (errors.length) console.error('Auto-publish errors:', errors);
+        const done = await ensureWebsiteChannels(adminGraphql(domain, adminToken), `gid://shopify/Product/${product.id}`, WEBSITE_COLLECTIONS);
+        channelResult = { published: done.published, unpublished: done.unpublished };
+        if (done.published.length || done.unpublished.length) console.log(JSON.stringify({ at: 'website-channel', ...done }));
       } catch (err: any) {
-        console.error('Auto-publish failed (non-critical):', err?.message);
-        autoPublishResult = { errors: [err?.message || 'unknown'] };
+        // Logged, and the next full sync's sweep tries again and records it for the Today page.
+        console.error('Website channel failed:', err?.message);
+        channelResult = { error: err?.message || 'unknown' };
+        await markCatalogChanged().catch(() => {});
       }
     }
 
@@ -701,7 +713,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           handle: node.handle,
           embedded,
           rebuilt,
-          autoPublish: autoPublishResult,
+          channels: channelResult,
           redirect: redirectResult,
         }),
         { headers: { 'Content-Type': 'application/json' } }
