@@ -1,6 +1,6 @@
 import { defineMiddleware } from 'astro:middleware';
 import { authenticate } from '@/lib/admin-auth';
-import { adminHostRedirect } from '@/lib/admin-host.mjs';
+import { EMAIL_HOST, adminHostRedirect, inScope, isEmailPath } from '@/lib/admin-host.mjs';
 
 // Case-insensitive so a route can't be reached around this check by changing
 // the case of the URL. Handlers also call requireRole, as a second gate.
@@ -44,11 +44,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   const path = decodedPath(context.url.pathname);
-  if (context.isPrerendered || !ADMIN_PATH.test(path)) return next();
-
   const isApi = path.toLowerCase().startsWith('/api/');
+  const host = context.url.hostname.toLowerCase();
+  if (context.isPrerendered) return next();
+  // The email address serves the weekly email and nothing else: not the store's own calls either.
+  if (host === EMAIL_HOST && !isEmailPath(path)) return deny(isApi, 403, 'Not authorized');
+  if (!ADMIN_PATH.test(path)) return next();
+
   const identity = await authenticate(context.request, context.locals.runtime?.env ?? {});
   if (!identity) return deny(isApi, 403, 'Not authorized');
+  // Decided here, before any page runs, so a page added later is closed to an email-only login.
+  if (!inScope(identity, host, path)) return deny(isApi, 403, 'Not authorized');
 
   const method = context.request.method;
   if (method !== 'GET' && method !== 'HEAD') {

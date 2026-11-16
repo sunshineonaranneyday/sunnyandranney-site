@@ -5,9 +5,9 @@ import { addPerson, listPeople, removePerson } from '@/lib/sunny-side/test-store
 
 export const prerender = false;
 
-/** Puts someone on the list a weekly email's test can go to. Managers only. */
+/** Puts someone on the list a weekly email's test can go to. Managers and email-only logins. */
 export const PUT: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
   const body = await readJson(context.request);
   const person = cleanPerson(body ?? {});
@@ -18,9 +18,9 @@ export const PUT: APIRoute = async (context) => {
   return json({ ok: true, person, people: testPeople(await listPeople(db), admin.email) });
 };
 
-/** Takes someone off the list. Managers only. */
+/** Takes someone off the list. Managers and email-only logins. */
 export const DELETE: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
   const body = await readJson(context.request);
   const email = String(body?.email ?? '').trim().toLowerCase();

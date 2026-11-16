@@ -10,7 +10,7 @@ import AdminBase from '@/layouts/AdminBase.astro';
 import { kitClient, sentEmails } from '@/lib/sunny-side/kit.mjs';
 
 const admin = Astro.locals.admin;
-if (admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
+if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
 
 const env = Astro.locals.runtime.env;
 let sent: Awaited<ReturnType<typeof sentEmails>> = [];

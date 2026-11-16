@@ -18,12 +18,12 @@ function conflict(title: string, current: { updatedAt: string; updatedBy: string
 }
 
 /**
- * Saves one of the store's events. Managers only. A new event (since: null) gets its address
+ * Saves one of the store's events. Managers and email-only logins. A new event (since: null) gets its address
  * from its name and first date; an event keeps its address after that, because emails already
  * sent link to its calendar file.
  */
 export const PUT: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
 
   const body = await readJson(context.request);
@@ -40,9 +40,9 @@ export const PUT: APIRoute = async (context) => {
   return json({ ok: true, event: saved.record!.event, updatedAt: saved.record!.updatedAt, updatedBy: saved.record!.updatedBy });
 };
 
-/** Takes one of the store's events away. Managers only. */
+/** Takes one of the store's events away. Managers and email-only logins. */
 export const DELETE: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
 
   const body = await readJson(context.request);

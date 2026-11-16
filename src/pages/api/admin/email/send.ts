@@ -22,11 +22,11 @@ async function sendOf(db: D1Database, body: Record<string, unknown> | null): Pro
 
 /**
  * Schedules the week's email, as saved, to every subscriber, through Kit, on a day of its week
- * (sendDays; Tuesday is the usual one) at a time, Eastern. Managers only. Built as of that day,
+ * (sendDays; Tuesday is the usual one) at a time, Eastern. Managers and email-only logins. Built as of that day,
  * kept off the web, and checked with Kit once scheduled.
  */
 export const PUT: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
   const env = context.locals.runtime.env;
   if (!env.KIT_API_KEY) return json({ error: 'The site isn’t connected to Kit: KIT_API_KEY isn’t set.' }, 503);
@@ -77,9 +77,9 @@ export const PUT: APIRoute = async (context) => {
   }
 };
 
-/** Cancels the scheduled send, before it goes. Managers only. */
+/** Cancels the scheduled send, before it goes. Managers and email-only logins. */
 export const DELETE: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager');
+  const admin = requireRole(context.locals, 'manager', 'email');
   if (admin instanceof Response) return admin;
   const env = context.locals.runtime.env;
   if (!env.KIT_API_KEY) return json({ error: 'The site isn’t connected to Kit: KIT_API_KEY isn’t set.' }, 503);

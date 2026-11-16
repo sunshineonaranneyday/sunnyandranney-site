@@ -17,7 +17,9 @@ declare namespace Cloudflare {
     SHOPIFY_ADMIN_TOKEN?: string;
     CF_ACCESS_TEAM_DOMAIN?: string;
     CF_ACCESS_AUD?: string;
+    CF_ACCESS_EMAIL_AUD?: string;
     ADMIN_MANAGER_EMAILS?: string;
+    ADMIN_EMAIL_EMAILS?: string;
     ADMIN_KIOSK_EMAILS?: string;
     ADMIN_KIOSK_SERVICE_TOKENS?: string;
     ADMIN_OWNER_EMAILS?: string;
