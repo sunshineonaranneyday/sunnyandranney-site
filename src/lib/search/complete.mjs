@@ -5,8 +5,8 @@
  * ("gray sofa", "swivel chair": three pieces or more), and the names its product lines
  * share ("Dovely"). Pure functions, like the engine, so the tests run them in Node.
  */
-import { normalize, search, stem, tokens, parse } from './engine.mjs';
-import { CHEAP, COLORS, FEATURES, KINDS, MATERIALS, PAGES, REAL_WORDS, ROOMS, STOPWORDS, STYLES } from './lexicon.mjs';
+import { normalize, search, tokens, parse } from './engine.mjs';
+import { COLORS, FEATURES, KINDS, MATERIALS, PAGES, ROOMS, STOPWORDS, STYLES, CHEAP } from './lexicon.mjs';
 
 const LEXICON = new Set(
   [...KINDS, ...ROOMS, ...COLORS, ...MATERIALS, ...FEATURES, ...PAGES]
@@ -15,12 +15,6 @@ const LEXICON = new Set(
     .flatMap((s) => tokens(s)),
 );
 const STOP = new Set([...STOPWORDS].flatMap((w) => tokens(w)));
-const REAL_TOKENS = new Set(REAL_WORDS.flatMap((w) => tokens(w)));
-/**
- * Phrases with filler words ("chair and a half", "table for 4", "chair that rocks") help read a
- * query, but as a suggestion they promise something narrower than the kind they find.
- */
-const hasFiller = (phrase) => tokens(phrase).some((w) => STOP.has(w));
 /** A kind too broad to suggest on its own ("chair" is every chair). */
 const BROAD = new Set(['chair']);
 /** A look needs this many pieces of a kind before it's worth suggesting. */
@@ -45,7 +39,9 @@ function prepared(index) {
   const ofKind = new Map(KINDS.map((k) => [k.id, index.items.filter((it) => it.kinds.has(k.id))]));
   for (const k of KINDS) {
     const n = ofKind.get(k.id).length;
-    if (n) k.say.forEach((s, i) => { if (!hasFiller(s)) add(s, `k:${k.id}`, n - i * 0.001, 0); });
+    // Phrases with filler words ("chair and a half", "table for 4") help read a query, but as a
+    // suggestion they promise something narrower than the kind they find.
+    if (n) k.say.forEach((s, i) => { if (!tokens(s).some((w) => STOP.has(w))) add(s, `k:${k.id}`, n - i * 0.001, 0); });
   }
   const looks = [['colors', COLORS], ['materials', MATERIALS], ['features', FEATURES]];
   for (const k of KINDS) {
@@ -128,22 +124,14 @@ export function completions(index, raw, { max = 4 } = {}) {
   };
   run(typedKey, typedPlain, false);
 
-  // The words before the last describe a look or a price: finish the last one with a kind
-  // ("blue velvet so" → "blue velvet sofa"). Never after words that already name a kind or
-  // something else ("chest of d" isn't "chest of display cabinet").
+  // The words before the last are settled; finish the last one with a kind ("blue velvet so" → "blue velvet sofa").
   const words = typedPlain.split(' ');
-  const head = words.slice(0, -1).join(' ');
-  const h = head ? parse(head, index) : null;
-  const describes = !!h && !h.kinds.length && !h.terms.length && !h.pages.length
-    && (h.looks.length + h.rooms.length > 0 || h.price.min !== null || h.price.max !== null);
-  if (out.length < max && describes) {
+  if (out.length < max && words.length > 1) {
+    const head = words.slice(0, -1).join(' ');
     const last = words[words.length - 1];
-    // A typo before the kind is offered fixed, and says so ("gary so" → "gray sofa").
-    const lead = h.corrected ?? head;
     for (const k of KINDS) {
-      // The same rule as every other suggestion: no phrase with filler words ("chair and a half").
-      const say = k.say.find((s) => s.startsWith(last) && !hasFiller(s));
-      if (say) take(`${lead} ${say}`, !!h.corrected);
+      const say = k.say.find((s) => s.startsWith(last));
+      if (say && !BROAD.has(k.id)) take(`${head} ${say}`, false);
       if (out.length >= max) break;
     }
   }
@@ -178,29 +166,18 @@ export function popular(index, n = 6) {
 }
 
 /**
- * The results page's search, and the box's "See all" count. When the last word isn't a word
- * the store knows but starts one ("sect", "sofa tab", "loves"), the shopper was still typing:
- * the search the box was finishing comes first ("sectional", "sofa table", "loveseat"), not a
- * typo fix ("sect" isn't "set"). Then the pieces with a word that starts that way; then the
- * query as typed, typos fixed.
+ * The results page's search: the query as typed; or, when its last word looks half typed
+ * ("sof" finds nothing; "dining t" only finds anything by ignoring the "t"), the pieces with
+ * a word that starts that way, as the search box showed them.
  */
 export function results(index, raw) {
   const full = search(index, raw);
-  const typed = normalize(raw);
-  const lastRaw = typed.split(' ').pop() ?? '';
-  const last = stem(lastRaw);
-  const known = (w) => index.df.has(w) || LEXICON.has(w) || REAL_TOKENS.has(w);
-  const halfTyped = /[a-z]$/.test(typed) && !known(last) && !known(lastRaw);
-  if (!halfTyped) return { ...full, prefixed: false, completed: null };
-  const finish = completions(index, raw, { max: 3 }).find((c) => !c.corrected && normalize(c.text).startsWith(typed));
-  if (finish) {
-    const done = search(index, finish.text);
-    if (done.items.length) return { ...done, prefixed: true, completed: finish.text };
-  }
-  if (full.items.length && !full.relaxed.length && !full.query.corrected) return { ...full, prefixed: false, completed: null };
+  const words = tokens(raw);
+  const last = words[words.length - 1] ?? '';
+  const unknownLast = /[a-z]$/i.test(String(raw).trim()) && !index.df.has(last) && !LEXICON.has(last);
+  // Found nothing, or found things only by ignoring a last word of a letter or two.
+  const halfTyped = unknownLast && (!full.items.length || (last.length <= 2 && full.relaxed.includes(last)));
+  if (!halfTyped) return { ...full, prefixed: false };
   const prefixed = search(index, raw, { prefix: true });
-  // Words that start that way: only when nothing else was found, or the last word is a letter or two
-  // ("dining t"). A whole unknown word isn't the start of another ("sofa for my cat" isn't Catnapper).
-  if (prefixed.items.length && (!full.items.length || (last.length <= 2 && full.relaxed.includes(last)))) return { ...prefixed, prefixed: true, completed: null };
-  return { ...full, prefixed: false, completed: null };
+  return prefixed.items.length ? { ...prefixed, prefixed: true } : { ...full, prefixed: false };
 }

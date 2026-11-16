@@ -15,7 +15,6 @@
 export const KINDS = [
   { id: 'sofa', label: 'Sofas', say: ['sofa', 'couch', 'settee', 'davenport'], find: ['sofa', 'sofas', 'sectional', 'loveseat', 'love seat', 'chaise sofa'] },
   { id: 'sectional', label: 'Sectionals', say: ['sectional', 'sectional sofa', 'sectional couch', 'modular sofa', 'l shaped couch', 'l shaped sofa'], find: ['sectional', 'sectional sofas', 'modular'] },
-  { id: 'sleeper', label: 'Sleeper sofas', say: ['sofa bed', 'sleeper sofa', 'sleeper', 'pull out couch', 'pull out sofa', 'pullout couch', 'pullout sofa', 'futon'], find: ['sleeper', 'sofa bed', 'sofa beds', 'sleeper sofa'] },
   { id: 'loveseat', label: 'Loveseats', say: ['loveseat', 'love seat'], find: ['loveseat', 'love seat', 'loveseat sofas'] },
   { id: 'chaise', label: 'Chaises', say: ['chaise', 'chaise lounge', 'chaise longue', 'fainting couch'], find: ['chaise', 'chaise longue sofas'] },
   { id: 'recliner', label: 'Recliners', say: ['recliner', 'reclining chair', 'lazy boy', 'la z boy', 'power recliner', 'rocker recliner'], find: ['recliner', 'recliners', 'rocker', 'recl'] },
@@ -36,7 +35,7 @@ export const KINDS = [
   { id: 'bookcase', label: 'Bookcases and shelves', say: ['bookcase', 'bookshelf', 'book shelf', 'shelf', 'shelves', 'shelving', 'etagere', 'shelving unit'], find: ['bookcase', 'bookcases', 'shelf', 'shelves', 'shelving', 'etagere', 'bookcases & standing shelves', 'rack bookcases & shelves'] },
   { id: 'desk', label: 'Desks', say: ['desk', 'writing desk', 'office desk', 'vanity'], find: ['desk', 'vanity', 'writing desk'] },
   { id: 'nightstand', label: 'Nightstands', say: ['nightstand', 'night stand', 'bedside table', 'night table', 'bedside cabinet'], find: ['nightstand', 'nightstands', 'night stand'] },
-  { id: 'dresser', label: 'Dressers and chests', say: ['dresser', 'chest', 'chest of drawers', 'bureau', 'tallboy'], find: ['dresser', 'dressers', 'chest'] },
+  { id: 'dresser', label: 'Dressers and chests', say: ['dresser', 'chest', 'chest of drawers', 'bureau', 'tallboy', 'drawers'], find: ['dresser', 'dressers', 'chest'] },
   { id: 'bed', label: 'Beds', say: ['bed', 'bed frame', 'platform bed', 'headboard'], find: ['bed', 'beds', 'bed frames', 'platform beds & bed frames', 'headboard', 'headboards'] },
   { id: 'rug', label: 'Rugs', say: ['rug', 'area rug', 'carpet', 'runner', 'floor rug'], find: ['rug', 'rugs', 'runner'] },
   { id: 'mirror', label: 'Mirrors', say: ['mirror', 'wall mirror', 'floor mirror', 'standing mirror', 'vanity mirror'], find: ['mirror', 'mirrors'] },
@@ -48,7 +47,7 @@ export const KINDS = [
 /** Families of kinds: a category can add a kind to a piece, but not one from another family
  * (Shopify files one dining table under Dressers; its title says what it is). */
 export const FAMILIES = {
-  seating: ['sofa', 'sectional', 'sleeper', 'loveseat', 'chaise', 'recliner', 'glider', 'armchair', 'chair', 'dining-chair', 'stool', 'bench', 'ottoman'],
+  seating: ['sofa', 'sectional', 'loveseat', 'chaise', 'recliner', 'glider', 'armchair', 'chair', 'dining-chair', 'stool', 'bench', 'ottoman'],
   tables: ['coffee-table', 'end-table', 'console', 'dining-table', 'desk'],
   storage: ['sideboard', 'cabinet', 'tv', 'bookcase', 'nightstand', 'dresser'],
   beds: ['bed'],
@@ -71,7 +70,7 @@ export const COLORS = [
   { id: 'green', say: ['green', 'olive', 'sage', 'forest', 'emerald', 'hunter green', 'moss', 'jade', 'mint', 'pine'] },
   { id: 'white', say: ['white', 'ivory', 'cream', 'off white', 'snow', 'alabaster', 'pearl', 'chalk', 'bone'] },
   { id: 'beige', say: ['beige', 'sand', 'natural', 'oat', 'oatmeal', 'linen', 'khaki', 'taupe', 'wheat', 'flax', 'pashimina', 'pashmina', 'bisque', 'tan', 'camel', 'putty', 'mushroom'] },
-  { id: 'brown', say: ['brown', 'walnut', 'chestnut', 'espresso', 'mocha', 'chocolate', 'choco', 'brwn', 'cognac', 'caramel', 'tobacco', 'whiskey', 'rust', 'cinnamon', 'pecan', 'mahogany', 'cherry'] },
+  { id: 'brown', say: ['brown', 'walnut', 'chestnut', 'espresso', 'mocha', 'chocolate', 'choco', 'cognac', 'caramel', 'tobacco', 'whiskey', 'rust', 'cinnamon', 'pecan', 'mahogany', 'cherry'] },
   { id: 'black', say: ['black', 'ebony', 'onyx', 'jet', 'blk', 'midnight'] },
   { id: 'gold', say: ['gold', 'brass', 'champagne', 'gilded', 'bronze'] },
   { id: 'red', say: ['red', 'burgundy', 'maroon', 'brick', 'terracotta', 'coral', 'blush', 'pink', 'rose', 'mauve'] },
@@ -121,14 +120,12 @@ export const FEATURES = [
   { id: 'bar-height', say: ['bar height', 'bar-height', 'pub height'] },
   { id: 'queen', say: ['queen', 'qn', 'qu'] },
   { id: 'king', say: ['king', 'kg', 'cal king', 'california king'] },
-  { id: 'full', say: ['full'] },
+  { id: 'full', say: ['full', 'double'] },
   { id: 'twin', say: ['twin', 'single'] },
 ];
 
 /** Style words: they raise a match but never rule a product out (few products are tagged with a style). */
-export const STYLES = ['modern', 'contemporary', 'mid century', 'midcentury', 'mid-century', 'farmhouse', 'rustic', 'industrial', 'traditional', 'transitional', 'coastal', 'boho', 'bohemian', 'glam', 'scandinavian', 'minimalist', 'vintage', 'classic', 'cozy', 'comfortable', 'comfy', 'small', 'large', 'big', 'oversized', 'compact', 'apartment', 'small space', 'luxury', 'elegant', 'cute', 'unique',
-  // Sizes and shades that rank a piece but never rule one out ("tall bookcase", "light gray sofa").
-  'tall', 'short', 'low', 'narrow', 'wide', 'long', 'skinny', 'slim', 'mini', 'petite', 'double', 'light', 'lt', 'dark', 'dk', 'deep'];
+export const STYLES = ['modern', 'contemporary', 'mid century', 'midcentury', 'mid-century', 'farmhouse', 'rustic', 'industrial', 'traditional', 'transitional', 'coastal', 'boho', 'bohemian', 'glam', 'scandinavian', 'minimalist', 'vintage', 'classic', 'cozy', 'comfortable', 'comfy', 'small', 'large', 'big', 'oversized', 'compact', 'apartment', 'small space', 'luxury', 'elegant', 'cute', 'unique'];
 
 /** Words that carry no meaning in a product search. */
 export const STOPWORDS = new Set(['a', 'an', 'the', 'for', 'of', 'and', 'or', 'with', 'to', 'in', 'on', 'my', 'me', 'i', 'im', "i'm", 'need', 'needs', 'want', 'wanted', 'looking', 'look', 'find', 'some', 'something', 'anything', 'piece', 'pieces', 'that', 'which', 'this', 'is', 'are', 'it', 'its', 'do', 'you', 'have', 'has', 'any', 'nice', 'good', 'great', 'best', 'new', 'please', 'show', 'buy', 'shop', 'furniture', 'store', 'people', 'person', 'seats', 'seat', 'seating', 'nook', 'corner', 'room', 'space', 'like', 'by', 'from', 'at', 'can', 'could']);
@@ -147,17 +144,7 @@ export const PAGES = [
  * ("card" into "cart", "vase" into "base") and show pieces nobody asked for; left alone, they
  * find nothing and the shopper is offered what the store does have.
  */
-export const REAL_WORDS = ['card', 'gift', 'gift card', 'lamp', 'light', 'lighting', 'chandelier', 'pendant', 'sconce', 'vase', 'candle', 'candlestick', 'pillow', 'cushion', 'throw', 'blanket', 'quilt', 'duvet', 'comforter', 'sheet', 'bedding', 'curtain', 'drape', 'blind', 'plant', 'planter', 'pot', 'basket', 'clock', 'frame', 'picture frame', 'tray', 'bowl', 'book', 'towel', 'crib', 'toy', 'dish', 'plate', 'mug', 'cup', 'wreath', 'ornament', 'christmas', 'holiday', 'garland', 'lantern', 'hook', 'umbrella', 'hammock', 'grill', 'fan', 'heater', 'appliance', 'tv', 'television', 'piano', 'treadmill', 'bike', 'safe', 'mat', 'doormat', 'flower', 'faux plant', 'diffuser', 'soap', 'jewelry', 'bag', 'hat', 'shirt', 'clothes', 'shoe',
-  // Furniture words a one-letter fix would turn into another catalog word ("wool" → "wood", "seater" → "slater").
-  'seater', 'wool', 'hope', 'hope chest', 'slipper', 'slipper chair', 'beech', 'slat', 'cedar', 'maple', 'birch', 'elm', 'sisal', 'cotton', 'silk', 'satin', 'suede',
-  'chenille', 'tweed', 'twill', 'fur', 'sheepskin', 'cowhide', 'hide', 'plush', 'shag', 'braided', 'bunk', 'loft', 'trundle', 'daybed', 'canopy', 'poster', 'sleigh',
-  'wardrobe', 'chifforobe', 'highboy', 'lowboy', 'pantry', 'island', 'banquette', 'beanbag', 'bean bag', 'swing', 'pergola', 'firepit', 'trolley', 'cubby', 'locker',
-  'mattress', 'topper', 'footboard', 'rail', 'drum', 'pedestal', 'trestle', 'bistro', 'gateleg', 'parsons', 'tulip', 'saarinen', 'eames', 'barcelona', 'chesterfield',
-  'camelback', 'lawson', 'tuxedo', 'cabriole', 'spindle', 'windsor', 'ladderback', 'cane', 'hairpin', 'brass', 'nickel', 'lucite', 'acrylic', 'concrete', 'resin', 'teak',
-  'mini', 'cozy', 'comfy', 'kid', 'baby', 'toddler', 'teen', 'dorm', 'office', 'gaming', 'massage'];
+export const REAL_WORDS = ['card', 'gift', 'gift card', 'lamp', 'light', 'lighting', 'chandelier', 'pendant', 'sconce', 'vase', 'candle', 'candlestick', 'pillow', 'cushion', 'throw', 'blanket', 'quilt', 'duvet', 'comforter', 'sheet', 'bedding', 'curtain', 'drape', 'blind', 'plant', 'planter', 'pot', 'basket', 'clock', 'frame', 'picture frame', 'tray', 'bowl', 'book', 'towel', 'crib', 'toy', 'dish', 'plate', 'mug', 'cup', 'wreath', 'ornament', 'christmas', 'holiday', 'garland', 'lantern', 'hook', 'umbrella', 'hammock', 'grill', 'fan', 'heater', 'appliance', 'tv', 'television', 'piano', 'treadmill', 'bike', 'safe', 'mat', 'doormat', 'flower', 'faux plant', 'diffuser', 'soap', 'jewelry', 'bag', 'hat', 'shirt', 'clothes', 'shoe'];
 
 /** Price words: "under 500", "less than $1,000", "over 800", "between 200 and 400", "cheap". */
-export const CHEAP = ['cheap', 'cheapest', 'inexpensive', 'affordable', 'budget', 'bargain', 'low price', 'lowest price'];
-
-/** Sale words: pieces marked down (a compare-at price above the price), as the site's Sale tab shows. */
-export const SALE = ['sale', 'on sale', 'clearance', 'deal', 'deals', 'markdown', 'marked down', 'discounted', 'reduced', 'price drop'];
+export const CHEAP = ['cheap', 'inexpensive', 'affordable', 'budget', 'bargain', 'deal', 'deals', 'low price', 'clearance'];
