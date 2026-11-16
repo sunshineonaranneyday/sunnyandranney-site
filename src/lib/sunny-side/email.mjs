@@ -48,6 +48,22 @@ const GUTTER = 4; // between photo wall tiles
 export const SITE = 'https://sunnyandranney.com';
 const MAP = 'https://maps.app.goo.gl/QXwgPyiX93HkwjwDA';
 const CF = 'https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ';
+// The store's own files on Shopify's CDN: the only source the domain's image resizing accepts.
+export const SHOP_FILES = 'https://cdn.shopify.com/s/files/1/0930/2117/6092/';
+// Cloudflare's image resizing for the domain (on since Nov 12, 2026). It runs only on hostnames
+// Cloudflare proxies, and sunnyandranney.com itself is DNS-only to the Pages site, so it's served
+// from shop.sunnyandranney.com, the proxied hostname that redirects old shop links.
+export const RESIZE = 'https://shop.sunnyandranney.com/cdn-cgi/image';
+// The store's own uploads (the week's top photo, the story's collage) live on the site, at
+// /media/email/<id>.jpg, and go out through the same resizing, cropped around what's in them.
+let photoOrigin = SITE;
+let photoDirect = false;
+/** For the admin run locally, whose uploads aren't on the live site: show them as they are. */
+export function usePhotoOrigin(origin, { direct = false } = {}) {
+  photoOrigin = origin;
+  photoDirect = direct;
+}
+const isPng = (url) => /\.png(\?|$)/i.test(url);
 const LOGO = `${CF}/logo-tagline-light-bg/w=360,h=144,fit=scale-down,format=png`; // 1000x400 original, 2.5:1
 const PIG = `${CF}/logo-tagline-light-bg/trim=2;300;192;230,w=192,format=png`; // the flying pig, 192x84
 const GREG = `${CF}/team/greg-ranney/w=88,h=88,fit=cover,gravity=auto,quality=70,format=jpeg`;
@@ -193,8 +209,11 @@ function mostOff(sale) {
 }
 
 /** The subject and preheader as they go out, with {offer} and {upto} written from the offer. Throws if either promises what the offer doesn't give. */
+/** A subject or preheader with {offer} and {upto} written from the sale. */
+export const fillLine = (t, sale) => String(t || '').replace('{offer}', () => offerLine(sale)).replace('{upto}', () => mostOff(sale));
+
 export function lines(brief) {
-  const fill = (t) => String(t || '').replace('{offer}', () => offerLine(brief.sale)).replace('{upto}', () => mostOff(brief.sale));
+  const fill = (t) => fillLine(t, brief.sale);
   const subject = fill(brief.subject);
   const preheader = fill(brief.preheader);
   const claims = [...offerClaims(subject, brief.sale, 'subject'), ...offerClaims(preheader, brief.sale, 'preheader')];
@@ -241,6 +260,10 @@ export function offerClaims(line, sale, where) {
 const WALL_ROWS = { 4: [2, 2], 5: [1, 2, 2], 6: [2, 2, 2], 7: [1, 2, 2, 2], 8: [2, 2, 2, 2], 9: [1, 2, 2, 2, 2] };
 /** What each photo shows at 600px with the gutters taken out (3:2 for the lead, square for pairs). Outlook sizes images by these. */
 const SHAPE = { 1: [600, 400], 2: [298, 298] };
+/** The story's collage, by how many photos: one wide, then rows of two or three, like a bento box. */
+/** @type {Record<number, number[]>} */
+export const COLLAGE_ROWS = { 1: [1], 2: [2], 3: [1, 2], 4: [1, 3], 5: [1, 2, 2] };
+const COLLAGE_SHAPE = { 1: [600, 300], 2: [298, 298], 3: [197, 197] };
 
 /** Every section, top to bottom. A preview can ask for just the first few. */
 export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'story', 'events', 'mission', 'visit', 'footer'];
@@ -261,15 +284,29 @@ export class Email {
   }
 
   static photo(src, w, h) {
+    if (src.startsWith('photo:')) {
+      const file = `${photoOrigin}/media/email/${src.slice(6)}.jpg`;
+      return photoDirect ? file : `${RESIZE}/width=${w},height=${h},fit=cover,gravity=auto,quality=64,format=jpeg/${file}`;
+    }
     if (src.startsWith('cf:')) return `${CF}/${src.slice(3)}/w=${w},h=${h},fit=cover,gravity=auto,quality=64,format=jpeg`;
-    return `${src}${src.includes('?') ? '&' : '?'}width=${w}&height=${h}&crop=center&quality=64`;
+    // Shopify won't send a PNG saved with a transparency channel as a JPEG, even when nothing in it is
+    // see-through, and Mac screenshots all save one (49 of the 51 PNG-only products in stock on Nov 12,
+    // 2026 were screenshots), so the store's PNGs go through Cloudflare's resizing on its own domain
+    // (RESIZE), which sends every one as a JPEG, on white if anything is see-through. It accepts only
+    // the store's own Shopify files (SHOP_FILES). Shopify resizes the rest itself, and sends its WebP,
+    // AVIF and HEIC photos as JPEGs too, which Outlook can show. verify.mjs fetches every image as sent.
+    if (isPng(src) && src.startsWith(SHOP_FILES)) return `${RESIZE}/width=${w},height=${h},fit=cover,gravity=center,quality=64,format=jpeg,background=white/${src}`;
+    return `${src}${src.includes('?') ? '&' : '?'}width=${w}&height=${h}&crop=center&quality=64&format=jpg`;
   }
 
   img(src, w, h, alt, href, slot, radius = 0, cls = '') {
     const c = cls ? ` class="${cls}"` : '';
+    // A store photo shown straight from the site (the admin, run locally) isn't cropped by the
+    // resizing, so the browser crops it to the same shape, keeping the preview's measurements true
+    const crop = photoDirect && src.includes('/media/email/') ? `aspect-ratio:${w}/${h};object-fit:cover;` : '';
     const tag =
       `<img${c} src="${escape(src)}" width="${w}" height="${h}" alt="${escape(alt)}" style="display:block;width:100%;` +
-      `max-width:${w}px;height:auto;border:0;border-radius:${radius}px;">`;
+      `max-width:${w}px;height:auto;${crop}border:0;border-radius:${radius}px;">`;
     if (!href) return tag;
     return `<a href="${escape(this.url(href, slot))}" target="_blank" style="display:block;color:${CHARCOAL};">${tag}</a>`;
   }
@@ -470,8 +507,34 @@ export class Email {
       this.band(Email.label(s.label) + Email.h2(s.headline) + Email.text(s.body, { mb: S1 }) + this.link(`${s.cta[0]} &#8594;`, href, 'story-link'), {
         top: S5,
         bottom: S2,
-      }) + this.fullPhoto(s.photo, 600, 240, href, 'story-photo')
+      }) + (s.photos?.length ? this.collage(s.photos, href) : s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo') : '')
     );
+  }
+
+  /**
+   * The story's photos, edge to edge: the first wide, then rows of two or three (COLLAGE_ROWS),
+   * each cropped to its cell around what's in it. Gutters are split inside the cells, as on the
+   * wall, so the outer photos touch the edges; rows after the first sit a gutter below.
+   */
+  collage(photos, href) {
+    const layout = COLLAGE_ROWS[photos.length];
+    if (!layout) throw new Error(`story.photos: the collage takes 1 to 5 photos, not ${photos.length}`);
+    let rows = '';
+    let i = 0;
+    layout.forEach((n, r) => {
+      const [cw, ch] = COLLAGE_SHAPE[n];
+      let tds = '';
+      photos.slice(i, i + n).forEach((ph, k) => {
+        const left = (GUTTER * k) / n, right = (GUTTER * (n - 1 - k)) / n;
+        tds +=
+          `<td width="${pct(100 / n)}%" valign="top" style="padding:${r ? GUTTER : 0}px ${px(right)} 0 ${px(left)};">` +
+          this.img(Email.photo(ph.src, cw * 2, ch * 2), cw, ch, ph.alt, href, `story-photo-${i + k + 1}`) +
+          '</td>';
+      });
+      rows += '<tr><td>' + Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"') + '</td></tr>';
+      i += n;
+    });
+    return this.band(Email.T(rows), { top: 0, side: 0, bottom: 0 });
   }
 
   /** The dates still ahead on send day, in order. Month, day and weekday all come from "date". */
@@ -528,29 +591,57 @@ export class Email {
     if (!items.slice(1).every((it, k) => daysBetween(items[k].d, it.d) === 7)) {
       throw new Error(`events: "${e.title}" has calendar links, but its dates aren't a week apart.`);
     }
+    const google = Email.google({
+      title: c.title,
+      start: c.start,
+      end: c.end,
+      day: items[0].d,
+      details: [c.intro, ...items.map((it) => `${monthShort(it.d)} ${it.d.getUTCDate()}: ${plain(it.what)}${it.note ? `. ${plain(it.note)}` : ''}`)].join('\n'),
+      weeks: items.length,
+    });
+    return Email.text(items.length > 1 ? 'Add every date to your calendar:' : 'Add it to your calendar:', { size: 15, lh: 20, color: WHITE }) + this.calendarLinks(google, c.ics, 'cal', WHITE);
+  }
+
+  /** Google Calendar's "add this event" link: one date, or `weeks` dates a week apart. */
+  static google({ title, start, end, day, details, weeks = 1 }) {
     const hms = (t) => {
       if (!/^\d{2}:\d{2}$/.test(t || '')) throw new Error(`events: the calendar's "start" and "end" are HH:MM, like "11:00".`);
       return t.replace(':', '') + '00';
     };
-    const day = items[0].d.toISOString().slice(0, 10).replace(/-/g, '');
+    const d = day.toISOString().slice(0, 10).replace(/-/g, '');
     const q = {
       action: 'TEMPLATE',
-      text: c.title,
-      dates: `${day}T${hms(c.start)}/${day}T${hms(c.end)}`,
+      text: title,
+      dates: `${d}T${hms(start)}/${d}T${hms(end)}`,
       ctz: 'America/New_York',
       location: 'Sunny & Ranney, 109A Oak Street, Roswell, GA',
-      details: [c.intro, ...items.map((it) => `${monthShort(it.d)} ${it.d.getUTCDate()}: ${plain(it.what)}${it.note ? `. ${plain(it.note)}` : ''}`)].join('\n'),
+      details,
     };
-    if (items.length > 1) q.recur = `RRULE:FREQ=WEEKLY;COUNT=${items.length}`;
-    const google = 'https://calendar.google.com/calendar/render?' + Object.entries(q).map(([k, v]) => `${k}=${encode(v, '/')}`).join('&');
-    const dot = `<span style="font-family:${SANS};color:${WHITE};">&nbsp;&nbsp;&middot;&nbsp;&nbsp;</span>`;
+    if (weeks > 1) q.recur = `RRULE:FREQ=WEEKLY;COUNT=${weeks}`;
+    return 'https://calendar.google.com/calendar/render?' + Object.entries(q).map(([k, v]) => `${k}=${encode(v, '/')}`).join('&');
+  }
+
+  /** Google, Apple and Outlook, the last two opening the calendar file. */
+  calendarLinks(google, ics, slot, color) {
+    const dot = `<span style="font-family:${SANS};color:${color};">&nbsp;&nbsp;&middot;&nbsp;&nbsp;</span>`;
     return (
-      Email.text(items.length > 1 ? 'Add every date to your calendar:' : 'Add it to your calendar:', { size: 15, lh: 20, color: WHITE }) +
-      this.link('Google', google, 'cal-google', WHITE) +
-      dot +
-      this.link('Apple', c.ics, 'cal-apple', WHITE) +
-      dot +
-      this.link('Outlook', c.ics, 'cal-outlook', WHITE)
+      this.link('Google', google, `${slot}-google`, color) + dot + this.link('Apple', ics, `${slot}-apple`, color) + dot + this.link('Outlook', ics, `${slot}-outlook`, color)
+    );
+  }
+
+  /**
+   * The event's next date on its own, in the card that leads the event: the date people are
+   * deciding on now, for any event (a weekly series also gets "every date" below, once there's
+   * more than one). Apple and Outlook get a file with just that date (/events/<event>/<date>.ics).
+   */
+  addOne(e, it) {
+    const c = e.one;
+    const date = it.d.toISOString().slice(0, 10);
+    const google = Email.google({ title: c.title, start: c.start, end: c.end, day: it.d, details: `${plain(it.what)}${it.note ? `. ${plain(it.note)}` : ''}` });
+    return (
+      Email.gap(S1) +
+      Email.text(`Add ${monthShort(it.d)} ${it.d.getUTCDate()} to your calendar:`, { size: 14, lh: 20 }) +
+      this.calendarLinks(google, `${c.ics}/${date}.ics`, 'next', CHARCOAL)
     );
   }
 
@@ -576,6 +667,7 @@ export class Email {
               Email.text(noWidow(first.what), { size: 24, lh: 29, weight: 700, cls: 'spot' }) +
               (first.note ? Email.text(first.note, { size: 15, lh: 21 }) : '') +
               Email.text(`${first.time || e.time} at the showroom`, { size: 15, lh: 21, weight: 700 }) +
+              (e.one ? this.addOne(e, first) : '') +
               `</td>${Email.greg(first)}</tr>`,
           ) +
           '</td></tr>',
@@ -612,7 +704,9 @@ export class Email {
         Email.label(e.label ?? 'Coming up', { color: WHITE }) +
         Email.h2(e.title, { color: WHITE, mb: line ? 6 : S2 }) +
         (line ? Email.text(noWidow(line), { size: 16, lh: 24, color: WHITE, mb: S2 }) : '');
-      const foot = Email.gap(S2) + (e.calendar ? this.calendar(e, [first, ...rest]) : '');
+      // Every date, once there's more than the one the card already offers
+      const series = e.calendar && (rest.length || !e.one);
+      const foot = Email.gap(S2) + (series ? this.calendar(e, [first, ...rest]) : '');
       out += this.breather() + this.band(head + spot + agenda + foot, { bg: TEAL, bottom: S4 });
     }
     return out;

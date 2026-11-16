@@ -1,0 +1,257 @@
+/**
+ * What the weekly email page edits, and the small rules the browser needs on top of the shared
+ * ones (src/lib/sunny-side/special.mjs, wall.mjs, events.mjs, catalog.mjs).
+ */
+import { Email } from '@/lib/sunny-side/email.mjs';
+import { KINDS, LINKS, WHERE, clean, isDiscount, whole } from '@/lib/sunny-side/special.mjs';
+
+export type Kind = keyof typeof KINDS;
+export type Where = keyof typeof WHERE;
+
+export interface Special {
+  kind: Kind | '';
+  headline: string;
+  tiers: { spend: number | null; percent: number | null }[];
+  percent: number | null;
+  what: string;
+  where: Where | '';
+  label: string;
+  cta: string;
+  link: string;
+  ends: string;
+  details: string;
+}
+
+/** The sale as typed: numbers stay text until they're read, so "1,0" isn't fought while typing. */
+export interface SaleForm {
+  kind: Kind | '';
+  headline: string;
+  tiers: { spend: string; percent: string }[];
+  percent: string;
+  what: string;
+  where: Where | '';
+  label: string;
+  cta: string;
+  link: string;
+  linkOther: boolean;
+  ends: string;
+  details: string;
+}
+
+export interface Pick {
+  handle: string;
+  photo: string;
+  name: string;
+}
+export interface Wall {
+  label: string;
+  headline: string;
+  picks: Pick[];
+  arranged: 'auto' | 'hand';
+}
+
+/** One product in the shop's catalog (/shop/catalog.json). */
+export interface Product {
+  handle: string;
+  name: string;
+  title: string;
+  price: number;
+  was: number | null;
+  qty: number;
+  added: string;
+  kind: string;
+  type: string;
+  collections: string[];
+  photos: { url: string; w: number; h: number }[];
+  rank: number | null;
+  staffPick: boolean;
+}
+export interface Catalog {
+  built: string;
+  collections: { handle: string; title: string }[];
+  products: Product[];
+}
+
+export interface EventDate {
+  date: string;
+  what: string;
+  note: string;
+  greg: boolean;
+}
+export interface StoreEvent {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  when: string;
+  dates: EventDate[];
+}
+export interface EventRecord {
+  event: StoreEvent;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface WeekTab {
+  send: string;
+  label: string;
+  sale: string;
+  products: number;
+}
+export interface Other {
+  send: string;
+  label: string;
+  summary: string;
+  special: Special;
+}
+
+export interface AppProps {
+  send: string;
+  label: string;
+  today: string;
+  weeks: WeekTab[];
+  record: { special: Special | null; wall: Wall | null; updatedAt: string; updatedBy: string } | null;
+  others: Other[];
+  events: EventRecord[];
+  test: { people: TestPerson[]; me: string };
+  /** The rest of the email (parts.mjs), as saved, or blank. */
+  parts: Parts;
+  /** The store's own photos, newest first. */
+  photos: Photo[];
+  /** The week's send, once it's scheduled in Kit, with where it stands there. */
+  kitSend: KitSend | null;
+  /** The last tests of this email. */
+  tests: TestSent[];
+  /** The charity's kids, most recent reveal first (kids.mjs). */
+  kids: Kid[];
+  /** When the store's emails usually go ("HH:MM" Eastern), from Kit, or null. */
+  usualTime: string | null;
+  /** Kit's active subscribers, or null if Kit didn't say. */
+  subscribers: number | null;
+  /** The charity's numbers, read from its site when the page loaded, or null if it didn't answer. */
+  impact: { rooms: string; children: string } | null;
+  /** True on a developer's machine, whose uploads aren't on the live site. */
+  local: boolean;
+}
+
+export interface Parts {
+  subject: string;
+  preheader: string;
+  /** A library photo's id, or '' for the store's wide shot. */
+  hero: string;
+  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[] };
+  /** The charity kid's slug, or '' for the most recent reveal. */
+  kid: string;
+}
+export interface Kid {
+  slug: string;
+  name: string;
+  page: string;
+  photo: { src: string; alt: string };
+  caption: string;
+  story: string;
+  revealedOn: string | null;
+  dated: 'recorded' | 'photos' | null;
+}
+export interface TestSent {
+  at: string;
+  by: string;
+  to: string[];
+}
+export interface Photo {
+  id: string;
+  w: number;
+  h: number;
+  alt: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+export interface KitSend {
+  id: string;
+  url: string;
+  at: string;
+  by: string;
+  sendAt: string;
+  status: string;
+}
+export const partsSnapshot = (p: Parts) => JSON.stringify(p);
+
+/** Someone a test can go to; the person signed in comes first, as "You". */
+export interface TestPerson {
+  name: string;
+  email: string;
+  you?: boolean;
+}
+
+// ── The sale form ──────────────────────────────────────────────────────────
+/** Leaving a number field tidies it to what will be saved: "1000" becomes "1,000", "20%" becomes "20". */
+export const tidyMoney = (v: string) => {
+  const n = whole(v);
+  return n === null ? v : n.toLocaleString('en-US');
+};
+export const tidyPercent = (v: string) => {
+  const n = whole(v);
+  return n === null ? v : String(n);
+};
+const num = (n: number | null) => (n === null ? '' : String(n));
+const money = (n: number | null) => (n === null ? '' : n.toLocaleString('en-US'));
+const twoTiers = () => [
+  { spend: '', percent: '' },
+  { spend: '', percent: '' },
+];
+
+export function saleFormOf(s: Special | null): SaleForm {
+  if (!s) return { kind: '', headline: '', tiers: twoTiers(), percent: '', what: 'everything', where: '', label: '', cta: '', link: '', linkOther: false, ends: '', details: '' };
+  return {
+    kind: s.kind,
+    headline: s.headline ?? '',
+    tiers: s.tiers?.length ? s.tiers.map((t) => ({ spend: money(t.spend), percent: num(t.percent) })) : twoTiers(),
+    percent: num(s.percent ?? null),
+    what: s.what || 'everything',
+    where: s.where ?? '',
+    label: s.label ?? '',
+    cta: s.cta ?? '',
+    link: s.link ?? '',
+    linkOther: Boolean(s.link) && !LINKS.some((l) => l.path === s.link),
+    ends: s.ends ?? '',
+    details: s.details ?? '',
+  };
+}
+
+export const specialOf = (f: SaleForm): Special => clean(f) as Special;
+
+/** Only what saving keeps, so switching kinds and back doesn't count as a change. */
+export function saleSnapshot(f: SaleForm): string {
+  const s = specialOf(f);
+  if (!s.kind) return '';
+  const keep: Record<string, unknown> = { kind: s.kind, label: s.label, cta: s.cta, link: s.link, details: s.details };
+  if (isDiscount(s.kind)) Object.assign(keep, { where: s.where, ends: s.ends });
+  if (s.kind === 'tiers') Object.assign(keep, { headline: s.headline, tiers: s.tiers });
+  if (s.kind === 'percent') Object.assign(keep, { percent: s.percent, what: s.what });
+  if (s.kind === 'headline') keep.headline = s.headline;
+  return JSON.stringify(keep);
+}
+
+export const wallSnapshot = (w: Wall) => (w.picks.length ? JSON.stringify({ l: w.label, h: w.headline, p: w.picks, a: w.arranged }) : '');
+
+// ── Small helpers ──────────────────────────────────────────────────────────
+export const fieldId = (key: string) => `em-${key.replace(/[.]/g, '-')}`;
+export const who = (email: string) => email.split('@')[0].replace(/^./, (c) => c.toUpperCase());
+export const at = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+export const toast = (message: string, tone?: 'ok' | 'error') => document.dispatchEvent(new CustomEvent('admin:toast', { detail: { message, tone } }));
+export const usd = (n: number) => '$' + (Number.isInteger(n) ? n.toLocaleString('en-US') : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+/** A photo at a size and crop, as a thumbnail, sent the way the email sends it (a JPEG). */
+export const thumb = (url: string, w: number, h = w): string => Email.photo(url, w, h);
+
+/** Fetches JSON from the admin's API, saying what went wrong in words fit to show. */
+export async function send<T>(url: string, method: 'POST' | 'PUT' | 'DELETE', body: unknown): Promise<{ ok: true; body: T } | { ok: false; error: string; body: Record<string, unknown> }> {
+  try {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) return { ok: false, error: (data.error as string) || 'That didn’t save. Try again.', body: data };
+    return { ok: true, body: data as T };
+  } catch {
+    return { ok: false, error: 'That didn’t save: the connection dropped. Try again.', body: {} };
+  }
+}

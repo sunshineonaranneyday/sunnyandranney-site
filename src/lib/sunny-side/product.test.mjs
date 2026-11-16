@@ -51,10 +51,9 @@ test('prices read the way the store writes them', () => {
   assert.equal(money('130.00'), '$130');
 });
 
-test('the tile photo skips PNGs, which Shopify cannot shrink', () => {
-  assert.equal(photoFor(['https://cdn.shopify.com/x.png?v=1', 'https://cdn.shopify.com/y.jpg?v=2']), 'https://cdn.shopify.com/y.jpg?v=2');
-  assert.equal(photoFor(['https://cdn.shopify.com/x.PNG']), null);
-  assert.equal(photoFor(['https://cdn.shopify.com/z.webp']), 'https://cdn.shopify.com/z.webp');
+test('the tile photo is the product’s main photo, whatever its format', () => {
+  assert.equal(photoFor(['https://cdn.shopify.com/x.png?v=1', 'https://cdn.shopify.com/y.jpg?v=2']), 'https://cdn.shopify.com/x.png?v=1');
+  assert.equal(photoFor([]), null);
 });
 
 test('only the store’s own product pages count as products', () => {

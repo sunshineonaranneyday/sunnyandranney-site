@@ -71,10 +71,28 @@
       "Plan your visit",
       "/visit/"
     ],
-    "photo": {
-      "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/shopping_1.jpg?v=1776021813",
-      "alt": "Hudson castered ottoman in a living room"
-    }
+    "photos": [
+      {
+        "src": "cf:sunny-ranney-interior",
+        "alt": "The showroom floor"
+      },
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/vitoswivelchairinpebbletan_lifestyle_r1_lp9qm9n7aeyf8bxk.jpg?v=1774477996",
+        "alt": "A swivel chair in pebble"
+      },
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/255_harperswcloud20room.jpg?v=1776024853",
+        "alt": "A cloud swivel chair"
+      },
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/Screenshot2026-06-11at12.52.45PM.png?v=1781196806",
+        "alt": "A charcoal swivel chair"
+      },
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/shopping_1.jpg?v=1776021813",
+        "alt": "An ottoman in a living room"
+      }
+    ]
   },
   "events": [
     {
@@ -114,7 +132,13 @@
         "intro": "Holiday crafts for kids, 11am-2pm:",
         "ics": "https://sunnyandranney.com/events/kids-christmas-saturdays-2026.ics"
       },
-      "time": "11am&#8211;2pm"
+      "time": "11am&#8211;2pm",
+      "one": {
+        "title": "Kids' Christmas Saturdays at Sunny & Ranney",
+        "start": "11:00",
+        "end": "14:00",
+        "ics": "https://sunnyandranney.com/events/kids-christmas-saturdays-2026"
+      }
     }
   ],
   "mission": {

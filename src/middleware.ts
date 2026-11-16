@@ -5,6 +5,10 @@ import { adminHostRedirect } from '@/lib/admin-host.mjs';
 // Case-insensitive so a route can't be reached around this check by changing
 // the case of the URL. Handlers also call requireRole, as a second gate.
 const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/i;
+// A store event's calendar file, all its dates or one: /events/<event>.ics, /events/<event>/<date>.ics
+const CALENDAR_FILE = /^\/events\/[a-z0-9-]{1,81}(\/\d{4}-\d{2}-\d{2})?\.ics$/;
+// A photo uploaded for the weekly email: /media/email/<id>.jpg
+const EMAIL_PHOTO = /^\/media\/email\/[a-z0-9]{12,40}\.jpg$/;
 
 const SECURITY_HEADERS: Record<string, string> = {
   'Cache-Control': 'no-store',
@@ -13,9 +17,10 @@ const SECURITY_HEADERS: Record<string, string> = {
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'same-origin',
   'Content-Security-Policy':
-    // Images may also come from the store's own Cloudflare Images account (the logo), and from
-    // the store's own Shopify files, where product photos live until they move to Cloudflare Images.
-    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ/ https://cdn.shopify.com/s/files/1/0930/2117/6092/; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    // Images may also come from the store's own Cloudflare Images account (the logo), from the
+    // store's own Shopify files, where product photos live until they move to Cloudflare Images, and
+    // from the domain's image resizing, which sends those files' PNGs as JPEGs (email.mjs, RESIZE).
+    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ/ https://cdn.shopify.com/s/files/1/0930/2117/6092/ https://shop.sunnyandranney.com/cdn-cgi/image/; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
 };
 
 function decodedPath(pathname: string): string {
@@ -41,6 +46,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
     const elsewhere = adminHostRedirect(context.url, context.request.method);
     if (elsewhere) return context.redirect(elsewhere, 302);
   }
+
+  // A store event's calendar file and an email photo keep the addresses the emails use; the site's
+  // trailing-slash rule would otherwise refuse them (src/pages/events/, src/pages/media/email/).
+  if (CALENDAR_FILE.test(context.url.pathname) || EMAIL_PHOTO.test(context.url.pathname)) return next(`${context.url.pathname}/`);
 
   const path = decodedPath(context.url.pathname);
   if (context.isPrerendered || !ADMIN_PATH.test(path)) return next();

@@ -8,8 +8,11 @@
 // the full 600px or sit on the 536px column; cards and the words that start a row sit on the
 // column), a phone render whose sale button lands below the first screen, CSS that Gmail strips
 // (these renders load the raw file, so a layout that leans on stripped CSS would pass here and
-// break in the inbox), and any image with dark artwork on a transparent background (Gmail and
-// Outlook darken backgrounds in dark mode but never images, so that artwork vanishes).
+// break in the inbox), any image with dark artwork on a transparent background (Gmail and
+// Outlook darken backgrounds in dark mode but never images, so that artwork vanishes), and any
+// image that, fetched as an inbox that can't show WebP would fetch it, isn't a JPEG, PNG or GIF or
+// weighs over 150KB (on Nov 12, 2026 the heaviest good image was the 103KB hero, and the screenshot
+// PNGs Shopify wouldn't convert were 177–493KB a tile).
 import { chromium, webkit } from 'playwright';
 import { readdirSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -69,6 +72,35 @@ async function darkOnTransparent(html) {
   await page.close();
   return bad;
 }
+/**
+ * Every image as the email sends it, fetched the way Outlook for Windows would (no WebP, no AVIF):
+ * a JPEG, PNG or GIF, and light enough for a phone on a slow connection.
+ */
+const IMAGE_MAX_KB = 150;
+const weighed = new Map();
+async function heavyOrUnshowable(html) {
+  const urls = [...new Set([...html.matchAll(/<img[^>]*\bsrc="([^"]+)"/g)].map(m => m[1].replace(/&amp;/g, '&')))];
+  const out = [];
+  for (const u of urls) {
+    if (!weighed.has(u)) {
+      weighed.set(u, (async () => {
+        try {
+          const res = await fetch(u, { headers: { Accept: 'image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.5' }, signal: AbortSignal.timeout(30000) });
+          const kb = Math.round((await res.arrayBuffer()).byteLength / 1024);
+          return { status: res.status, type: (res.headers.get('content-type') || '').split(';')[0], kb };
+        } catch (err) {
+          return { status: 0, type: '', kb: 0, err: err.message };
+        }
+      })());
+    }
+    const w = await weighed.get(u);
+    const name = u.replace(/^https:\/\/[^/]+/, '').split('?')[0].split('/').slice(-3).join('/').slice(0, 70);
+    if (w.status !== 200) out.push(`${name} answered ${w.status || w.err}`);
+    else if (!/^image\/(jpeg|png|gif)$/.test(w.type)) out.push(`${name} comes as ${w.type || 'no type'}, which Outlook can't show`);
+    else if (w.kb > IMAGE_MAX_KB) out.push(`${name} weighs ${w.kb}KB (${IMAGE_MAX_KB}KB at most)`);
+  }
+  return out;
+}
 let failures = 0;
 for (const f of files) {
   const src = readFileSync(f, 'utf8');
@@ -76,6 +108,8 @@ for (const f of files) {
   if (stripped.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  Gmail strips: ${stripped.join(' | ')}`); }
   const darkMode = await darkOnTransparent(src);
   if (darkMode.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  dark mode: ${darkMode.join(' | ')}`); }
+  const images = await heavyOrUnshowable(src);
+  if (images.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  images: ${images.join(' | ')}`); }
   for (const r of runs) {
     const ctx = await engines[r.e].newContext({ viewport: { width: r.w, height: 844 }, deviceScaleFactor: r.w < 600 ? 2 : 1 });
     if (r.gmail) await ctx.route(/fonts\.(googleapis|gstatic)\.com/, x => x.abort());

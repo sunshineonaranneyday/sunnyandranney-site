@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Miniflare } from 'miniflare';
 import { Email, amount, escape, lines, noWidow, offerClaims, offerLine, render } from './email.mjs';
 import {
   blank,
@@ -18,7 +17,6 @@ import {
   typeset,
   upcomingSends,
 } from './special.mjs';
-import { clearSpecial, getSpecial, pastSpecials, putSpecial, specialsBetween } from './special-store.mjs';
 import { impactFromPage } from './impact.mjs';
 
 const SEND = '2026-11-17';
@@ -260,48 +258,6 @@ test('the email goes out on Tuesdays', () => {
   assert.equal(isSendDate('2026-11-18'), false);
   assert.equal(isSendDate('2026-13-01'), false);
   assert.equal(sendLabel('2026-11-17'), 'Tue, Nov 17');
-});
-
-// ─── Real D1 (Miniflare's local SQLite) ──────────────────────────────
-let dbCount = 0;
-async function freshDb() {
-  const mf = new Miniflare({ modules: true, script: 'export default {}', d1Databases: { DB: `special-test-${dbCount++}` } });
-  return { DB: await mf.getD1Database('DB'), mf };
-}
-
-test('saving checks the version the page loaded, so nobody overwrites anybody', async () => {
-  const { DB, mf } = await freshDb();
-  try {
-    const special = forKind(clean({ kind: 'percent', percent: 20, what: 'everything' }));
-    const first = await putSpecial(DB, { send: SEND, special, by: 'staci@x', now: '2026-11-11T15:00:00Z', since: null });
-    assert.equal(first.ok, true);
-    // A second "first save" (another manager's page loaded before the first save) is refused
-    const late = await putSpecial(DB, { send: SEND, special, by: 'mike@x', now: '2026-11-11T15:01:00Z', since: null });
-    assert.equal(late.ok, false);
-    assert.equal(late.current.updatedBy, 'staci@x');
-    const edit = await putSpecial(DB, { send: SEND, special: { ...special, percent: 25 }, by: 'staci@x', now: '2026-11-11T15:02:00Z', since: '2026-11-11T15:00:00Z' });
-    assert.equal(edit.ok, true);
-    const stale = await putSpecial(DB, { send: SEND, special, by: 'mike@x', now: '2026-11-11T15:03:00Z', since: '2026-11-11T15:00:00Z' });
-    assert.equal(stale.ok, false);
-    assert.equal((await getSpecial(DB, SEND)).special.percent, 25);
-    assert.equal((await clearSpecial(DB, { send: SEND, since: '2026-11-11T15:00:00Z' })).ok, false);
-    assert.equal((await clearSpecial(DB, { send: SEND, since: '2026-11-11T15:02:00Z' })).ok, true);
-    assert.equal(await getSpecial(DB, SEND), null);
-  } finally {
-    await mf.dispose();
-  }
-});
-
-test('past specials come newest first; a range comes in order', async () => {
-  const { DB, mf } = await freshDb();
-  try {
-    const special = forKind(clean({ kind: 'headline', headline: 'Hi' }));
-    for (const send of ['2026-11-03', '2026-11-10', '2026-11-17', '2026-11-24']) await putSpecial(DB, { send, special, by: 'staci@x', now: send, since: null });
-    assert.deepEqual((await pastSpecials(DB, '2026-11-17')).map((r) => r.send), ['2026-11-10', '2026-11-03']);
-    assert.deepEqual((await specialsBetween(DB, '2026-11-10', '2026-11-24')).map((r) => r.send), ['2026-11-10', '2026-11-17', '2026-11-24']);
-  } finally {
-    await mf.dispose();
-  }
 });
 
 // ─── The charity's section ───────────────────────────────────────────

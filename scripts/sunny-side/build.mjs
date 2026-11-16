@@ -3,8 +3,9 @@
 // which verify.mjs then holds to the standard. The email itself is src/lib/sunny-side/email.mjs, the
 // same code the admin uses to preview the week's special.
 //
-// A brief whose "sale" is "admin" takes the special Staci saved at /admin/special/ for its send date,
-// read from the store's D1 database with wrangler (--local reads the local dev database instead).
+// A brief whose "sale", "wall" or "events" is "admin" takes what Staci set at /admin/email/: the
+// special and the products she saved for its send date, and the store's events with dates still
+// ahead, read from the store's D1 database with wrangler (--local reads the local dev database).
 // A brief whose mission "impact" is "live" takes the charity's impact numbers from its own site,
 // where its records keep them current.
 // Every photo-wall product is read from its own page on sunnyandranney.com (name, price, photo) and
@@ -15,8 +16,11 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from 'nod
 import { basename, join, relative } from 'node:path';
 import { lines, render } from '../../src/lib/sunny-side/email.mjs';
 import { check, clean, isSendDate, sendLabel, toSale } from '../../src/lib/sunny-side/special.mjs';
+import { checkWall, cleanWall, toWall } from '../../src/lib/sunny-side/wall.mjs';
+import { checkEvent, cleanEvent, toBriefEvent } from '../../src/lib/sunny-side/events.mjs';
 import { IMPACT_PAGE, impactFromPage } from '../../src/lib/sunny-side/impact.mjs';
 import { NAME_MAX, displayName, handleOf, isProductPage, photoFor, productFromPage, quantitiesFromShop } from '../../src/lib/sunny-side/product.mjs';
+import { SITE } from '../../src/lib/sunny-side/email.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;
 const ROOT = join(HERE, '..', '..');
@@ -24,28 +28,64 @@ const args = process.argv.slice(2);
 const local = args.includes('--local');
 const briefs = args.filter((a) => a !== '--local');
 
-/** The special Staci saved for a send date, as the email's offer. */
-function specialFromAdmin(send) {
-  if (!isSendDate(send)) throw new Error(`send_date ${send} isn't a Tuesday, so the admin has no special for it.`);
-  const missing = `No special is saved for the ${sendLabel(send)} email yet. Staci sets it at admin.sunnyandranney.com/admin/special/.`;
-  let out;
+const ADMIN = 'admin.sunnyandranney.com/admin/email/';
+
+/** Rows from the store's D1 database, or null when the table hasn't been made yet (nothing saved). */
+function query(sql) {
   try {
-    out = execFileSync(
-      'npx',
-      ['wrangler', 'd1', 'execute', 'sunnyandranney-db', local ? '--local' : '--remote', '--json', '--command', `SELECT special FROM email_specials WHERE send_date = '${send}'`],
-      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'sunnyandranney-db', local ? '--local' : '--remote', '--json', '--command', sql], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return JSON.parse(out)[0]?.results ?? [];
   } catch (err) {
-    // The table only exists once a first special is saved
-    if (/no such table/i.test(String(err.stdout) + String(err.stderr))) throw new Error(missing);
+    // A table only exists once something is first saved in it
+    if (/no such table/i.test(String(err.stdout) + String(err.stderr))) return null;
     throw new Error(`Couldn't read the admin's database with wrangler: ${String(err.stderr || err.message).trim()}`);
   }
-  const rows = JSON.parse(out)[0]?.results ?? [];
-  if (!rows.length) throw new Error(missing);
-  const special = clean(JSON.parse(rows[0].special));
+}
+
+/** What Staci saved for a send date: { special, wall }, each null until she saves it. */
+const weeks = new Map();
+function weekFromAdmin(send) {
+  if (!isSendDate(send)) throw new Error(`send_date ${send} isn't a Tuesday, so the admin has nothing for it.`);
+  if (!weeks.has(send)) {
+    const row = query(`SELECT special, wall FROM email_weeks WHERE send_date = '${send}'`)?.[0];
+    weeks.set(send, { special: row?.special ? JSON.parse(row.special) : null, wall: row?.wall ? JSON.parse(row.wall) : null });
+  }
+  return weeks.get(send);
+}
+
+/** The special Staci saved for a send date, as the email's offer. */
+function specialFromAdmin(send) {
+  const saved = weekFromAdmin(send).special;
+  if (!saved) throw new Error(`No special is saved for the ${sendLabel(send)} email yet. Staci sets it at ${ADMIN}.`);
+  const special = clean(saved);
   const problems = Object.values(check(special, send));
   if (problems.length) throw new Error(`The ${sendLabel(send)} special needs fixing in the admin: ${problems.join(' ')}`);
   return toSale(special);
+}
+
+/** The products Staci picked for a send date, as the email's photo wall. The store check comes after, as for any wall. */
+function wallFromAdmin(send) {
+  const saved = weekFromAdmin(send).wall;
+  if (!saved) throw new Error(`No products are picked for the ${sendLabel(send)} email yet. Staci picks them at ${ADMIN}.`);
+  const wall = cleanWall(saved);
+  const problems = Object.values(checkWall(wall, { send }));
+  if (problems.length) throw new Error(`The ${sendLabel(send)} products need fixing in the admin: ${problems.join(' ')}`);
+  return toWall(wall, SITE);
+}
+
+/** The store's events with dates on or after the send date, soonest first, as the email takes them. */
+function eventsFromAdmin(send) {
+  const rows = query(`SELECT event FROM store_events WHERE last_date >= '${send}' ORDER BY first_date, id`) ?? [];
+  return rows.map((r) => {
+    const ev = cleanEvent(JSON.parse(r.event));
+    const problems = Object.values(checkEvent(ev));
+    if (problems.length) throw new Error(`The event "${ev.title}" needs fixing in the admin: ${problems.join(' ')}`);
+    return toBriefEvent(ev, send, SITE);
+  }).filter(Boolean);
 }
 
 let impact = null;
@@ -107,10 +147,15 @@ async function productsFromStore(photos, { fixed }) {
       else if (qty <= 0 || !p.inStock) problems.push(`${name} is out of stock (${qty} in the shop). Pick another product.`);
       if (!ph.name && name.length > NAME_MAX) problems.push(`"${name}" is too long for a tile (${name.length} characters, ${NAME_MAX} at most). Give it a short "name".`);
       const src = ph.src || photoFor(p.images);
-      if (!src) problems.push(`${name} has only PNG photos, which are too heavy for email. Give it a "src" photo.`);
+      if (!src) problems.push(`${name} has no photo. Give it a "src" photo.`);
       return { ...ph, name, price: p.price, src };
     }),
   );
+  const seen = new Set();
+  for (const { name } of filled) {
+    if (name && seen.has(name.toLowerCase())) problems.push(`Two products would both say "${name}". Give one a name that tells them apart.`);
+    seen.add(name?.toLowerCase());
+  }
   if (problems.length) throw new Error(`The photo wall needs fixing:\n- ${problems.join('\n- ')}`);
   return filled;
 }
@@ -122,6 +167,8 @@ async function build(path, out) {
   rmSync(join(out, `${name}.html`), { force: true });
   const brief = JSON.parse(readFileSync(path, 'utf8'));
   if (brief.sale === 'admin') brief.sale = specialFromAdmin(brief.send_date);
+  if (brief.wall === 'admin') brief.wall = wallFromAdmin(brief.send_date);
+  if (brief.events === 'admin') brief.events = eventsFromAdmin(brief.send_date);
   if (brief.mission?.impact === 'live') brief.mission.impact = await liveImpact();
   const fixed = !relative(join(HERE, 'tests'), path).startsWith('..');
   if (brief.wall?.photos) brief.wall.photos = await productsFromStore(brief.wall.photos, { fixed });
