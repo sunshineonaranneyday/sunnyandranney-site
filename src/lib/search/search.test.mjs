@@ -51,7 +51,7 @@ test('prices: under is below the number, up to includes it, between is both ends
   assert.equal(parse('sofa under 1000', index).price.max, 999.99);
   assert.equal(parse('sofa up to $1,000', index).price.max, 1000);
   assert.equal(parse('chair over 300', index).price.min, 300);
-  assert.deepEqual(parse('rug between 200 and 400', index).price, { min: 200, max: 400, cheap: false });
+  assert.deepEqual(parse('rug between 200 and 400', index).price, { min: 200, max: 400, cheap: false, sale: false });
   assert.equal(parse('cheap coffee table', index).price.cheap, true);
 });
 
@@ -124,20 +124,33 @@ const soldBeforeStock = (items) => {
 };
 
 test('every piece in stock comes before every sold one, as everywhere on the site', () => {
-  // "gray" is any gray: a heather sofa in stock comes before a sold one called Gray.
-  for (const q of ['sofa', 'gray sofa', 'grey sectional', 'leather sofa', 'dining table', 'rug']) {
-    assert.ok(!soldBeforeStock(results(index, q).items), `${q}: a piece in stock after a sold one`);
+  for (const q of ['sofa', 'sectional', 'leather sofa', 'dining table', 'rug', 'accent chair']) {
+    const items = results(index, q).items;
+    // Only a real check when the results hold both.
+    assert.ok(items.some(({ item }) => item.doc.s) && items.some(({ item }) => !item.doc.s), `${q}: needs pieces in stock and sold`);
+    assert.ok(!soldBeforeStock(items), `${q}: a piece in stock after a sold one`);
   }
 });
 
-test('a specific look typed comes first ("walnut", "king"), then pieces in stock', () => {
-  for (const [q, word] of [['walnut table', 'walnut'], ['king bed', 'king'], ['navy chair', 'navy'], ['swivel chair', 'swivel']]) {
+test('a specific look typed comes first ("walnut", "navy", "swivel"), then pieces in stock', () => {
+  for (const [q, word] of [['walnut table', 'walnut'], ['navy chair', 'navy'], ['round mirror', 'round'], ['queen bed', 'queen']]) {
     const items = results(index, q).items;
-    const says = items.map(({ item }) => item.titleT.includes(word) || (word === 'king' && item.titleT.includes('kg')));
+    const says = items.map(({ item }) => item.titleT.includes(word) || (word === 'queen' && item.titleT.includes('qn')));
+    // Only a real check when some results say the word and some don't.
+    assert.ok(says.includes(true) && says.includes(false), `${q}: needs pieces with and without “${word}”`);
     const firstNot = says.indexOf(false);
-    assert.ok(firstNot === -1 || !says.slice(firstNot).includes(true), `${q}: a piece without “${word}” before one with it`);
+    assert.ok(!says.slice(firstNot).includes(true), `${q}: a piece without “${word}” before one with it`);
     assert.ok(!soldBeforeStock(items.filter((_, i) => says[i])), `${q}: among pieces saying “${word}”, a sold one before one in stock`);
   }
+});
+
+test('"gray" is any gray, but a color the title names comes before one only the description mentions', () => {
+  const items = results(index, 'black sofa').items;
+  const named = items.map(({ item }) => item.namedColors.has('black'));
+  assert.ok(named.includes(true) && named.includes(false), 'needs both');
+  assert.ok(!named.slice(named.indexOf(false)).includes(true), 'a sofa only described as black ranks above one named black');
+  // Heather is a gray, and its title says so: it can come before a sold sofa called Gray.
+  assert.ok(results(index, 'gray sofa').items.slice(0, 3).some(({ item }) => /heather/i.test(item.title)));
 });
 
 test('every keystroke is answered fast: 95% of searches under 8ms, with suggestions', () => {
@@ -155,6 +168,87 @@ test('every keystroke is answered fast: 95% of searches under 8ms, with suggesti
   times.sort((a, b) => a - b);
   const p95 = times[Math.floor(times.length * 0.95)];
   assert.ok(p95 < 8, `p95 ${p95.toFixed(2)}ms over ${times.length} keystrokes`);
+});
+
+// ── searches the second review found failing (2026-11-16) ──────────────
+
+const titles = (q, n = 5) => results(index, q).items.slice(0, n).map(({ item }) => item.title);
+const kindsOf = (q, n = 5) => results(index, q).items.slice(0, n).map(({ item }) => [...item.kinds.keys()]);
+
+test('a price alone, or "cheap" alone, finds pieces at that price', () => {
+  for (const [q, ok] of [['under 200', (p) => p > 0 && p < 200], ['over 2000', (p) => p >= 2000], ['under 1.5k', (p) => p > 0 && p < 1500], ['between 1000 and 500', (p) => p >= 500 && p <= 1000]]) {
+    const items = results(index, q).items;
+    assert.ok(items.length > 0, `${q} found nothing`);
+    assert.ok(items.every(({ item }) => ok(item.doc.p)), `${q}: a piece outside the price`);
+  }
+  const cheap = results(index, 'cheap').items;
+  assert.ok(cheap.length > 0 && cheap[0].item.doc.p <= cheap[5].item.doc.p);
+});
+
+test('"sale", "clearance", "deals" mean pieces marked down; with a kind, that kind on sale', () => {
+  for (const q of ['sale', 'clearance', 'deals', 'sofa on sale']) {
+    const items = results(index, q).items;
+    assert.ok(items.length > 0 && items.every(({ item }) => item.doc.cp > item.doc.p), q);
+  }
+  assert.ok(results(index, 'sofa on sale').items.every(({ item }) => item.kinds.has('sofa')));
+});
+
+test('"drawers" is the storage feature, not a dresser', () => {
+  assert.ok(titles('desk with drawers').some((t) => /desk/i.test(t)));
+  assert.ok(titles('nightstand with drawers').every((t) => /night ?stand/i.test(t)));
+  assert.ok(titles('4 drawer coffee table', 20).some((t) => /Brisbane 4-Drawer Coffee/.test(t)));
+  assert.equal(titles('bedford drawer end table', 1)[0], 'Bedford Drawer End Table');
+});
+
+test('two kinds in one search show both, in the order named; a sofa bed is a sleeper', () => {
+  const set = kindsOf('dining table and chairs', 130);
+  assert.ok(set[0].includes('dining-table') && set.some((k) => k.includes('dining-chair')));
+  assert.ok(set.findIndex((k) => k.includes('dining-chair') && !k.includes('dining-table')) > set.findLastIndex((k) => k.includes('dining-table') && !k.includes('dining-chair')), 'tables, then chairs');
+  assert.ok(kindsOf('bed and nightstand', 28).some((k) => k.includes('nightstand')));
+  assert.ok(kindsOf('sofa bed', 3).every((k) => k.includes('sleeper')), 'sleepers, by name or by Shopify category');
+  assert.ok(kindsOf('sofa and loveseat', 1)[0].includes('loveseat'), 'a piece that is both comes first');
+});
+
+test('a count never swallows the kind, and never rules a piece out', () => {
+  assert.ok(results(index, '2 chairs').items.length > 100);
+  assert.ok(results(index, '4 dining chairs').items.every(({ item }) => item.kinds.has('dining-chair')));
+  assert.ok(results(index, '6 seat dining table').items.length > 50);
+  assert.ok(results(index, '3 seater sofa').items.every(({ item }) => item.kinds.has('sofa')));
+  assert.equal(parse('table for at least 6 people', index).seats, 6);
+  assert.equal(parse('table for at least 6 people', index).price.min, null);
+});
+
+test('a word that narrows too far is given up before the kind ("tall bookcase", "light gray sofa")', () => {
+  for (const [q, kind] of [['tall bookcase', 'bookcase'], ['light gray sofa', 'sofa'], ['dark gray sectional', 'sectional'], ['mini sofa', 'sofa'], ['hope chest', 'dresser'], ['slipper chair', 'chair'], ['wool rug', 'rug']]) {
+    const items = results(index, q).items;
+    assert.ok(items.length > 0 && items.every(({ item }) => item.kinds.has(kind)), q);
+  }
+});
+
+test('real furniture words are never “fixed” into other words', () => {
+  for (const w of ['seater', 'mini', 'wool', 'hope', 'slipper', 'beech', 'slats', 'cedar', 'maple', 'bunk', 'trundle', 'wardrobe']) {
+    const fix = parse(`${w} sofa`, index).corrections.find(([from]) => from === w || from === w.replace(/s$/, ''));
+    assert.equal(fix, undefined, `${w} → ${fix?.[1]}`);
+  }
+});
+
+test('a half-typed last word opens the search the box was finishing', () => {
+  for (const [typed, done] of [['sect', 'sectional'], ['sofa tab', 'sofa table'], ['dining tab', 'dining table'], ['ottom', 'ottoman']]) {
+    assert.equal(results(index, typed).completed, done, typed);
+  }
+  assert.equal(stem('curves'), 'curve');
+  assert.equal(stem('shelves'), 'shelf');
+});
+
+test('a word that is both a color and a material counts as either; "cheap" stays within the kind', () => {
+  const linen = results(index, 'linen sofa').items;
+  assert.ok(linen.some(({ item }) => item.materials.has('linen')) && linen.some(({ item }) => !item.materials.has('linen') && item.colors.has('beige')));
+  assert.ok(results(index, 'cheap sofa').items.slice(0, 5).every(({ item }) => item.kinds.has('sofa') && !/table/i.test(item.title)));
+});
+
+test('a typo before the kind is offered fixed ("gary so" → "gray sofa")', () => {
+  const s = completions(index, 'gary so');
+  assert.ok(s.length && s.every((x) => x.text.startsWith('gray') && x.corrected));
 });
 
 // ── as you type ─────────────────────────────────────────────────────────
@@ -181,6 +275,19 @@ test('a typo still gets suggestions, marked as fixed', () => {
   const s = completions(index, 'recliener');
   assert.equal(s[0].text, 'recliner');
   assert.equal(s[0].corrected, true);
+});
+
+test('no suggestion carries filler words, however it was made ("swivel chair and a half")', () => {
+  const typed = new Set(['swivel ch', 'gray ch', 'blue ch', 'leather ch', 'round ta', 'oak ta', 'kids ch', 'cou', 'nur', 'rea']);
+  for (const [q] of QUERIES) for (let i = 1; i <= q.length; i++) typed.add(q.slice(0, i));
+  const filler = new Set(['and', 'a', 'that', 'for', 'of', 'the', 'with', 'nook', 'corner']);
+  for (const t of typed) {
+    const own = new Set(t.split(' ')); // the shopper's own words may be filler ("chest of drawe" → "chest of drawer")
+    for (const s of completions(index, t, { max: 6 })) {
+      assert.ok(!s.text.split(' ').some((w) => filler.has(w) && !own.has(w)), `“${t}” suggests “${s.text}”`);
+    }
+  }
+  assert.ok(completions(index, 'swivel ch').some((s) => s.text === 'swivel chair'));
 });
 
 test('no suggestion repeats what was typed, or a kind twice', () => {

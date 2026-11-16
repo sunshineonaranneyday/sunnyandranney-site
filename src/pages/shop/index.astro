@@ -2389,7 +2389,8 @@ const itemListSchema = hasShopify ? {
     const notice = document.getElementById('search-notice');
     if (notice) {
       notice.replaceChildren();
-      if (n && found.query.corrected) put(notice, 'Showing results for ', strong(`“${found.query.corrected}”`), '. ');
+      if (n && found.completed) put(notice, 'Showing results for ', strong(`“${found.completed}”`), '. ');
+      else if (n && found.query.corrected) put(notice, 'Showing results for ', strong(`“${found.query.corrected}”`), '. ');
       if (n && found.relaxed.length) put(notice, 'Showing results without ', strong(found.relaxed.map((w) => `“${w}”`).join(', ')), '. ');
       if (n && found.partial) put(notice, 'Nothing has everything you searched for, so these are the closest matches.');
       notice.hidden = !notice.childNodes.length;
