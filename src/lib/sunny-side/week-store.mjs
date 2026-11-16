@@ -78,6 +78,9 @@ export async function weeksBetween(db, from, to) {
   return (results || []).map(fromRow);
 }
 
+/** True when a week's email has gone out through Kit: it was scheduled for a time now past. @param {Week | null | undefined} w */
+export const wentOut = (w, now = Date.now()) => Boolean(w?.kit) && Date.parse(w.kit.sendAt) <= now;
+
 /** The most recent weeks with a special before a send date, newest first: the specials Staci can start from. @returns {Promise<Week[]>} */
 export async function pastWeeks(db, before, limit = 12) {
   await ensureTable(db);

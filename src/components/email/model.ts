@@ -94,6 +94,8 @@ export interface WeekTab {
   label: string;
   sale: string;
   products: number;
+  /** When it's set to go (or went) through Kit, or null. */
+  kitAt: string | null;
 }
 export interface Other {
   send: string;

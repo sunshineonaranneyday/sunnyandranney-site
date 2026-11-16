@@ -3,8 +3,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { REMIND_DAYS, ensureTable as ensureTaxTable, salesTaxFacts } from '../sales-tax/status.mjs';
-import { emailNeeds } from '../sunny-side/special.mjs';
-import { ensureTable as ensureEmailTable, getWeek } from '../sunny-side/week-store.mjs';
+import { emailNeeds, emailToWorkOn } from '../sunny-side/special.mjs';
+import { ensureTable as ensureEmailTable, getWeek, wentOut } from '../sunny-side/week-store.mjs';
 import { dueText, loadNavStatus, navStatus } from './nav-status.mjs';
 import { allLinks, navFor } from './nav.mjs';
 import { loadToday } from './today.mjs';
@@ -69,7 +69,9 @@ test('Weekly email shows how long until it goes while it needs its sale or produ
   assert.equal(email({ special: '{}' }).spoken, 'The Tue, Nov 17 email needs the products');
   assert.equal(email({ special: '{}', wall: '{}' }), undefined);
   // The Wednesday after a send, the next one is six days out: shown, quietly.
-  assert.deepEqual(email(null, '2026-11-18T15:00:00.000Z'), { text: '6 days', spoken: 'The Tue, Nov 24 email needs the sale and the products', tone: 'plain' });
+  assert.deepEqual(navStatus({ week: null, send: '2026-11-24', now: '2026-11-18T15:00:00.000Z' })['/admin/email/'], { text: '6 days', spoken: 'The Tue, Nov 24 email needs the sale and the products', tone: 'plain' });
+  // A Tuesday missed: this week's email can still go by Saturday, so it stays, late
+  assert.deepEqual(email(null, '2026-11-18T15:00:00.000Z'), { text: 'Late', spoken: 'The Tue, Nov 17 email needs the sale and the products', tone: 'alert' });
   assert.equal(email(null, '2026-11-17T15:00:00.000Z').text, 'Today');
 });
 
@@ -176,4 +178,28 @@ test('on the same database, a mark is exactly what Today, Weekly email and Sales
   sqlite.exec("UPDATE sales_tax_months SET filed_at = '2026-11-16T15:00:00.000Z' WHERE month = '2026-10'");
   sqlite.exec("UPDATE time_entries SET status = 'approved' WHERE id = 'forgot'");
   assert.deepEqual(await check('all done'), {});
+});
+
+test('the email mark is about the email the email page and Today open: this week’s until it has gone out', async () => {
+  const { sqlite, db } = database();
+  await ensureEmailTable(db);
+  const WED = '2026-11-18T15:00:00.000Z';
+  const stamp = '2026-11-10T00:00:00.000Z';
+  const mark = async () => (await loadNavStatus(db, { now: WED, myEmail: ME }))['/admin/email/'];
+  const page = async () => {
+    const tuesday = await getWeek(db, '2026-11-17');
+    return emailToWorkOn('2026-11-18', (s) => s === '2026-11-17' && wentOut(tuesday, Date.parse(WED)));
+  };
+  // Tuesday's email never went: it's still this week's to send, and late
+  sqlite.prepare("INSERT INTO email_weeks (send_date, special, wall, updated_at, updated_by) VALUES ('2026-11-17', '{}', NULL, ?, ?)").run(stamp, ME);
+  assert.equal((await mark()).spoken, 'The Tue, Nov 17 email needs the products');
+  assert.equal(await page(), '2026-11-17');
+  // Scheduled for Thursday: not gone yet, and it has all it needs, so no mark
+  sqlite.exec("UPDATE email_weeks SET wall = '{}', kit_id = '5', kit_send_at = '2026-11-19T15:00:00.000Z' WHERE send_date = '2026-11-17'");
+  assert.equal(await mark(), undefined);
+  assert.equal(await page(), '2026-11-17');
+  // Sent on Tuesday: the mark and the page both move to next week's
+  sqlite.exec("UPDATE email_weeks SET kit_send_at = '2026-11-17T15:00:00.000Z' WHERE send_date = '2026-11-17'");
+  assert.equal((await mark()).spoken, 'The Tue, Nov 24 email needs the sale and the products');
+  assert.equal(await page(), '2026-11-24');
 });

@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
 import { kitClient, readyTester, sendTest, templateFor } from '@/lib/sunny-side/kit.mjs';
-import { isSendDate, sendLabel } from '@/lib/sunny-side/special.mjs';
+import { isSendDate, isSendDay, sendLabel, sendPassed } from '@/lib/sunny-side/special.mjs';
 import { TEST_MAX, TESTS_PER_DAY, namesOf, testPeople, testRecipients } from '@/lib/sunny-side/testers.mjs';
 import { listPeople, logTest, testsSince } from '@/lib/sunny-side/test-store.mjs';
 import { weekEmail } from '@/lib/sunny-side/week-email';
@@ -27,7 +27,10 @@ export const POST: APIRoute = async (context) => {
   if (!isSendDate(send)) return json({ error: 'Pick one of the Tuesday emails.' }, 400);
   const now = new Date();
   const today = localDate(now.toISOString());
-  if ((send as string) < today) return json({ error: `The ${sendLabel(send as string)} email has already gone out.` }, 409);
+  if (sendPassed(send, today)) return json({ error: `The days for the ${sendLabel(send as string)} email have passed.` }, 409);
+  // The day it'll go, so the test is the email as it'll be that day
+  const day = typeof body?.day === 'string' ? body.day : (send as string);
+  if (!isSendDay(send, day)) return json({ error: `Pick a day in the ${sendLabel(send as string)} email’s week.` }, 400);
 
   const db = dbOf(context);
   const people = testPeople(await listPeople(db), admin.email);
@@ -37,7 +40,7 @@ export const POST: APIRoute = async (context) => {
     return json({ error: `That’s ${TESTS_PER_DAY} tests in a day, the most the admin sends. Try again tomorrow.` }, 429);
   }
 
-  const email = await weekEmail(context, send as string, today);
+  const email = await weekEmail(context, send as string, today, day);
   if (!email.ok) return json({ error: `Before a test can go: ${email.problems.join(' ')}`, problems: email.problems }, email.status);
 
   try {

@@ -349,7 +349,6 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-scheduled-when { font-size: 1.0625rem; font-weight: 700; margin: 0 0 0.125rem; }
 .em-scheduled .em-hint { margin: 0; }
 .em-when { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-top: 0.25rem; }
-.em-when-day { font-weight: 700; }
 .em-when select { width: auto; min-width: 9rem; }
 .em-when .em-hint { margin: 0; }
 .em-dialog { width: min(32rem, calc(100vw - 2rem)); padding: 1.25rem; border: 0; border-radius: var(--r-lg, 16px); background: var(--panel); color: var(--ink); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.24); }

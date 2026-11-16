@@ -8,6 +8,7 @@
  * the admin page, the API and the weekly build (scripts/sunny-side/build.mjs) share it.
  */
 
+import { WORKWEEK_START_DAY } from '../time-clock/hours.mjs';
 import { day, monthShort, weekday } from './email.mjs';
 
 /** The Sunny Side goes out on Tuesdays (Tue Nov 3 and Tue Nov 10, 2026). 0 = Sunday. */
@@ -270,9 +271,38 @@ export function nextSend(today) {
  */
 export const emailNeeds = (week) => [week?.special ? '' : 'the sale', week?.wall ? '' : 'the products'].filter(Boolean);
 
+/**
+ * The days an email can go: its week as the store keeps it, Sunday to Saturday (the staff
+ * schedule's and Gusto's workweek, WORKWEEK_START_DAY), so every day belongs to one email and
+ * the emails go out in order. Its Tuesday is the usual day.
+ */
+export function sendDays(send) {
+  const start = addDays(send, -((SEND_WEEKDAY - WORKWEEK_START_DAY + 7) % 7));
+  return Array.from({ length: 7 }, (_, k) => addDays(start, k));
+}
+
+/** True when `d` is one of the days the email for `send` can go. */
+export const isSendDay = (send, d) => isSendDate(send) && typeof d === 'string' && sendDays(send).includes(d);
+
+/** The email whose week today is in: until Saturday, an email can still go out late. */
+export const thisWeeksSend = (today) => addDays(today, -((day(today).getUTCDay() - WORKWEEK_START_DAY + 7) % 7) + ((SEND_WEEKDAY - WORKWEEK_START_DAY + 7) % 7));
+
+/**
+ * The email to work on: this week's, unless it has already gone out, then next week's. The email
+ * page opens on it and the Today page's task is about it, so the two always agree.
+ * @param {string} today @param {(send: string) => boolean} wentOut
+ */
+export function emailToWorkOn(today, wentOut) {
+  const first = thisWeeksSend(today);
+  return wentOut(first) ? addDays(first, 7) : first;
+}
+
+/** True once every day the email could go has passed. */
+export const sendPassed = (send, today) => sendDays(send)[6] < today;
+
 /** This week's email and the ones after it. */
 export function upcomingSends(today, count = 4) {
-  const first = nextSend(today);
+  const first = thisWeeksSend(today);
   return Array.from({ length: count }, (_, k) => addDays(first, 7 * k));
 }
 

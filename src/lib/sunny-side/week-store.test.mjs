@@ -4,7 +4,7 @@ import { Miniflare } from 'miniflare';
 import { clean, forKind } from './special.mjs';
 import { cleanWall } from './wall.mjs';
 import { cleanEvent } from './events.mjs';
-import { clearWeek, getWeek, pastWeeks, putWeek, weeksBetween } from './week-store.mjs';
+import { clearWeek, getWeek, pastWeeks, putWeek, weeksBetween, wentOut } from './week-store.mjs';
 import { deleteEvent, eventsFrom, getEvent, putEvent } from './event-store.mjs';
 
 // Real D1 (Miniflare's local SQLite)
@@ -87,4 +87,13 @@ test('events save by version, and the ones still ahead come soonest first', asyn
   } finally {
     await mf.dispose();
   }
+});
+
+test('a week has gone out once Kit’s send time has passed; scheduled ahead or never sent, it hasn’t', () => {
+  const at = (sendAt) => ({ kit: { id: '1', at: '', by: '', sendAt } });
+  const now = Date.parse('2026-11-17T16:00:00Z');
+  assert.equal(wentOut(at('2026-11-17T15:00:00Z'), now), true);
+  assert.equal(wentOut(at('2026-11-19T15:00:00Z'), now), false);
+  assert.equal(wentOut({ kit: null }, now), false);
+  assert.equal(wentOut(null, now), false);
 });
