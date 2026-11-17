@@ -9,6 +9,8 @@
  * "Most recent reveal": the latest reveal date the charity has on record that has passed (its
  * reveal invites keep them, from November 2026 on). Reveals from before it kept dates are dated
  * by the day their photos went up, which the charity's photo ids carry (a 13-digit time in ms).
+ * The photo starts on the finished room (the charity's own "after" photo), since the section's
+ * line is "Every purchase builds a dream room"; she can pick any photo from the family's page.
  * No Node or browser APIs: the page, the server and the tests share it.
  */
 
@@ -34,6 +36,32 @@ export function roomsPhrase(rooms) {
 
 const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
 
+/** How many of a family's photos the page offers: the charity's galleries run 11 to 48. */
+export const KID_PHOTOS = 24;
+/** A family photo as the email keeps it: "cf:" and its Cloudflare Images id. */
+export const KID_PHOTO = /^cf:kids\/[a-z0-9-]+\/[A-Za-z0-9._-]{1,120}$/;
+
+/**
+ * The family's photos, the finished room first: its "after" photos (marked `after`), then the photo
+ * its page leads with, its accent photo and the rest of its gallery, each once.
+ */
+export function photosOf(d, fallbackAlt) {
+  const alts = new Map((Array.isArray(d.photos) ? d.photos : []).filter((p) => p && typeof p === 'object').map((p) => [cfIdOf(p.url), p.alt]));
+  const seen = new Set();
+  const out = [];
+  const add = (url, alt, after = false) => {
+    const id = cfIdOf(url);
+    if (!id || seen.has(id) || !KID_PHOTO.test(`cf:${id}`)) return;
+    seen.add(id);
+    out.push({ src: `cf:${id}`, alt: String(alt || alts.get(id) || fallbackAlt).trim().slice(0, 160), ...(after ? { after: true } : {}) });
+  };
+  for (const b of Array.isArray(d.beforeAfterPhotos) ? d.beforeAfterPhotos : []) add(b?.after, b?.afterAlt, true);
+  add(d.heroImage);
+  add(d.accentImage);
+  for (const p of Array.isArray(d.photos) ? d.photos : []) add(typeof p === 'string' ? p : p?.url, p?.alt);
+  return out.slice(0, KID_PHOTOS);
+}
+
 /** The day the kid's newest photo went up, from the time in its id, or null. */
 export function photosDate(photos) {
   const stamps = (Array.isArray(photos) ? photos : [])
@@ -46,7 +74,7 @@ export function photosDate(photos) {
 /**
  * The kids the section can show, most recent reveal first. `rows` are soard-db's kids rows
  * ({ slug, name, status, data }), `reveals` its recorded reveal dates ({ slug, d }).
- * @returns {{ slug: string, name: string, page: string, photo: { src: string, alt: string }, caption: string, story: string, revealedOn: string | null, dated: 'recorded' | 'photos' | null }[]}
+ * @returns {{ slug: string, name: string, page: string, photo: { src: string, alt: string, after?: true }, photos: { src: string, alt: string, after?: true }[], caption: string, story: string, revealedOn: string | null, dated: 'recorded' | 'photos' | null }[]}
  */
 export function revealedKids(rows, reveals, today) {
   const recorded = new Map(reveals.filter((r) => r.slug && r.d && r.d <= today).map((r) => [r.slug, r.d]));
@@ -65,14 +93,16 @@ export function revealedKids(rows, reveals, today) {
     if (!revealed || !src || !story || !KID_SLUG.test(row.slug)) continue;
     const name = String(row.name || d.name || '').trim();
     const where = roomsPhrase(d.roomTypes);
-    const heroAlt = (d.photos || []).find((p) => p && typeof p === 'object' && cfIdOf(p.url) === src)?.alt;
+    const photos = photosOf(d, `${name}’s new ${where}`);
+    if (!photos.length) continue;
     const onRecord = recorded.get(row.slug) ?? null;
     const byPhotos = photosDate(d.photos);
     out.push({
       slug: row.slug,
       name,
       page: kidPage(row.slug),
-      photo: { src: `cf:${src}`, alt: String(heroAlt || `${name}’s new ${where}`).slice(0, 160) },
+      photo: photos[0],
+      photos,
       caption: `${name}’s new ${where}.`,
       story,
       revealedOn: onRecord ?? byPhotos,
@@ -103,7 +133,10 @@ export async function listRevealedKids(db, today) {
 /** The kid the email shows: the one picked, or the most recent reveal. */
 export const kidFor = (slug, kids) => (slug && kids.find((k) => k.slug === slug)) || kids[0] || null;
 
-/** The charity section as the email draws it, from the kid, in the charity's words. */
-export function missionOf(kid) {
-  return { photo: kid.photo, caption: typeset(kid.caption), story: typeset(kid.story), cta: 'See their story', url: kid.page };
+/** The family photo the email shows: the one picked, if it's still on their page, else the finished room. */
+export const kidPhotoFor = (src, kid) => (src && kid.photos?.find((p) => p.src === src)) || kid.photo;
+
+/** The charity section as the email draws it, from the kid and the photo picked, in the charity's words. */
+export function missionOf(kid, photo = '') {
+  return { photo: kidPhotoFor(photo, kid), caption: typeset(kid.caption), story: typeset(kid.story), cta: 'See their story', url: kid.page };
 }

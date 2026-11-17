@@ -10,7 +10,7 @@
  */
 
 import { fillLine, lines, offerClaims, plain } from './email.mjs';
-import { KID_SLUG, kidFor, missionOf } from './kids.mjs';
+import { KID_PHOTO, KID_SLUG, kidFor, missionOf } from './kids.mjs';
 import { typeset } from './special.mjs';
 
 export const PART_LIMITS = { subject: 80, preheader: 110, label: 40, headline: 70, body: 320, cta: 30 };
@@ -42,6 +42,8 @@ export function cleanParts(p) {
     },
     // '' shows the charity's most recent reveal
     kid: typeof p?.kid === 'string' && KID_SLUG.test(p.kid) ? p.kid : '',
+    // One of that family's photos ("cf:" id), or '' for their finished room
+    kidPhoto: typeof p?.kidPhoto === 'string' && KID_PHOTO.test(p.kidPhoto) ? p.kidPhoto : '',
   };
 }
 
@@ -152,7 +154,7 @@ export function briefParts(p, { sale, photos, kids = [], photoSrc = (id) => `pho
             photos: s.photos.filter((id) => photos.has(id)).slice(0, COLLAGE_MAX).map(pic),
           }
         : null,
-    mission: kid ? missionOf(kid) : null,
+    mission: kid ? missionOf(kid, p.kidPhoto) : null,
   };
 }
 

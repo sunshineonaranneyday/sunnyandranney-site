@@ -125,12 +125,23 @@ export interface Parts {
   story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[] };
   /** The charity kid's slug, or '' for the most recent reveal. */
   kid: string;
+  /** One of that family's photos ("cf:" id), or '' for their finished room. */
+  kidPhoto: string;
+}
+export interface KidPhoto {
+  src: string;
+  alt: string;
+  /** The charity's own photo of the finished room. */
+  after?: true;
 }
 export interface Kid {
   slug: string;
   name: string;
   page: string;
-  photo: { src: string; alt: string };
+  /** The photo the email starts on: the finished room, when the charity has one. */
+  photo: KidPhoto;
+  /** Their photos, that one first (kids.mjs, photosOf). */
+  photos: KidPhoto[];
   caption: string;
   story: string;
   revealedOn: string | null;

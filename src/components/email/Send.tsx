@@ -42,6 +42,17 @@ const timesFor = (d: string, today: string) => {
   const now = minutesOf(eastern.format(new Date()));
   return TIMES.filter((t) => minutesOf(t.value) >= now + LEAD_MIN);
 };
+/**
+ * The times a tap away, besides the store's usual: morning, lunch and evening. Every other quarter
+ * hour is under "Other time". (Peter, 2026-11-16: 57 times in one list buried the usual one.)
+ */
+const QUICK = ['08:00', '12:00', '18:00'];
+const OTHER = 'other';
+/** "Tue" and "Nov 17", the two lines of a day's button */
+const dayParts = (d: string) => {
+  const [wd, md] = sendLabel(d).split(', ');
+  return { wd, md };
+};
 const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 const count = (n: number | null) => (n === null || Number.isNaN(n) ? 'every subscriber' : `${n.toLocaleString('en-US')} subscriber${n === 1 ? '' : 's'}`);
 
@@ -96,6 +107,20 @@ export function Send(props: Props) {
   const open = days.filter((d) => timesFor(d, today).length);
   const times = timesFor(day, today);
   const time = times.some((t) => t.value === wanted) ? wanted : (times.find((t) => t.value === props.usualTime) ?? times[0])?.value ?? wanted;
+  // The usual time and the common ones still open that day, in order through the day
+  const quick = [...new Set([props.usualTime, ...QUICK])].filter((v): v is string => Boolean(v) && times.some((t) => t.value === v)).sort((a, b) => minutesOf(a) - minutesOf(b));
+  const [other, setOther] = useState(false);
+  const otherOn = other || !quick.includes(time);
+  const otherSelect = useRef<HTMLSelectElement>(null);
+  const pickTime = (v: string) => {
+    if (v === OTHER) {
+      setOther(true);
+      window.setTimeout(() => otherSelect.current?.focus(), 0);
+    } else {
+      setOther(false);
+      setTime(v);
+    }
+  };
   useEffect(() => {
     if (!kitSend && open.length && !open.includes(day)) setDay(open[0]);
   }, [open.join(), day, kitSend]);
@@ -310,30 +335,54 @@ export function Send(props: Props) {
           <>
             {open.length ? (
               <div class="em-when">
-                <label class="visually-hidden" for="em-send-day">
-                  Day
-                </label>
-                <select id="em-send-day" value={day} onChange={(e) => setDay((e.target as HTMLSelectElement).value)}>
-                  {open.map((d) => (
-                    <option value={d}>
-                      {d === today ? 'Today, ' : ''}
-                      {sendLabel(d)}
-                      {d === send ? ' (usual)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <label class="visually-hidden" for="em-send-time">
-                  Time
-                </label>
-                <select id="em-send-time" value={time} onChange={(e) => setTime((e.target as HTMLSelectElement).value)}>
-                  {times.map((t) => (
-                    <option value={t.value}>
-                      {t.label}
-                      {t.value === props.usualTime ? ' (usual)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <span class="em-hint">Eastern, to {count(subscribers)}.</span>
+                <fieldset class="em-seg em-days" id="em-send-day">
+                  <legend>Day</legend>
+                  <div class="em-seg-row">
+                    {open.map((d) => {
+                      const { wd, md } = dayParts(d);
+                      return (
+                        <label class="em-seg-option">
+                          <input type="radio" name="em-send-day" value={d} checked={d === day} onChange={() => setDay(d)} />
+                          <span>
+                            <strong>{d === today ? 'Today' : wd}</strong>
+                            <small>{md}</small>
+                            <em>{d === send ? 'Usual' : '\u00a0'}</em>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+                <fieldset class="em-seg em-times" id="em-send-time">
+                  <legend>Time, Eastern</legend>
+                  {quick.length > 0 && (
+                    <div class="em-seg-row">
+                      {[...quick, OTHER].map((v) => (
+                        <label class="em-seg-option">
+                          <input type="radio" name="em-send-time" value={v} checked={v === OTHER ? otherOn : !otherOn && v === time} onChange={() => pickTime(v)} />
+                          <span>
+                            <strong>{v === OTHER ? 'Other time' : timeLabel(v)}</strong>
+                            <em>{v === props.usualTime ? 'Usual' : '\u00a0'}</em>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {(otherOn || !quick.length) && (
+                    <div class="em-other-time">
+                      <label for="em-send-other">{quick.length ? 'Pick the time' : 'Time'}</label>
+                      <select id="em-send-other" ref={otherSelect} value={time} onChange={(e) => setTime((e.target as HTMLSelectElement).value)}>
+                        {times.map((t) => (
+                          <option value={t.value}>
+                            {t.label}
+                            {t.value === props.usualTime ? ' (usual)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </fieldset>
+                <p class="em-hint">To {count(subscribers)}.</p>
               </div>
             ) : (
               <p class="em-hint">This email’s week is over, so it can’t be scheduled.</p>

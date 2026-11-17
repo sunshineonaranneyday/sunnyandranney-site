@@ -337,8 +337,8 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-section .badge { transition: background-color var(--em-mid) var(--em-ease), color var(--em-mid) var(--em-ease); }
 .em-section { transition: opacity var(--em-slow) var(--em-ease); }
 .em-section.is-locked { opacity: 0.55; }
-.em-photo, .em-collage-item, .em-kid, .em-test-person, .em-scheduled, .em-done, .em-todo li { animation: em-in var(--em-mid) var(--em-ease) both; }
-.em-photo .em-photo-img img, .em-kid img { transition: transform var(--em-slow) var(--em-ease); }
+.em-photo, .em-collage-item, .em-test-person, .em-scheduled, .em-done, .em-todo li { animation: em-in var(--em-mid) var(--em-ease) both; }
+.em-photo .em-photo-img img { transition: transform var(--em-slow) var(--em-ease); }
 .em-photo:hover .em-photo-img img { transform: scale(1.02); }
 .em-photo { transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease); }
 .em-collage-item { will-change: transform; }
@@ -346,15 +346,39 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
   .em *, .em *::before, .em *::after { animation: none !important; transition: none !important; }
 }
 
-/* ── The charity ── */
-.em-kid { display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr); gap: 0.875rem; align-items: start; margin: 0 0 0.75rem; padding: 0.75rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); }
-.em-kid img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--sunk); }
-.em-kid figcaption { display: grid; gap: 0.375rem; min-width: 0; }
-.em-kid-caption { font-weight: 700; }
-.em-kid-story { color: var(--ink-2); font-size: 0.875rem; line-height: 1.45; }
-.em-kid-link { font-size: 0.8125rem; font-weight: 600; color: var(--ink); }
-.em-charity > .em-hint { margin: 0; }
-@container (max-width: 560px) { .em-kid { grid-template-columns: minmax(0, 1fr); } }
+/* ── The charity: families and their photos as pictures to tap, each cropped as the email crops it ── */
+.em-pick { margin: 0 0 1.25rem; }
+.em-pick-hint { margin: 0 0 0.5rem; }
+.em-families, .em-kid-pics { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.625rem; }
+.em-families { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.em-kid-pics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
+.em-family, .em-kid-pic {
+  position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; padding: 0; text-align: left; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font: inherit; overflow: hidden;
+  transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease);
+}
+.em-kid-pic { border-radius: 8px; background: var(--sunk); }
+.em-family:hover, .em-kid-pic:hover { border-color: color-mix(in srgb, var(--ink) 35%, var(--line)); }
+.em-family:focus-visible, .em-kid-pic:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+/* Chosen: a ring outside the photo (an inset one would sit under it) and a check on it */
+.em-family[aria-pressed='true'], .em-kid-pic[aria-pressed='true'] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+.em-family-photo { position: relative; display: block; }
+.em-family-photo img, .em-kid-pic img { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; object-fit: cover; background: var(--sunk); }
+.em-family-name { padding: 0.5rem 0.625rem 0; font-weight: 700; font-size: 0.875rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.em-family-when { padding: 0.125rem 0.625rem 0.5rem; font-size: 0.8125rem; line-height: 1.35; color: var(--ink-2); }
+.em-pick-check { position: absolute; top: 0.375rem; right: 0.375rem; display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; background: var(--ink); color: var(--bg); box-shadow: 0 0 0 2px var(--panel); }
+.em-pick-more { margin-top: 0.625rem; }
+.em-kid-words { padding: 0.75rem 0.875rem; border-radius: var(--r-md); background: var(--sunk); }
+.em-kid-words p { margin: 0; font-size: 0.875rem; line-height: 1.5; color: var(--ink-2); }
+.em-kid-words strong { color: var(--ink); }
+.em-kid-words .em-hint { margin-top: 0.375rem; font-size: 0.8125rem; }
+.em-kid-words a { font-weight: 600; color: var(--ink); white-space: nowrap; }
+@container (max-width: 560px) {
+  .em-families { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .em-kid-pics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+/* A small phone: photos stay at least 44px tall to tap */
+@container (max-width: 360px) { .em-kid-pics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* ── Send ── */
 .em-send { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
@@ -387,9 +411,18 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-scheduled-icon { width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: var(--sage); stroke: #fff; margin-top: 2px; }
 .em-scheduled-when { font-size: 1.0625rem; font-weight: 700; margin: 0 0 0.125rem; }
 .em-scheduled .em-hint { margin: 0; }
-.em-when { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-top: 0.25rem; }
-.em-when select { width: auto; min-width: 9rem; }
-.em-when .em-hint { margin: 0; }
+/* When it goes: the week's days and the usual times as buttons, one tap each; every other time in "Other time" */
+.em-when { display: grid; gap: 0.25rem; margin-top: 0.25rem; }
+.em-when .em-seg { margin: 0 0 0.75rem; }
+.em-when .em-seg-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.em-when .em-seg-option span { flex-direction: column; gap: 0.0625rem; min-height: 44px; padding: 0.375rem 0.25rem; line-height: 1.2; }
+.em-when .em-seg-option strong { font-weight: 700; white-space: nowrap; }
+.em-when .em-seg-option small { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.em-when .em-seg-option em { font-style: normal; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--teal); }
+.em-other-time { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.75rem; margin-top: 0.625rem; animation: em-fade var(--em-mid) var(--em-ease) both; }
+.em-other-time label { font-weight: 600; font-size: 0.875rem; }
+.em-other-time select { width: auto; min-width: 9rem; min-height: 44px; }
+.em-when > .em-hint { margin: 0; }
 .em-dialog { width: min(32rem, calc(100vw - 2rem)); padding: 1.25rem; border: 0; border-radius: var(--r-lg, 16px); background: var(--panel); color: var(--ink); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.24); }
 .em-dialog[open] { animation: em-pop var(--em-mid) var(--em-pop) both; }
 .em-dialog::backdrop { background: rgba(28, 28, 28, 0.45); animation: em-fade var(--em-mid) var(--em-ease) both; }
@@ -401,6 +434,9 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 @container (max-width: 560px) {
   .em-test-add-row { grid-template-columns: minmax(0, 1fr); }
+  /* Each cell at least as wide as its words ("Other time", "12:00 PM" in bold), as many to a row as fit */
+  .em-when .em-seg-row { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(5.75rem, 1fr)); }
+  .em-when .em-days .em-seg-row { grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr)); }
   .em-send-row .btn { width: 100%; }
 }
 

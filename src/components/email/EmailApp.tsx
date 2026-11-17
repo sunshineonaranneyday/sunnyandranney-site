@@ -267,14 +267,28 @@ export default function EmailApp(props: AppProps) {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // The phone's "See the preview" button steps aside once the preview itself is on screen
+  // The phone's "See the preview" button steps aside once the preview itself is on screen, and
+  // while Send is, so it never sits on Schedule or the test button (the preview is just below Send)
   const [seesPreview, setSeesPreview] = useState(false);
   useEffect(() => {
-    const preview = document.getElementById('em-preview');
-    if (!preview || typeof IntersectionObserver === 'undefined') return;
-    const watch = new IntersectionObserver(([entry]) => setSeesPreview(entry.isIntersecting), { rootMargin: '0px 0px -25% 0px' });
-    watch.observe(preview);
-    return () => watch.disconnect();
+    if (typeof IntersectionObserver === 'undefined') return;
+    const onScreen = new Set<Element>();
+    const seen = (entries: IntersectionObserverEntry[]) => {
+      for (const e of entries) e.isIntersecting ? onScreen.add(e.target) : onScreen.delete(e.target);
+      setSeesPreview(onScreen.size > 0);
+    };
+    // The preview counts once it fills the lower part of the screen; Send as soon as any of it shows
+    const watches = [
+      ['em-preview', '0px 0px -25% 0px'],
+      ['em-send', '0px'],
+    ].flatMap(([id, rootMargin]) => {
+      const el = document.getElementById(id);
+      if (!el) return [];
+      const w = new IntersectionObserver(seen, { rootMargin });
+      w.observe(el);
+      return [w];
+    });
+    return () => watches.forEach((w) => w.disconnect());
   }, []);
 
   // ── Where each part stands ──

@@ -323,11 +323,14 @@ test('the charity section shows its live numbers, and leaves the strip out witho
     mission: { photo: { src: 'cf:x.jpg', alt: 'A family' }, caption: 'Ages 14 and 12.', story: 'Story.', cta: 'See their reveal', url: 'https://sunshineonaranneyday.com/kids/x/', impact: { rooms: '295+', children: '208+' } },
   };
   const html = new Email(brief).mission();
-  // The logo on its own Warm Gray tile (readable when dark mode darkens the band), in a row whose
-  // padding is short by the tile's margin so the lettering stays on the column
-  assert.match(html, /class="soard ptl pxl"[^>]*padding:34px 26px 0px;/);
-  assert.match(html, /soard-logo-warm-tile\/public" width="132" height="121"/);
-  assert.match(html, /class="px pb soard"[^>]*padding:18px 32px 40px;/);
+  // About one phone screen: a small logo on its own Warm Gray tile (readable when dark mode darkens
+  // the band), the finished room at 2:1, the caption run into the story, and a text link, so the
+  // store's sale keeps the email's one big button
+  assert.match(html, /soard-logo-warm-tile\/public" width="88" height="81"/);
+  assert.match(html, /w=1072,h=536,[^"]*" width="536" height="268"/);
+  assert.match(html, /<strong style="font-weight:700;">Ages 14 and 12\.<\/strong> Story\.<\/p>/);
+  assert.match(html, /utm_content=mission-link"[^>]*padding:10px 0;[^>]*>See their reveal&nbsp;&#8594;<\/a>/);
+  assert.doesNotMatch(html, /mission-button|bgcolor="#FFDA24"/, 'no yellow button in the charity section');
   assert.match(html, />295\+</);
   assert.match(html, />208\+</);
   assert.match(html, /\$0</);
