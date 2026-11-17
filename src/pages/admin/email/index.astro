@@ -41,12 +41,13 @@ async function impactNow() {
 
 const env = Astro.locals.runtime.env;
 const kit = env.KIT_API_KEY ? kitClient({ key: env.KIT_API_KEY, base: env.KIT_API_BASE || undefined }) : null;
-/** A Kit answer for the page, or null if Kit is slow or says no: the page still works without it. */
-async function fromKit<T>(ask: () => Promise<T>): Promise<T | null> {
+/** A Kit answer for the page, or null if Kit is slow or says no: the page still works without it, and the log says why. */
+async function fromKit<T>(what: string, ask: () => Promise<T>): Promise<T | null> {
   if (!kit) return null;
   try {
-    return await Promise.race([ask(), new Promise<null>((done) => setTimeout(() => done(null), 4000))]);
-  } catch {
+    return await Promise.race([ask(), new Promise<null>((done) => setTimeout(() => (console.error(`Kit ${what}: no answer in 4 seconds`), done(null)), 4000))]);
+  } catch (err) {
+    console.error(`Kit ${what}:`, err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -65,8 +66,8 @@ const [past, events, testList, library, impact, kids, usual, subscribers] = awai
   listPhotos(db, 80),
   impactNow(),
   kidsNow(),
-  fromKit(() => usualTime(kit!)),
-  fromKit(() => subscriberCount(kit!)),
+  fromKit('usual time', () => usualTime(kit!)),
+  fromKit('subscriber count', () => subscriberCount(kit!)),
 ]);
 const parts = record?.parts ?? blankParts();
 // The library, plus any older photo this email still uses
@@ -76,7 +77,7 @@ const [older, tests, layoutReports] = await Promise.all([photosByIds(db, using),
 const photos = [...library, ...older];
 // Where the week's send stands in Kit now: scheduled, sending or sent. One deleted in Kit's own app
 // counts as none, so the email unlocks; if Kit doesn't answer, it stays as it was noted.
-const kitStatus = record?.kit ? await fromKit(() => statusOf(kit!, record.kit!.id)) : null;
+const kitStatus = record?.kit ? await fromKit('send status', () => statusOf(kit!, record.kit!.id)) : null;
 if (record?.kit && kitStatus?.status === 'gone') {
   await setKit(db, { send, id: null });
   record.kit = null;

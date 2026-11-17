@@ -323,14 +323,14 @@ test('the count is the store segment’s, worked out the way the segment is made
     { type: 'tags', any: [{ type: 'ids', matching: [25389847] }] },
     { type: 'subscriber_state', states: ['active'] },
   ] });
-  // Kit's filter counting the tag differently from the tag's own list, or an impossible overlap: no number
-  assert.ok(Number.isNaN(await subscriberCount(fakeKit(counts({ viaFilter: 50 })).kit)));
-  assert.ok(Number.isNaN(await subscriberCount(fakeKit(counts({ both: 4000 })).kit)));
-  assert.ok(Number.isNaN(await subscriberCount(fakeKit(counts({ both: null })).kit)));
+  // Kit's filter counting the tag differently from the tag's own list, or an impossible overlap: no number, and why
+  await assert.rejects(subscriberCount(fakeKit(counts({ viaFilter: 50 })).kit), /the tag’s list has 3115 active, Kit’s filter 50, on both tags 274/);
+  await assert.rejects(subscriberCount(fakeKit(counts({ both: 4000 })).kit), /on both tags 4000/);
+  await assert.rejects(subscriberCount(fakeKit(counts({ both: null })).kit), /on both tags NaN/);
   // A tag the segment is made of is gone: no number
   const noTag = counts();
   noTag['GET /tags?per_page=1000'] = { tags: [{ id: 1, name: 'Donors' }], pagination: { has_next_page: true, end_cursor: 'c1' } };
-  assert.ok(Number.isNaN(await subscriberCount(fakeKit(noTag).kit)));
+  await assert.rejects(subscriberCount(fakeKit(noTag).kit), /no “Shopify: no marketing” tag/);
 });
 
 test('a send Kit keeps as a draft is deleted, so nothing is left half-done', async () => {
