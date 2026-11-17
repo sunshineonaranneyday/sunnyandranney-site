@@ -212,29 +212,51 @@ export async function cancel(kit, id) {
   await kit.call(`/broadcasts/${id}`, { method: 'DELETE' });
 }
 
-/** Kit's count of active subscribers with every one of these tags, from its subscriber filter. */
+/** A tag's active subscribers, from the tag's own list (live Nov 17, 2026: the store tag read 3,115, as Kit's app does). */
+async function activeOnTag(kit, tagId) {
+  const data = await kit.call(`/tags/${tagId}/subscribers?status=active&include_total_count=true&per_page=1`);
+  return Number(data?.pagination?.total_count ?? NaN);
+}
+
+/**
+ * Kit's count of active subscribers with every one of these tags, from its subscriber filter: its
+ * total when it gives one, else the people it returned when they all fit on one page. Live on Nov
+ * 17, 2026 the filter answered with no total when not asked for one (include_total_count, as Kit's
+ * other lists take). Otherwise NaN, with what Kit sent noted for the log.
+ * @returns {Promise<{ n: number, seen: string }>}
+ */
 async function activeWithTags(kit, tagIds) {
   const all = [...tagIds.map((id) => ({ type: 'tags', any: [{ type: 'ids', matching: [id] }] })), { type: 'subscriber_state', states: ['active'] }];
-  const data = await kit.call('/subscribers/filter', { method: 'POST', body: { all } });
-  return Number(data?.pagination?.total_count ?? NaN);
+  const data = await kit.call('/subscribers/filter?include_total_count=true&per_page=1000', { method: 'POST', body: { all } });
+  const page = data?.pagination ?? {};
+  const listed = Array.isArray(data?.subscribers) ? data.subscribers.length : NaN;
+  const seen = `total ${page.total_count ?? 'none'}, ${listed} listed, per page ${page.per_page ?? '?'}, more ${page.has_next_page ?? '?'}`;
+  if (Number.isInteger(page.total_count)) return { n: page.total_count, seen };
+  if (page.has_next_page === false && Number.isInteger(listed)) return { n: listed, seen };
+  return { n: NaN, seen };
 }
 
 /**
  * How many people the email would go to: the store segment's active subscribers. Kit's API has no
  * count for a segment, so it's counted the way the segment is made (STORE_SEGMENT): the store tag's
- * active subscribers, less those also on NO_MARKETING_TAG. Kit's filter must count the store tag
- * the same as the tag's own list does, or it throws, saying what Kit counted, rather than give a
- * wrong number.
+ * active subscribers, less those also on NO_MARKETING_TAG. Kit's filter must first count the
+ * no-marketing tag the same as that tag's own list does, or it throws, saying what Kit counted,
+ * rather than give a wrong number.
  */
 export async function subscriberCount(kit) {
   const [store, noMarketing] = await Promise.all([idNamed(kit, 'tags', STORE_TAG), idNamed(kit, 'tags', NO_MARKETING_TAG)]);
   if (!store || !noMarketing) throw new Error(`Kit has no “${store ? NO_MARKETING_TAG : STORE_TAG}” tag, so the store segment can’t be counted.`);
-  const onTag = await kit.call(`/tags/${store}/subscribers?status=active&include_total_count=true&per_page=1`).then((d) => Number(d?.pagination?.total_count ?? NaN));
-  const [viaFilter, both] = await Promise.all([activeWithTags(kit, [store]), activeWithTags(kit, [store, noMarketing])]);
-  if (!Number.isInteger(onTag) || viaFilter !== onTag || !Number.isInteger(both) || both < 0 || both > onTag) {
-    throw new Error(`The store segment can’t be counted: the tag’s list has ${onTag} active, Kit’s filter ${viaFilter}, on both tags ${both}.`);
+  const [onStore, onNoMarketing, viaFilter, both] = await Promise.all([
+    activeOnTag(kit, store),
+    activeOnTag(kit, noMarketing),
+    activeWithTags(kit, [noMarketing]),
+    activeWithTags(kit, [store, noMarketing]),
+  ]);
+  const n = both.n;
+  if (!Number.isInteger(onStore) || !Number.isInteger(onNoMarketing) || viaFilter.n !== onNoMarketing || !Number.isInteger(n) || n < 0 || n > Math.min(onStore, onNoMarketing)) {
+    throw new Error(`The store segment can’t be counted: the store tag’s list has ${onStore} active and the no-marketing tag’s ${onNoMarketing}; Kit’s filter found ${viaFilter.n} on the no-marketing tag (${viaFilter.seen}) and ${n} on both (${both.seen}).`);
   }
-  return onTag - both;
+  return onStore - n;
 }
 
 /** A test, not a real send: the admin's tests go out with "[Test]" before the subject (sendTest). */
