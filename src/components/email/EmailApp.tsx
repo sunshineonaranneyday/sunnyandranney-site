@@ -338,7 +338,8 @@ export default function EmailApp(props: AppProps) {
     if (typeof IntersectionObserver === 'undefined') return;
     const onScreen = new Set<Element>();
     const seen = (entries: IntersectionObserverEntry[]) => {
-      for (const e of entries) e.isIntersecting ? onScreen.add(e.target) : onScreen.delete(e.target);
+      // On a phone the preview is a sheet over the page (below), there whether open or not: it never counts
+      for (const e of entries) e.isIntersecting && getComputedStyle(e.target).position !== 'fixed' ? onScreen.add(e.target) : onScreen.delete(e.target);
       setSeesPreview(onScreen.size > 0);
     };
     // The preview counts once it fills the lower part of the screen; Send as soon as any of it shows
@@ -354,6 +355,31 @@ export default function EmailApp(props: AppProps) {
     });
     return () => watches.forEach((w) => w.disconnect());
   }, []);
+
+  // On a phone or upright iPad the preview is a sheet over the page: "See the preview" opens it at the
+  // part she's working on, and "Back to editing" closes it with the page just where she left it (as
+  // Shopify's and Canva's phone editors keep editing and preview a tap apart). It was 11 screens down
+  // the page, below Send. While it's open the page under it is out of reach, and Escape closes it.
+  const [previewing, setPreviewing] = useState(false);
+  const jump = useRef<HTMLButtonElement>(null);
+  const back = useRef<HTMLButtonElement>(null);
+  const closePreview = () => {
+    setPreviewing(false);
+    requestAnimationFrame(() => jump.current?.focus({ preventScroll: true }));
+  };
+  useEffect(() => {
+    if (!previewing) return;
+    back.current?.focus({ preventScroll: true });
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && closePreview();
+    // Wide enough for the preview beside the form again (the button isn't drawn there): no sheet
+    const wide = () => jump.current && getComputedStyle(jump.current).display === 'none' && setPreviewing(false);
+    window.addEventListener('keydown', key);
+    window.addEventListener('resize', wide);
+    return () => {
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('resize', wide);
+    };
+  }, [previewing]);
 
   // ── Where each part stands ──
   const saleState = !form.kind ? { state: 'Not set', tone: 'todo' as const } : Object.keys(saleErrors).length ? { state: 'Needs fixing', tone: 'bad' as const } : { state: 'Ready', tone: 'ok' as const };
@@ -413,8 +439,8 @@ export default function EmailApp(props: AppProps) {
   ];
 
   return (
-    <div class={`em${dirty ? ' is-dirty' : ''}${seesPreview ? ' sees-preview' : ''}`}>
-      <div class="em-bar">
+    <div class={`em${dirty ? ' is-dirty' : ''}${seesPreview ? ' sees-preview' : ''}${previewing ? ' is-previewing' : ''}`}>
+      <div class="em-bar" {...(previewing ? { inert: true } : {})}>
         <div class="em-bar-title">
           <h1>Weekly email</h1>
           <p class="em-which">
@@ -448,7 +474,7 @@ export default function EmailApp(props: AppProps) {
       </div>
 
       <div class="em-grid">
-        <div class="em-edit" onFocusCapture={follow} onPointerDown={follow}>
+        <div class="em-edit" onFocusCapture={follow} onPointerDown={follow} {...(previewing ? { inert: true } : {})}>
           {attempted && (errorList.length > 0 || layoutProblem) && (
             <div class="em-summary" role="alert" tabIndex={-1} ref={summaryRef}>
               <p>
@@ -557,7 +583,12 @@ export default function EmailApp(props: AppProps) {
           )}
         </div>
 
-        <div class="em-side" id="em-preview">
+        <div class="em-side" id="em-preview" {...(previewing ? { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Preview of the email' } : {})}>
+          <div class="em-side-bar">
+            <button type="button" class="btn em-side-back" ref={back} onClick={closePreview}>
+              ← Back to editing
+            </button>
+          </div>
           {props.owner && layoutReports.length > 0 && (
             <section class="em-owner card" aria-labelledby="em-owner-title">
               <h2 id="em-owner-title">Only you see this: the email’s own layout</h2>
@@ -578,9 +609,9 @@ export default function EmailApp(props: AppProps) {
           <Preview focus={focus} brief={brief} sections={sections} problem={null} checks={checks} onFit={setFit} />
         </div>
       </div>
-      <a class="em-jump btn btn-dark" href="#em-preview">
+      <button type="button" class="em-jump btn btn-dark" ref={jump} aria-haspopup="dialog" onClick={() => setPreviewing(true)}>
         See the preview
-      </a>
+      </button>
     </div>
   );
 }

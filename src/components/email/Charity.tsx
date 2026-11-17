@@ -100,7 +100,7 @@ export function Charity({ parts, setParts, kids, error }: { parts: Parts; setPar
           </p>
           <p class="em-hint">
             Their words, from the charity’s site.{' '}
-            <a href={kid.page} target="_blank" rel="noopener">
+            <a class="em-tap-link" href={kid.page} target="_blank" rel="noopener">
               Their page&nbsp;→
             </a>
           </p>
