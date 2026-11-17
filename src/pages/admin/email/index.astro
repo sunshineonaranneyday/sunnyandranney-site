@@ -16,6 +16,7 @@ import { listPhotos, photosByIds } from '@/lib/sunny-side/photo-store.mjs';
 import { testPeople } from '@/lib/sunny-side/testers.mjs';
 import { listPeople, recentTests } from '@/lib/sunny-side/test-store.mjs';
 import { listReports } from '@/lib/sunny-side/layout-store.mjs';
+import { viewFor } from '@/lib/admin/nav.mjs';
 import { localDate } from '@/lib/time-clock/hours.mjs';
 
 const admin = Astro.locals.admin;
@@ -82,8 +83,10 @@ const [past, events, testList, library, impact, kids, reveals, usual, subscriber
 const parts = record?.parts ?? blankParts();
 // The library, plus any older photo this email still uses
 const using = [parts.hero, ...parts.story.photos].filter((id) => id && !library.some((p) => p.id === id));
-// Problems in the email's own layout, which only the owner is shown (layout-store.mjs)
-const [older, tests, layoutReports] = await Promise.all([photosByIds(db, using), recentTests(db, send), admin.owner ? listReports(db) : []]);
+// Problems in the email's own layout, which only the owner is shown (layout-store.mjs), and only on the
+// admin's own address: on the email address no one is the owner, and everyone sees what Mike sees (viewFor)
+const owner = viewFor(admin, Astro.url.hostname.toLowerCase()).owner;
+const [older, tests, layoutReports] = await Promise.all([photosByIds(db, using), recentTests(db, send), owner ? listReports(db) : []]);
 const photos = [...library, ...older];
 // Where the week's send stands in Kit now: scheduled, sending or sent. One deleted in Kit's own app
 // counts as none, so the email unlocks; if Kit doesn't answer, it stays as it was noted.
@@ -120,7 +123,7 @@ const props = {
   subscribers: Number.isFinite(subscribers) ? subscribers : null,
   impact,
   local: import.meta.env.DEV,
-  owner: Boolean(admin.owner),
+  owner,
   layoutReports,
 } as unknown as AppProps;
 // The page's JSON can't close its own script tag.

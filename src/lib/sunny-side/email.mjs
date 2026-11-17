@@ -300,6 +300,17 @@ export const COLLAGE_ROWS = { 1: [1], 2: [2], 3: [1, 2], 4: [1, 3], 5: [1, 2, 2]
  */
 export const PARTS = ['offer', 'wall', 'story', 'events', 'mission'];
 
+/** The web-font link as the email writes it, hidden from Outlook. */
+export const FONT_LINK = /<!--\[if !mso\]><!--><link href="https:\/\/fonts\.googleapis\.com[^>]*><!--<!\[endif\]-->/;
+
+/**
+ * The email as a mail app that drops its styling shows it (the Gmail app with a Yahoo, Outlook or
+ * iCloud address): no style block and no web fonts, only the inline styles. The email is written
+ * phones first, so it still fits. What "bare" means wherever it's checked: verify.mjs, the admin's
+ * preview and the tests, so they can't drift apart.
+ */
+export const bareEmail = (html) => html.replace(FONT_LINK, '').replace(/<style[\s\S]*?<\/style>/g, '');
+
 /** Every section, top to bottom. A preview can ask for just the first few. */
 export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'story', 'events', 'mission', 'visit', 'footer'];
 
@@ -371,16 +382,22 @@ export class Email {
     const width = 56 + 9 * [...text.replace(/&#8594;/g, 'x').replace(/&#8217;/g, "'").replace(/&amp;/g, '&')].length;
     const radius = pill ? 999 : R_BTN;
     // In a full-width row of its own: a table with align= floats, and whatever came after it (the
-    // sale's fine print) sat beside the button on a computer instead of under it
+    // sale's fine print) sat beside the button on a computer instead of under it.
+    // Phones first: inline the button fills its row, so it does on a phone even when the mail app
+    // throws the style block away; the computer's rules (.btn) give it its own width back. Outlook,
+    // whose button is the VML shape, gets a table of its own width: a full-width one would paint
+    // the color across the whole row around the shape.
+    const attrs = `role="presentation" cellpadding="0" cellspacing="0" border="0" align="${align}" class="btn"`;
     return (
       `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${align}">` +
-      `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="${align}" class="btn" ` +
-      `style="border-collapse:separate;"><tr><td bgcolor="${bg}" style="border-radius:${radius}px;background-color:${bg};">` +
+      `<!--[if mso]><table ${attrs} style="border-collapse:separate;"><![endif]-->` +
+      `<!--[if !mso]><!--><table ${attrs} style="border-collapse:separate;width:100%;"><!--<![endif]-->` +
+      `<tr><td bgcolor="${bg}" style="border-radius:${radius}px;background-color:${bg};">` +
       `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" ` +
       `href="${u}" style="height:52px;v-text-anchor:middle;width:${width}px;" arcsize="${pill ? '50%' : '15%'}" stroke="f" fillcolor="${bg}">` +
       `<w:anchorlock/><center style="color:${fg};font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">${text}</center>` +
       `</v:roundrect><![endif]--><!--[if !mso]><!-->` +
-      `<a href="${u}" target="_blank" style="display:inline-block;padding:16px 28px;font-family:${font};font-size:16px;` +
+      `<a href="${u}" target="_blank" style="display:block;text-align:center;padding:16px 28px;font-family:${font};font-size:16px;` +
       `line-height:20px;font-weight:700;color:${fg};text-decoration:none;border-radius:${radius}px;border:2px solid ${bg};">${text}</a>` +
       `<!--<![endif]--></td></tr></table></td></tr></table>`
     );
@@ -926,6 +943,11 @@ export class Email {
     return this.band(Email.statColumns(cells), { bg: SOARD_DEEP, top: S4, bottom: S4 - S2, cls: 'soard', part: 'mission' });
   }
 
+  /** Markup only Outlook for Windows reads: the table it lays side by side columns out with (the "ghost table"). */
+  static ghost(s) {
+    return `<!--[if mso]>${s}<![endif]-->`;
+  }
+
   /**
    * Blocks that sit side by side while they fit and wrap to the next line, centered, when they don't:
    * inline blocks, each at most STAT_PHONE wide (STAT_DESKTOP on a computer, .stat), so two fit across
@@ -934,7 +956,7 @@ export class Email {
    * a table of its own (the "ghost table").
    */
   static statColumns(cells) {
-    const ghost = (s) => `<!--[if mso]>${s}<![endif]-->`;
+    const { ghost } = Email;
     const w = Math.floor(COLUMN / cells.length);
     return (
       `<div style="font-size:0;line-height:0;text-align:center;">` +
@@ -961,12 +983,21 @@ export class Email {
    * drops it keeps width:100%, so the columns stack, which still fits. Outlook gets a ghost table.
    * min-width is a share of the row, not pixels: min-width beats max-width, so a 326px minimum held
    * the address column at 326 on a 280px phone and pushed the email off the screen.
+   * `gap` px go between the columns while they're stacked, and none once they're side by side: a
+   * spacer as tall as the gap whose width works out the same way, the whole row while they stack and
+   * nothing beside them. A gap hidden by a media query showed from 576 to 620px, where the columns
+   * already sit side by side, and always with the style block gone, and pushed the button off the
+   * address's middle.
    * @param {{ html: string, width: number, align?: string }[]} cols widths summing to `at`
    */
-  static fabFour(cols, at = COLUMN) {
-    const ghost = (s) => `<!--[if mso]>${s}<![endif]-->`;
+  static fabFour(cols, at = COLUMN, { gap = 0 } = {}) {
+    const { ghost } = Email;
     // Rounded down, so the shares never add up to more than the row
     const share = (w) => Math.floor((w / at) * 10000) / 100;
+    const spacer = gap
+      ? `<!--[if !mso]><!--><div class="fab-gap" style="display:inline-block;vertical-align:middle;min-width:0;max-width:100%;width:100%;` +
+        `width:calc(${at * at}px - ${at * 100}%);height:${gap}px;font-size:0;line-height:0;"></div><!--<![endif]-->`
+      : '';
     return (
       `<div style="font-size:0;line-height:0;">` +
       ghost(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`) +
@@ -978,7 +1009,7 @@ export class Email {
             `width:calc(${at * at}px - ${at * 100}%);font-size:16px;line-height:24px;text-align:${align};">${html}</div>` +
             ghost('</td>'),
         )
-        .join('') +
+        .join(spacer) +
       ghost('</tr></table>') +
       '</div>'
     );
@@ -996,13 +1027,17 @@ export class Email {
         { size: 16, lh: 24 },
       );
     // The address beside the button on a computer; on a phone the button goes under it, full width,
-    // whether or not the mail app keeps the style block (fabFour)
-    const button = `<!--[if !mso]><!-->${Email.gap(S3, 'visit-gap')}<!--<![endif]-->` + this.button('Get directions &#8594;', MAP, 'directions', GOLD, CHARCOAL, 'right');
+    // whether or not the mail app keeps the style block (fabFour, button)
+    const button = this.button('Get directions &#8594;', MAP, 'directions', GOLD, CHARCOAL, 'right');
     return this.band(
-      Email.fabFour([
-        { html: left, width: COLUMN - VISIT_BUTTON },
-        { html: button, width: VISIT_BUTTON, align: 'right' },
-      ]),
+      Email.fabFour(
+        [
+          { html: left, width: COLUMN - VISIT_BUTTON },
+          { html: button, width: VISIT_BUTTON, align: 'right' },
+        ],
+        COLUMN,
+        { gap: S3 },
+      ),
     );
   }
 
@@ -1104,11 +1139,8 @@ ${tierRules(1)}
   @media (min-width:${DESKTOP}px) {
 ${computer}
     .stat { max-width:${STAT_DESKTOP}px !important; }
-    .visit-gap { display:none !important; }
-  }
-  @media (max-width:${DESKTOP - 1}px) {
-    .btn { width:100% !important; float:none !important; }
-    .btn a { display:block !important; text-align:center !important; }
+    .btn { width:auto !important; }
+    .btn a { display:inline-block !important; }
   }
 </style>
 </head>

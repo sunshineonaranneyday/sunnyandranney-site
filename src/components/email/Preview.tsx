@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { FIRST_SCREEN, PARTS, render } from '@/lib/sunny-side/email.mjs';
-import { FONT, FONT_LINK } from './font';
+import { FIRST_SCREEN, FONT_LINK, PARTS, bareEmail, render } from '@/lib/sunny-side/email.mjs';
+import { FONT } from './font';
 
 /** Text too wide for a phone: the word that doesn't fit, by how much, and the part of the email it's in. */
 export interface Spill {
@@ -21,16 +21,15 @@ export interface Fit {
 }
 
 /**
- * The email for this brief and these sections, with the font swapped for the admin's copy. Bare, it's
- * the email as the Gmail app shows it to a Yahoo, Outlook or iCloud account: no web fonts (Helvetica
- * or Arial in their place, which run wider) and no style block, only the inline styles, the worst
- * case verify.mjs holds the email to.
+ * The email for this brief and these sections, built once: as sent, with the font swapped for the
+ * admin's copy, and bare (bareEmail), as the Gmail app shows it to a Yahoo, Outlook or iCloud
+ * account: no web fonts (Helvetica or Arial in their place, which run wider) and no style block, only
+ * the inline styles, the worst case verify.mjs holds the email to.
  */
-function emailHtml(brief: Record<string, unknown>, sections: string[], { bare = false } = {}): string {
-  const html = render(brief, sections);
-  const swapped = html.replace(FONT_LINK, bare ? '' : FONT);
-  if (swapped === html) throw new Error('The email’s font link changed; update the preview’s font swap.');
-  return bare ? swapped.replace(/<style[\s\S]*?<\/style>/g, '') : swapped;
+function emailHtml(brief: Record<string, unknown>, sections: string[]): { html: string; bare: string } {
+  const sent = render(brief, sections);
+  if (!FONT_LINK.test(sent)) throw new Error('The email’s font link changed; update the preview’s font swap.');
+  return { html: sent.replace(FONT_LINK, FONT), bare: bareEmail(sent) };
 }
 
 const rowsOf = (doc: Document) => {
@@ -179,8 +178,7 @@ export function Preview({ focus, brief, sections, problem, checks, onFit }: Prop
       let html: string;
       let bareHtml: string;
       try {
-        html = emailHtml(brief, sections);
-        bareHtml = emailHtml(brief, sections, { bare: true });
+        ({ html, bare: bareHtml } = emailHtml(brief, sections));
       } catch {
         return; // the page says what's wrong; the preview keeps the last good email
       }

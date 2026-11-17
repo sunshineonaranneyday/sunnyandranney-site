@@ -13,6 +13,7 @@ import {
   type Catalog,
   type EventRecord,
   type KitSend,
+  type LayoutReport,
   type Parts,
   type Photo,
   type Product,
@@ -65,9 +66,24 @@ const SPILL_WHERE: Record<Fixable, [string, string]> = {
   events: ['the events', 'Shorten it in the event.'],
   mission: ['the charity section', 'Those words come from the charity’s site: pick another family, or fix them there.'],
 };
-const spillMessage = (s: Spill & { part: Fixable }) => `“${s.word}” in ${SPILL_WHERE[s.part][0]} is ${s.over} px too wide for a small phone (320 px). ${SPILL_WHERE[s.part][1]}`;
 /** Each measuring frame's phone width (Preview: the smallest phone, a phone, the smallest phone bare). */
 const FRAME_WIDTH = { small: 320, phone: 390, bare: 320 } as const;
+type Frame = keyof typeof FRAME_WIDTH;
+/**
+ * The phone a spill was found on, by the frame that measured it. The bare frame is the email with its
+ * styles dropped, which the preview doesn't show, so it says where that happens: otherwise she'd be
+ * told a word is too wide while the preview shows it fitting.
+ */
+const SPILL_ON: Record<Frame, string> = {
+  small: 'a small phone (320 px)',
+  phone: 'a phone (390 px)',
+  bare: 'a small phone (320 px) in some mail apps, like the Gmail app with a Yahoo or iCloud address',
+};
+const spillMessage = (s: Spill & { part: Fixable; frame: Frame }) =>
+  `“${s.word}” in ${SPILL_WHERE[s.part][0]} is ${s.over} px too wide for ${SPILL_ON[s.frame]}. ${SPILL_WHERE[s.part][1]}`;
+/** How many times a layout report that didn't go through is sent again, and how far apart. */
+const REPORT_TRIES = 3;
+const REPORT_RETRY_MS = 20_000;
 
 /** "YYYY-MM-DD" in the store's time zone. */
 const easternDay = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(iso));
@@ -106,6 +122,9 @@ export default function EmailApp(props: AppProps) {
   // The owner's view of problems in the email's own layout: those reported from this page before (layout-store.mjs)
   const [layoutReports, setLayoutReports] = useState(props.layoutReports);
   const reported = useRef(new Set<string>());
+  // Times each word's report didn't go through, and a tick that sends the ones still waiting again
+  const tries = useRef(new Map<string, number>());
+  const [retry, setRetry] = useState(0);
   const [focus, setFocus] = useState<Focus>('offer');
   /** The part of the email Staci is working on, from where her focus or tap is. */
   const follow = (e: Event) => {
@@ -183,30 +202,38 @@ export default function EmailApp(props: AppProps) {
   const fold = fit.small && fit.phone ? Math.max(...frames.map(([, f]) => f?.buttonAt ?? 0)) : null;
   // What's too wide for a small phone, named, with where to fix it (the 320 px phone first: it's the
   // tightest). Words in the email's own layout aren't hers to fix: they go to the owner instead.
-  const spills = frames.flatMap(([k, f]) => (f?.spills ?? []).map((s) => ({ ...s, width: FRAME_WIDTH[k] })));
-  const spillAt = (spills.find((s) => s.part !== 'layout') as (Spill & { part: Fixable }) | undefined) ?? null;
+  const spills = frames.flatMap(([k, f]) => (f?.spills ?? []).map((s) => ({ ...s, width: FRAME_WIDTH[k], frame: k })));
+  const spillAt = (spills.find((s) => s.part !== 'layout') as (Spill & { part: Fixable; frame: Frame }) | undefined) ?? null;
   const layoutSpills = spills.filter((s) => s.part === 'layout');
   const spill = Boolean(spillAt);
   const spillWords = spillAt ? spillMessage(spillAt) : null;
   const longNames = useMemo(() => new Set(frames.flatMap(([, f]) => f?.longNames ?? [])), [fit]);
-  // A layout problem is reported once per word for each page load: the owner sees it on this page
+  // A layout problem is reported once per word for each page load: the owner sees it on this page, as
+  // the server now has it (how often, since when). One that doesn't go through (the connection
+  // dropped) is sent again a few times, or the owner would never hear of it from this page.
   useEffect(() => {
     for (const s of layoutSpills) {
-      if (reported.current.has(s.word)) continue;
+      if (reported.current.has(s.word) || (tries.current.get(s.word) ?? 0) >= REPORT_TRIES) continue;
       reported.current.add(s.word);
-      void call('/api/admin/email/layout/', 'POST', { word: s.word, over: s.over, width: s.width, send }).then((res) => {
-        if (res.ok && props.owner) {
-          const now = new Date().toISOString();
-          setLayoutReports((list) => [{ word: s.word, over: s.over, width: s.width, send, seenBy: props.test.me, firstSeen: now, lastSeen: now, times: 1 }, ...list.filter((r) => r.word !== s.word)]);
+      void call<{ report?: LayoutReport }>('/api/admin/email/layout/', 'POST', { word: s.word, over: s.over, width: s.width, send }).then((res) => {
+        if (res.ok) {
+          const saved = res.body.report;
+          if (props.owner && saved) setLayoutReports((list) => [saved, ...list.filter((r) => r.word !== saved.word)]);
+          return;
         }
+        reported.current.delete(s.word);
+        const n = (tries.current.get(s.word) ?? 0) + 1;
+        tries.current.set(s.word, n);
+        if (n < REPORT_TRIES) setTimeout(() => setRetry((t) => t + 1), REPORT_RETRY_MS);
       });
     }
-  }, [layoutSpills.map((s) => s.word).join('|')]);
+  }, [layoutSpills.map((s) => s.word).join('|'), retry]);
   async function clearLayoutReports() {
     const res = await call('/api/admin/email/layout/', 'DELETE', {});
     if (res.ok) {
       setLayoutReports([]);
       reported.current.clear();
+      tries.current.clear();
     } else toast(res.error, 'error');
   }
   const layoutProblem =

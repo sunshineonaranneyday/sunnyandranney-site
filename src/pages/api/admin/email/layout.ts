@@ -14,8 +14,9 @@ export const POST: APIRoute = async (context) => {
   if (admin instanceof Response) return admin;
   const report = cleanReport(await readJson(context.request));
   if (!report) return json({ error: 'Invalid request' }, 400);
-  await noteReport(dbOf(context), { ...report, by: admin.email, now: new Date().toISOString() });
-  return json({ ok: true });
+  // The row as it now stands: the owner's page shows it as is (how often, since when)
+  const saved = await noteReport(dbOf(context), { ...report, by: admin.email, now: new Date().toISOString() });
+  return json({ ok: true, report: saved });
 };
 
 /** Clears the reports once the layout is fixed. The owner only. */

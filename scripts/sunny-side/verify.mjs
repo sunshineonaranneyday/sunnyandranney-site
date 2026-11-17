@@ -329,15 +329,40 @@ async function sweep(f, src) {
       if (loaded.length) bad.set(`web fonts loaded where none may (${[...new Set(loaded)].join(', ')})`, [SWEEP[0]]);
       for (const w of SWEEP) {
         await page.setViewportSize({ width: w, height: 844 });
-        const found = await page.evaluate(() => {
+        const found = await page.evaluate((bare) => {
           const out = [];
           const wider = document.documentElement.scrollWidth - innerWidth;
           if (wider > 0) out.push(`the email is ${wider}px wider than the screen`);
           for (const t of document.querySelectorAll('p,h1,h2,.tile-name,.tile-price')) {
             if (t.getBoundingClientRect().width && t.scrollWidth > t.clientWidth + 1) out.push(`"${t.textContent.trim().replace(/\s+/g, ' ').slice(0, 24)}" spills out of its box`);
           }
+          // Buttons fill their row on a phone, and with the style block gone (phones first); on a
+          // computer, as sent, a button in a wide row is its own width. With no style block the
+          // directions button sat right-floated at 188px under a left-aligned address.
+          const phone = innerWidth <= 620 || bare;
+          for (const b of document.querySelectorAll('table.btn')) {
+            const row = b.parentElement.getBoundingClientRect(), q = b.getBoundingClientRect(), link = b.querySelector('a')?.getBoundingClientRect();
+            const what = b.textContent.trim().replace(/\s+/g, ' ').slice(0, 20);
+            if (!q.width) continue;
+            if (phone && (q.width < row.width - 1 || (link && link.width < q.width - 1))) out.push(`the "${what}" button doesn't fill its row`);
+            if (!phone && row.width > 300 && q.width >= row.width - 1) out.push(`the "${what}" button fills a computer's row`);
+          }
+          // The directions button sits on the address's middle when beside it, and 24px under it when
+          // not. A gap hidden by a media query pushed it down from 576 to 620px, and with no style block.
+          const dir = [...document.querySelectorAll('table.btn')].find((b) => /Get directions/.test(b.textContent));
+          const addr = [...document.querySelectorAll('h2')].find((h) => /109A Oak\s+Street/.test(h.textContent))?.closest('div[style*="min-width"]');
+          if (dir && addr) {
+            const d = dir.getBoundingClientRect(), A = addr.getBoundingClientRect();
+            if (d.left >= A.right - 1) {
+              const off = Math.round((d.top + d.bottom) / 2 - (A.top + A.bottom) / 2);
+              if (Math.abs(off) > 1) out.push(`the directions button sits ${off}px off the address's middle`);
+            } else {
+              const gap = Math.round(d.top - A.bottom);
+              if (Math.abs(gap - 24) > 1) out.push(`the directions button is ${gap}px under the address, not 24`);
+            }
+          } else out.push('no directions button beside the address');
           return out;
-        });
+        }, mode === 'bare');
         for (const x of found) (bad.get(x) ?? bad.set(x, []).get(x)).push(w);
       }
       await ctx.close();
