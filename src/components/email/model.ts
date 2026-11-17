@@ -82,8 +82,8 @@ export interface EventRecord {
  */
 export interface SalePresets {
   percent: number;
-  /** The last spend-more tiers the store used, or null if it never has. */
-  tiers: { spend: number; percent: number }[] | null;
+  /** The last spend-more tiers saved here, else the store's own from its Nov 3 email (special.mjs, STORE_TIERS). */
+  tiers: { spend: number; percent: number }[];
   /** The last day a sale runs unless she changes it (usualEnds). */
   ends: string;
 }

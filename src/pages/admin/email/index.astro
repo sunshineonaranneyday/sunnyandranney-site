@@ -5,7 +5,7 @@ import EmailApp from '@/components/email/EmailApp';
 import type { AppProps } from '@/components/email/model';
 import '@/components/email/email.css';
 import AdminBase from '@/layouts/AdminBase.astro';
-import { USUAL_PERCENT, sendLabel, usualEnds } from '@/lib/sunny-side/special.mjs';
+import { STORE_TIERS, USUAL_PERCENT, sendLabel, usualEnds } from '@/lib/sunny-side/special.mjs';
 import { eventsFrom } from '@/lib/sunny-side/event-store.mjs';
 import { pastWeeks, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { IMPACT_PAGE, impactFromPage } from '@/lib/sunny-side/impact.mjs';
@@ -84,7 +84,8 @@ const kitSend = record?.kit ? { ...record.kit, url: broadcastUrl(record.kit.id),
 const lastOf = (kind: string) => past.find((r) => r.special?.kind === kind)?.special ?? null;
 type Tier = { spend: number | null; percent: number | null };
 const lastTiers = (lastOf('tiers')?.tiers as Tier[] | undefined)?.filter((t): t is { spend: number; percent: number } => t.spend !== null && t.percent !== null);
-const presets = { percent: lastOf('percent')?.percent ?? USUAL_PERCENT, tiers: lastTiers?.length ? lastTiers : null, ends: usualEnds(send) };
+// Each ready-made sale starts filled in: from the last one saved here, else the store's own (special.mjs)
+const presets = { percent: lastOf('percent')?.percent ?? USUAL_PERCENT, tiers: lastTiers?.length ? lastTiers : STORE_TIERS.map((t) => ({ ...t })), ends: usualEnds(send) };
 
 // The shared rules are plain JavaScript; the page's types say what they return
 const props = {

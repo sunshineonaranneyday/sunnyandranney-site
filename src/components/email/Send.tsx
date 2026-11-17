@@ -43,10 +43,12 @@ const timesFor = (d: string, today: string) => {
   return TIMES.filter((t) => minutesOf(t.value) >= now + LEAD_MIN);
 };
 /**
- * The times a tap away, besides the store's usual: morning, lunch and evening. Every other quarter
+ * The times a tap away, besides the store's usual once it has one: early morning, when the showroom
+ * opens (10 AM, the time picked until the store has a usual), lunch and evening. Every other quarter
  * hour is under "Other time". (Peter, 2026-11-16: 57 times in one list buried the usual one.)
  */
-const QUICK = ['08:00', '12:00', '18:00'];
+const OPENS = '10:00';
+const QUICK = ['08:00', OPENS, '12:00', '18:00'];
 const OTHER = 'other';
 /** "Tue" and "Nov 17", the two lines of a day's button */
 const dayParts = (d: string) => {
@@ -102,11 +104,12 @@ export function Send(props: Props) {
   const [adding, setAdding] = useState({ name: '', email: '' });
   const [addError, setAddError] = useState<string | undefined>();
   const [showAdd, setShowAdd] = useState(false);
-  const [wanted, setTime] = useState(props.usualTime && TIMES.some((t) => t.value === props.usualTime) ? props.usualTime : '10:00');
+  const [wanted, setTime] = useState(props.usualTime && TIMES.some((t) => t.value === props.usualTime) ? props.usualTime : OPENS);
   // Today offers only the times still ahead, and a day with none left isn't offered
   const open = days.filter((d) => timesFor(d, today).length);
   const times = timesFor(day, today);
-  const time = times.some((t) => t.value === wanted) ? wanted : (times.find((t) => t.value === props.usualTime) ?? times[0])?.value ?? wanted;
+  // Today, once the time wanted has passed: the usual or the opening time if still ahead, else the next one
+  const time = times.some((t) => t.value === wanted) ? wanted : (times.find((t) => t.value === props.usualTime) ?? times.find((t) => t.value === OPENS) ?? times[0])?.value ?? wanted;
   // The usual time and the common ones still open that day, in order through the day
   const quick = [...new Set([props.usualTime, ...QUICK])].filter((v): v is string => Boolean(v) && times.some((t) => t.value === v)).sort((a, b) => minutesOf(a) - minutesOf(b));
   const [other, setOther] = useState(false);
@@ -362,7 +365,7 @@ export function Send(props: Props) {
                           <input type="radio" name="em-send-time" value={v} checked={v === OTHER ? otherOn : !otherOn && v === time} onChange={() => pickTime(v)} />
                           <span>
                             <strong>{v === OTHER ? 'Other time' : timeLabel(v)}</strong>
-                            <em>{v === props.usualTime ? 'Usual' : '\u00a0'}</em>
+                            <em>{v === props.usualTime ? 'Usual' : v === OPENS && !props.usualTime ? 'Store opens' : '\u00a0'}</em>
                           </span>
                         </label>
                       ))}

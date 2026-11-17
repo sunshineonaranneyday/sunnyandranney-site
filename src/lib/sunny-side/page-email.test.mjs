@@ -264,17 +264,26 @@ test('a scheduled send can be cancelled until it goes; the template, count and u
     'GET /subscribers?status=active&include_total_count=true&per_page=1&slim=true': { subscribers: [], pagination: { total_count: 4812 } },
     [`GET /broadcasts?status=completed&sent_after=${SENT_AFTER}&per_page=1000&slim=true`]: {
       broadcasts: [
-        { subject: 'A', send_at: '2026-11-10T15:00:00Z' },
-        { subject: 'B', send_at: '2026-11-03T15:00:00Z' },
-        { subject: '[Test] C', send_at: '2026-11-02T20:00:00Z' },
-        { subject: 'D', send_at: '2026-10-27T13:30:00Z' },
+        // The store's weekly emails this admin scheduled, labeled as send.ts labels them
+        { subject: 'A', send_at: '2026-11-10T15:00:00Z', description: 'The Sunny Side for Tue, Nov 10, from the store admin' },
+        { subject: 'B', send_at: '2026-11-03T15:00:00Z', description: 'The Sunny Side for Tue, Nov 3, going Wed, Nov 4, from the store admin' },
+        { subject: '[Test] C', send_at: '2026-11-02T20:00:00Z', description: 'Test of the Tue, Nov 3 email, from the store admin' },
+        { subject: 'D', send_at: '2026-10-27T13:30:00Z', description: 'The Sunny Side for Tue, Oct 27, from the store admin' },
+        // The charity's emails from the same account, more of them and at their own time, count for nothing
+        { subject: 'Reveal day', send_at: '2026-11-16T20:31:00Z', description: null },
+        { subject: 'Last call', send_at: '2026-11-09T20:31:00Z' },
+        { subject: 'Newsletter', send_at: '2026-11-02T20:31:00Z', description: 'Monthly Dose of Sunshine' },
+        { subject: 'Hand-sent sale', send_at: '2026-11-11T02:52:00Z' },
       ],
     },
   });
   assert.equal(await templateFor(info.kit, null), 5);
   assert.equal(await templateFor(info.kit, '9'), 9);
   assert.equal(await subscriberCount(info.kit), 4812);
-  assert.equal(await usualTime(info.kit, NOW), '10:00'); // 15:00 UTC in November is 10 AM Eastern; the test is left out
+  assert.equal(await usualTime(info.kit, NOW), '10:00'); // 15:00 UTC in November is 10 AM Eastern; the test and the charity's emails are left out
+  // Before this admin has scheduled one, there's no usual time to offer (not the charity's)
+  const none = fakeKit({ [`GET /broadcasts?status=completed&sent_after=${SENT_AFTER}&per_page=1000&slim=true`]: { broadcasts: [{ subject: 'Reveal day', send_at: '2026-11-16T20:31:00Z' }] } });
+  assert.equal(await usualTime(none.kit, NOW), null);
   assert.equal(broadcastUrl(5), 'https://app.kit.com/campaigns/5/draft');
 });
 
