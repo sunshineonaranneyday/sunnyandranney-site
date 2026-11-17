@@ -110,7 +110,7 @@ export function Charity({ parts, setParts, kids, error }: { parts: Parts; setPar
   );
 }
 
-function Check() {
+export function Check() {
   return (
     <span class="em-pick-check" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">

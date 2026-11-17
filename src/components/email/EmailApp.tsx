@@ -135,7 +135,7 @@ export default function EmailApp(props: AppProps) {
   const photosById = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const saleOk = Boolean(form.kind) && !Object.keys(saleErrors).length;
   const sale = useMemo(() => draftSale(form.kind ? special : { ...special, kind: 'tiers' }), [special, form.kind]);
-  const partsErrors = useMemo(() => checkParts(parts, { sale: saleOk ? sale : null, photos: photosById, kids: props.kids }), [parts, saleOk, sale, photosById]);
+  const partsErrors = useMemo(() => checkParts(parts, { sale: saleOk ? sale : null, photos: photosById, kids: props.kids, reveals: props.reveals }), [parts, saleOk, sale, photosById]);
 
   const set = (patch: Partial<SaleForm>) => {
     setForm((f) => ({ ...f, ...patch }));
@@ -170,7 +170,7 @@ export default function EmailApp(props: AppProps) {
   const wallReady = Boolean(catalog) && wall.picks.length >= PICKS[0] && wall.picks.length <= PICKS[1];
   // The same email the Kit draft is made from (page-email.mjs), so Kit gets what the page shows
   const { brief, sections } = useMemo(
-    () => pageEmail({ sale, wall, parts, photos: photosById, kids: props.kids, catalog, events: shownEvents, impact: props.impact, send: day, site: SITE }),
+    () => pageEmail({ sale, wall, parts, photos: photosById, kids: props.kids, reveals: props.reveals, catalog, events: shownEvents, impact: props.impact, send: day, site: SITE }),
     [sale, wall, parts, photosById, catalog, shownEvents, day],
   );
 
@@ -341,6 +341,7 @@ export default function EmailApp(props: AppProps) {
     parts: saved.parts,
     photos: photosById,
     kids: props.kids,
+    reveals: props.reveals,
     catalog,
     send: day,
     check,
@@ -350,7 +351,7 @@ export default function EmailApp(props: AppProps) {
   });
   // Unsaved changes are saved first, so what counts is what's on the page once it saves
   const kitTodo = dirty
-    ? kitProblems({ special: form.kind ? special : null, wall: wall.picks.length ? wall : null, parts, photos: photosById, kids: props.kids, catalog, send: day, check, checkWall, checkParts, sale: saleOk ? sale : null })
+    ? kitProblems({ special: form.kind ? special : null, wall: wall.picks.length ? wall : null, parts, photos: photosById, kids: props.kids, reveals: props.reveals, catalog, send: day, check, checkWall, checkParts, sale: saleOk ? sale : null })
     : toKit;
   const story = parts.story;
   const kid = props.kids.find((k) => k.slug === parts.kid) ?? props.kids[0];
@@ -365,7 +366,12 @@ export default function EmailApp(props: AppProps) {
   const lines = saleOk ? linesOf(parts, sale) : { subject: parts.subject, preheader: parts.preheader };
   // Exactly what Kit gets (week-email.ts): the same plain text
   const inbox = { subject: plain(lines.subject), preheader: plain(lines.preheader) };
-  const storyState = story.headline && story.body ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const } : { state: 'Not written', tone: 'todo' as const };
+  const reveal = story.reveal ? props.reveals.find((r) => r.slug === story.reveal) : null;
+  const storyState = story.reveal
+    ? reveal
+      ? { state: `${reveal.name}’s reveal · ${reveal.short}`, tone: 'ok' as const }
+      : { state: 'Pick again', tone: 'bad' as const }
+    : story.headline && story.body ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const } : { state: 'Not written', tone: 'todo' as const };
   const checks = [
     { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` },
     // Measured as sent and bare (no style block, no web fonts, as the Gmail app shows it to other accounts).
@@ -457,7 +463,7 @@ export default function EmailApp(props: AppProps) {
           </Section>
 
           <Section n={4} id="em-story" locked={locked} title="The story" state={storyState.state} tone={storyState.tone}>
-            <Story parts={parts} setParts={setParts} shown={shownParts} />
+            <Story parts={parts} setParts={setParts} shown={shownParts} reveals={props.reveals} />
           </Section>
 
           <Section n={5} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={inEmail ? 'ok' : 'todo'}>

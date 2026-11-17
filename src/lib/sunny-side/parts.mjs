@@ -10,7 +10,7 @@
  */
 
 import { fillLine, lines, offerClaims, plain } from './email.mjs';
-import { KID_PHOTO, KID_SLUG, kidFor, missionOf } from './kids.mjs';
+import { KID_PHOTO, KID_SLUG, kidFor, missionOf, revealOf } from './kids.mjs';
 import { typeset } from './special.mjs';
 
 export const PART_LIMITS = { subject: 80, preheader: 110, label: 40, headline: 70, body: 320, cta: 30 };
@@ -39,6 +39,9 @@ export function cleanParts(p) {
       cta: str(s.cta, PART_LIMITS.cta),
       link: str(s.link, 200),
       photos: [...new Set((Array.isArray(s.photos) ? s.photos : []).map(photoId).filter(Boolean))].slice(0, COLLAGE_MAX + 2),
+      // A charity reveal still ahead (its kid's slug) takes the story spot: the charity's invite to
+      // watch it live, in the charity's words. '' is the showroom story, written above.
+      reveal: typeof s.reveal === 'string' && KID_SLUG.test(s.reveal) ? s.reveal : '',
     },
     // '' shows the charity's most recent reveal
     kid: typeof p?.kid === 'string' && KID_SLUG.test(p.kid) ? p.kid : '',
@@ -59,10 +62,10 @@ const isStorePath = (v) => /^\/[a-z0-9\-/_]*$/i.test(v) && !v.startsWith('//');
  */
 /**
  * @param {ReturnType<typeof cleanParts>} p
- * @param {{ sale?: any, photos?: Map<string, any> | null, kids?: any[] | null, ready?: boolean }} [opts]
+ * @param {{ sale?: any, photos?: Map<string, any> | null, kids?: any[] | null, reveals?: any[] | null, ready?: boolean }} [opts]
  * @returns {Record<string, string>}
  */
-export function checkParts(p, { sale = null, photos = null, kids = null, ready = false } = {}) {
+export function checkParts(p, { sale = null, photos = null, kids = null, reveals = null, ready = false } = {}) {
   /** @type {Record<string, string>} */
   const e = {};
   const set = (k, msg) => msg && (e[k] = msg);
@@ -90,8 +93,12 @@ export function checkParts(p, { sale = null, photos = null, kids = null, ready =
   set('story.body', over(s.body, PART_LIMITS.body, 'The story'));
   set('story.cta', over(s.cta, PART_LIMITS.cta, 'The link’s words'));
   if (s.link && !isStorePath(s.link)) e['story.link'] = 'The link goes to a page on sunnyandranney.com, like /visit/ or /shop/.';
-  if (ready && !s.headline) e['story.headline'] = 'Give the story a headline.';
-  if (ready && !s.body) e['story.body'] = 'Write a few lines for the story.';
+  // With a reveal in the spot, the charity's words fill it: nothing to write
+  if (ready && !s.reveal && !s.headline) e['story.headline'] = 'Give the story a headline.';
+  if (ready && !s.reveal && !s.body) e['story.body'] = 'Write a few lines for the story.';
+  if (s.reveal && reveals && !reveals.some((r) => r.slug === s.reveal)) {
+    e['story.reveal'] = reveals.length ? 'That reveal isn’t coming up anymore. Pick another, or the showroom story.' : 'The charity’s reveals didn’t load. Reload the page, or pick the showroom story.';
+  }
   if (s.photos.length > COLLAGE_MAX) e['story.photos'] = `The collage holds ${COLLAGE_MAX} photos at most. Take ${s.photos.length - COLLAGE_MAX} out.`;
   if (photos) {
     const gone = [p.hero, ...s.photos].filter((id) => id && !photos.has(id));
@@ -129,13 +136,14 @@ export function linesOf(p, sale) {
  */
 /**
  * @param {ReturnType<typeof cleanParts>} p
- * @param {{ sale: any, photos: Map<string, any>, kids?: any[], photoSrc?: (id: string) => string }} opts
+ * @param {{ sale: any, photos: Map<string, any>, kids?: any[], reveals?: any[], photoSrc?: (id: string) => string }} opts
  */
-export function briefParts(p, { sale, photos, kids = [], photoSrc = (id) => `photo:${id}` }) {
+export function briefParts(p, { sale, photos, kids = [], reveals = [], photoSrc = (id) => `photo:${id}` }) {
   // Alt text stays plain: the email escapes it where it draws the photo
   const pic = (id) => ({ src: photoSrc(id), alt: photos.get(id)?.alt || '' });
   const s = p.story;
   const kid = kidFor(p.kid, kids);
+  const reveal = s.reveal ? reveals.find((r) => r.slug === s.reveal) : null;
   const { subject, preheader } = linesOf(p, sale);
   return {
     // Plain text with curly quotes as characters: the email escapes these once where it writes them
@@ -144,8 +152,9 @@ export function briefParts(p, { sale, photos, kids = [], photoSrc = (id) => `pho
     subject: plain(typeset(subject)),
     preheader: plain(typeset(preheader)),
     hero: p.hero && photos.has(p.hero) ? pic(p.hero) : DEFAULT_HERO,
-    story:
-      s.headline || s.body || s.photos.length
+    story: reveal
+      ? { reveal: revealOf(reveal) }
+      : s.headline || s.body || s.photos.length
         ? {
             label: typeset(s.label || STORY_DEFAULTS.label),
             headline: typeset(s.headline || 'Your headline'),

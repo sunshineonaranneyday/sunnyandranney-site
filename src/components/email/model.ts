@@ -107,6 +107,8 @@ export interface AppProps {
   tests: TestSent[];
   /** The charity's kids, most recent reveal first (kids.mjs). */
   kids: Kid[];
+  /** The charity's reveals still ahead, soonest first, that the story spot can show (kids.mjs). */
+  reveals: Reveal[];
   /** When the store's emails usually go ("HH:MM" Eastern), from Kit, or null. */
   usualTime: string | null;
   /** The store's active subscribers in Kit (STORE_SEGMENT), or null if Kit didn't say. */
@@ -138,7 +140,7 @@ export interface Parts {
   preheader: string;
   /** A library photo's id, or '' for the store's wide shot. */
   hero: string;
-  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[] };
+  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[]; reveal: string };
   /** The charity kid's slug, or '' for the most recent reveal. */
   kid: string;
   /** One of that family's photos ("cf:" id), or '' for their finished room. */
@@ -149,6 +151,21 @@ export interface KidPhoto {
   alt: string;
   /** The charity's own photo of the finished room. */
   after?: true;
+}
+/** A charity reveal still ahead, with the day and time the charity publishes (kids.mjs, upcomingReveals). */
+export interface Reveal {
+  slug: string;
+  name: string;
+  start: string;
+  day: string;
+  long: string;
+  short: string;
+  time: string;
+  room: string;
+  photo: KidPhoto;
+  story: string;
+  page: string;
+  live: string;
 }
 export interface Kid {
   slug: string;
