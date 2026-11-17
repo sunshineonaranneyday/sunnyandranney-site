@@ -103,6 +103,18 @@ export function otherWeek(send, work) {
  */
 export const scheduledRefusal = (w) => (w?.kit ? 'This email is scheduled in Kit, so it can’t change. Cancel the send first, then change it and schedule it again.' : null);
 
+/**
+ * True when an email scheduled or sent through Kit uses the photo (its top photo or the story's
+ * collage). Kit's copy of that email asks the site for the photo every time someone opens it, so its
+ * file has to stay, even once the photo is out of the library. `id` is a photo id (PHOTO_ID: letters
+ * and digits only, so nothing in it is a LIKE wildcard).
+ */
+export async function photoInKitEmail(db, id) {
+  await ensureTable(db);
+  if (!/^[a-z0-9]+$/.test(id)) throw new Error(`Not a photo id: ${id}`);
+  return Boolean(await db.prepare('SELECT 1 FROM email_weeks WHERE kit_id IS NOT NULL AND parts LIKE ? LIMIT 1').bind(`%"${id}"%`).first());
+}
+
 /** The most recent weeks with a special before a send date, newest first: the specials Staci can start from. @returns {Promise<Week[]>} */
 export async function pastWeeks(db, before, limit = 12) {
   await ensureTable(db);

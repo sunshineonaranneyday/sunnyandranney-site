@@ -3,7 +3,7 @@
  * ===========================================================================
  * The page's preview and the draft the admin puts into Kit both come from pageEmail, so what
  * Staci sees on the page is what goes into Kit: the masthead, the top photo, the sale, the
- * products once 4 to 9 are picked, the story and its collage, the events, the charity section
+ * products once 4 to 9 are picked, the story and its collage, a charity reveal, the events, the charity section
  * with its live numbers, the visit band and the footer. No Node or browser APIs.
  */
 
@@ -35,6 +35,7 @@ export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catal
     'offer',
     ...(wallReady ? ['wall'] : []),
     ...(brief.story ? ['story'] : []),
+    ...(brief.reveal ? ['reveal'] : []),
     ...(events.length ? ['events'] : []),
     ...(brief.mission ? ['mission'] : []),
     'visit',
@@ -45,17 +46,19 @@ export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catal
 
 /**
  * The admin page's sections, top to bottom, in the order Staci decides things (Peter, 2026-11-17):
- * the subject line, the sale, the products, the reveal (the story spot: the showroom story or a
- * charity reveal, which says whether the collage is needed), then the photos, the events, the
- * charity, and Send. Not the email's own order (SECTIONS in email.mjs). The page, its error list
- * and "Before it can go" all follow this list; page-order.test.mjs holds them to it.
+ * the subject line, the sale, the products, the reveal (a charity reveal still ahead, or none), the
+ * story's words, then the photos (the top photo and the story's collage), the events, the charity, and
+ * Send. The reveal and the story are each their own section, in the email too: one never takes the
+ * other's place. Not the email's own order (SECTIONS in email.mjs). The page, its error list and
+ * "Before it can go" all follow this list; page-order.test.mjs holds them to it.
  */
-export const PAGE_SECTIONS = ['em-lines', 'em-sale', 'em-products', 'em-story', 'em-photos', 'em-events', 'em-charity', 'em-send'];
+export const PAGE_SECTIONS = ['em-lines', 'em-sale', 'em-products', 'em-reveal', 'em-story', 'em-photos', 'em-events', 'em-charity', 'em-send'];
 
 /** The fields each section of the page holds, by the first part of an error's key (check, checkWall, checkParts). */
 const FIELDS = {
   'em-lines': ['subject', 'preheader'],
   'em-sale': ['kind', 'tiers', 'percent', 'ends'],
+  'em-reveal': ['reveal'],
   'em-story': ['story'],
   'em-photos': ['photos', 'story.photos'],
   'em-products': ['picks', 'label', 'headline'],
@@ -93,11 +96,12 @@ export function kitProblems({ special, wall, parts, photos, kids, reveals = null
   const n = wall?.picks.length ?? 0;
   if (n < PICKS[0]) add(`Pick ${PICKS[0] - n} more product${PICKS[0] - n === 1 ? '' : 's'}.`, 'em-products');
   else if (Object.keys(checkWall(wall, { catalog: catalog ?? undefined, send })).length) add('Fix the products.', 'em-products');
-  if (e['story.headline'] || e['story.body']) add('Write the story.', 'em-story');
-  else if (Object.keys(e).some((k) => k.startsWith('story.') && k !== 'story.photos')) add(e['story.reveal'] || 'Fix the story.', 'em-story');
+  if (e.reveal) add(e.reveal, 'em-reveal');
   // A reveal invite can't go out after the reveal
-  const reveal = parts.story?.reveal && reveals?.find((r) => r.slug === parts.story.reveal);
-  if (reveal && reveal.day < send) add(`${reveal.name}’s reveal was ${reveal.short}, before this email goes out. Pick another, or the showroom story.`, 'em-story');
+  const reveal = parts.reveal && reveals?.find((r) => r.slug === parts.reveal);
+  if (reveal && reveal.day < send) add(`${reveal.name}’s reveal was ${reveal.short}, before this email goes out. Pick another, or no reveal.`, 'em-reveal');
+  if (e['story.headline'] || e['story.body']) add('Write the story.', 'em-story');
+  else if (Object.keys(e).some((k) => k.startsWith('story.') && k !== 'story.photos')) add('Fix the story.', 'em-story');
   if (e.kid) add(e.kid, 'em-charity');
   // A stable sort: within a section, the order above
   return out.sort((a, b) => pagePlace(a.section) - pagePlace(b.section));

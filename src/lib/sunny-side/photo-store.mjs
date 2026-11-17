@@ -98,6 +98,12 @@ export async function addPhoto(db, { id, w, h, bytes, alt, by, now }) {
   await db.prepare('INSERT INTO email_photos (id, w, h, bytes, alt, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(id, w, h, bytes, alt, by, now).run();
 }
 
+/** Takes a photo out of the library. True when it was there. The file is the caller's (photoInKitEmail says whether it stays). */
+export async function deletePhoto(db, id) {
+  await ensureTable(db);
+  return (await db.prepare('DELETE FROM email_photos WHERE id = ?').bind(id).run()).meta.changes === 1;
+}
+
 /** Changes what a photo's alt text says. True when the photo is there. */
 export async function setAlt(db, id, alt) {
   await ensureTable(db);

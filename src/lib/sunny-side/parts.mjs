@@ -2,7 +2,7 @@
  * The rest of the weekly email, set in the admin beside the sale, products and events
  * ===========================================================================
  * The subject and preview line, the top photo, the story (its words and a collage of the week's
- * store photos) and which of the charity's kids the charity section shows (kids.mjs: picked from
+ * store photos), a charity reveal still ahead, if any, and which of the charity's kids the charity section shows (kids.mjs: picked from
  * a list, never written at the store). With these in the admin the page holds the whole email,
  * so it can put the finished email into Kit as a draft (kit.mjs). Photos are the store's own
  * uploads (photo-store.mjs), referred to by id. No Node or browser APIs: the page, the server and
@@ -26,6 +26,7 @@ export const STORY_DEFAULTS = { label: 'This week in the showroom', cta: 'Plan y
 const str = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max + 20);
 const text = (v, max) => String(v ?? '').replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{2,}/g, '\n').trim().slice(0, max + 40);
 const photoId = (v) => (typeof v === 'string' && PHOTO_ID.test(v) ? v : '');
+const revealSlug = (v) => (typeof v === 'string' && KID_SLUG.test(v) ? v : '');
 
 /** Parts as typed: known fields only, trimmed, a few over the limit kept so the check can say so. */
 export function cleanParts(p) {
@@ -41,12 +42,14 @@ export function cleanParts(p) {
       cta: str(s.cta, PART_LIMITS.cta),
       link: str(s.link, 200),
       photos: [...new Set((Array.isArray(s.photos) ? s.photos : []).map(photoId).filter(Boolean))].slice(0, COLLAGE_MAX + 2),
-      // A charity reveal still ahead (its kid's slug) takes the story spot: the charity's invite to
-      // watch it live, in the charity's words. '' is the showroom story, written above.
-      reveal: typeof s.reveal === 'string' && KID_SLUG.test(s.reveal) ? s.reveal : '',
       // The collage's layout (collage-layouts.mjs), or '' for the one that fits her photos best
       layout: typeof s.layout === 'string' && LAYOUT_ID.test(s.layout) ? s.layout : '',
     },
+    // A charity reveal still ahead (its kid's slug): the charity's invite to watch it live, in the
+    // charity's words, its own section under the story. '' for none. The story and the reveal are each
+    // their own section (Peter, 2026-11-17: "its not a either or"); a week saved while the reveal took
+    // the story's place kept it in the story (story.reveal), and both now show.
+    reveal: revealSlug(p?.reveal ?? s.reveal),
     // '' shows the charity's most recent reveal
     kid: typeof p?.kid === 'string' && KID_SLUG.test(p.kid) ? p.kid : '',
     // One of that family's photos ("cf:" id), or '' for their finished room
@@ -97,16 +100,17 @@ export function checkParts(p, { sale = null, photos = null, kids = null, reveals
   set('story.body', over(s.body, PART_LIMITS.body, 'The story'));
   set('story.cta', over(s.cta, PART_LIMITS.cta, 'The link’s words'));
   if (s.link && !isStorePath(s.link)) e['story.link'] = 'The link goes to a page on sunnyandranney.com, like /visit/ or /shop/.';
-  // With a reveal in the spot, the charity's words fill it: nothing to write
-  if (ready && !s.reveal && !s.headline) e['story.headline'] = 'Give the story a headline.';
-  if (ready && !s.reveal && !s.body) e['story.body'] = 'Write a few lines for the story.';
-  if (s.reveal && reveals && !reveals.some((r) => r.slug === s.reveal)) {
-    e['story.reveal'] = reveals.length ? 'That reveal isn’t coming up anymore. Pick another, or the showroom story.' : 'The charity’s reveals didn’t load. Reload the page, or pick the showroom story.';
+  // A week can go with the reveal and no story; once the story has anything in it, it needs its
+  // headline and words, so "Your headline" never goes out
+  const story = !p.reveal || Boolean(s.headline || s.body || s.photos.length);
+  if (ready && story && !s.headline) e['story.headline'] = 'Give the story a headline.';
+  if (ready && story && !s.body) e['story.body'] = 'Write a few lines for the story.';
+  if (p.reveal && reveals && !reveals.some((r) => r.slug === p.reveal)) {
+    e.reveal = reveals.length ? 'That reveal isn’t coming up anymore. Pick another, or no reveal.' : 'The charity’s reveals didn’t load. Reload the page, or pick no reveal.';
   }
   if (s.photos.length > COLLAGE_MAX) e['story.photos'] = `The collage holds ${COLLAGE_MAX} photos at most. Take ${s.photos.length - COLLAGE_MAX} out.`;
   if (photos) {
-    // A reveal in the story spot leaves the collage out, so only the photos the email uses are held to it
-    const used = [p.hero, ...(s.reveal ? [] : s.photos)];
+    const used = [p.hero, ...s.photos];
     const gone = used.filter((id) => id && !photos.has(id));
     if (gone.length) e.photos = 'A photo this email uses isn’t in the library anymore. Pick another.';
     const noAlt = used.filter((id) => id && photos.get(id) && !photos.get(id).alt);
@@ -150,7 +154,7 @@ export function briefParts(p, { sale, photos, kids = [], reveals = [], photoSrc 
   const pic = (id) => ({ src: withFocus(photoSrc(id), photos.get(id)?.focus), alt: photos.get(id)?.alt || '' });
   const s = p.story;
   const kid = kidFor(p.kid, kids);
-  const reveal = s.reveal ? reveals.find((r) => r.slug === s.reveal) : null;
+  const reveal = p.reveal ? reveals.find((r) => r.slug === p.reveal) : null;
   const { subject, preheader } = linesOf(p, sale);
   return {
     // Plain text with curly quotes as characters: the email escapes these once where it writes them
@@ -159,9 +163,8 @@ export function briefParts(p, { sale, photos, kids = [], reveals = [], photoSrc 
     subject: plain(typeset(subject)),
     preheader: plain(typeset(preheader)),
     hero: p.hero && photos.has(p.hero) ? pic(p.hero) : DEFAULT_HERO,
-    story: reveal
-      ? { reveal: revealOf(reveal) }
-      : s.headline || s.body || s.photos.length
+    story:
+      s.headline || s.body || s.photos.length
         ? {
             label: typeset(s.label || STORY_DEFAULTS.label),
             headline: typeset(s.headline || 'Your headline'),
@@ -170,6 +173,7 @@ export function briefParts(p, { sale, photos, kids = [], reveals = [], photoSrc 
             ...collageOf(s, photos, pic),
           }
         : null,
+    reveal: reveal ? revealOf(reveal) : null,
     mission: kid ? missionOf(kid, p.kidPhoto) : null,
   };
 }

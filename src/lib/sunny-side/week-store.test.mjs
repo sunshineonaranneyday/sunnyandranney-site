@@ -4,7 +4,9 @@ import { Miniflare } from 'miniflare';
 import { clean, forKind } from './special.mjs';
 import { cleanWall } from './wall.mjs';
 import { cleanEvent } from './events.mjs';
-import { clearWeek, getWeek, otherWeek, pastWeeks, putWeek, scheduledRefusal, setKit, weekToWorkOn, wentOut } from './week-store.mjs';
+import { clearWeek, getWeek, otherWeek, pastWeeks, photoInKitEmail, putWeek, scheduledRefusal, setKit, weekToWorkOn, wentOut } from './week-store.mjs';
+import { addPhoto, deletePhoto, listPhotos } from './photo-store.mjs';
+import { cleanParts } from './parts.mjs';
 import { deleteEvent, eventsFrom, getEvent, putEvent } from './event-store.mjs';
 
 // Real D1 (Miniflare's local SQLite)
@@ -128,4 +130,29 @@ test('one email is worked on: this week’s until it has gone out, then next wee
   assert.equal(scheduledRefusal(null), null);
   assert.match(otherWeek('2026-11-10', SEND), /Nov 10 email has gone out, so it can’t change. Reload to work on the Tue, Nov 17 email/);
   assert.match(otherWeek('2026-11-24', SEND), /Only the Tue, Nov 17 email can be worked on until it goes out/);
+});
+
+test('a deleted photo leaves the library; its file stays only for an email scheduled or sent through Kit', async () => {
+  const { DB, mf } = await freshDb();
+  try {
+    const add = (id) => addPhoto(DB, { id, w: 2400, h: 1800, bytes: 1, alt: 'x', by: 'mike@x', now: 't' });
+    for (const id of ['sentphoto0001', 'draftphoto001', 'spare0photo01']) await add(id);
+    // Last week's email went out with one; this week's draft (not scheduled) uses another as its top photo
+    await putWeek(DB, { send: '2026-11-10', special: null, wall: null, parts: cleanParts({ story: { headline: 'h', body: 'b', photos: ['sentphoto0001'] } }), by: 's', now: 't1', since: null });
+    await setKit(DB, { send: '2026-11-10', id: 900, at: 't', by: 's', sendAt: '2026-11-10T15:00:00Z' });
+    await putWeek(DB, { send: SEND, special: null, wall: null, parts: cleanParts({ hero: 'draftphoto001' }), by: 's', now: 't2', since: null });
+    assert.equal(await photoInKitEmail(DB, 'sentphoto0001'), true);
+    assert.equal(await photoInKitEmail(DB, 'draftphoto001'), false);
+    assert.equal(await photoInKitEmail(DB, 'spare0photo01'), false);
+    // A photo id is letters and digits only, never a pattern
+    await assert.rejects(photoInKitEmail(DB, '%'), /Not a photo id/);
+    // Cancelling the send in Kit frees it
+    await setKit(DB, { send: '2026-11-10', id: null });
+    assert.equal(await photoInKitEmail(DB, 'sentphoto0001'), false);
+    assert.equal(await deletePhoto(DB, 'spare0photo01'), true);
+    assert.equal(await deletePhoto(DB, 'spare0photo01'), false);
+    assert.deepEqual((await listPhotos(DB)).map((p) => p.id).sort(), ['draftphoto001', 'sentphoto0001']);
+  } finally {
+    await mf.dispose();
+  }
 });

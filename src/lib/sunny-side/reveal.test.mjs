@@ -47,27 +47,57 @@ test('a reveal the charity’s site doesn’t answer for is left out, not shown 
 
 const reveals = upcomingReveals([dylan, max], new Map([['dylan-2026', '2026-11-18T21:00:00Z'], ['max', '2026-11-20T21:00:00Z']]), '2026-11-17');
 
-test('with a reveal in the story spot there’s nothing to write, and a gone reveal says so', () => {
-  const p = cleanParts({ subject: 'Hi', story: { reveal: 'dylan-2026' } });
-  assert.equal(p.story.reveal, 'dylan-2026');
-  assert.equal(cleanParts({ story: { reveal: '../x' } }).story.reveal, '');
+test('the reveal is its own part: nothing to write for it, and a gone reveal says so', () => {
+  const p = cleanParts({ subject: 'Hi', reveal: 'dylan-2026' });
+  assert.equal(p.reveal, 'dylan-2026');
+  assert.equal('reveal' in p.story, false);
+  assert.equal(cleanParts({ reveal: '../x' }).reveal, '');
   assert.deepEqual(checkParts(p, { reveals, ready: true }), {});
-  assert.match(checkParts(cleanParts({ story: { reveal: 'zed' } }), { reveals })['story.reveal'], /isn’t coming up anymore/);
-  assert.match(checkParts(cleanParts({ story: { reveal: 'zed' } }), { reveals: [] })['story.reveal'], /didn’t load/);
+  assert.match(checkParts(cleanParts({ reveal: 'zed' }), { reveals }).reveal, /isn’t coming up anymore/);
+  assert.match(checkParts(cleanParts({ reveal: 'zed' }), { reveals: [] }).reveal, /didn’t load/);
   // Without the list (a save), only what's typed is checked
-  assert.deepEqual(checkParts(cleanParts({ story: { reveal: 'zed' } }), {}), {});
+  assert.deepEqual(checkParts(cleanParts({ reveal: 'zed' }), {}), {});
+});
+
+test('a week saved while the reveal took the story’s place keeps both: the reveal, and the story with its photos', () => {
+  // The Nov 17 week as saved: the story written, five photos, and Dylan's reveal inside the story
+  const saved = { subject: 'Hi', story: { headline: 'Christmas is here.', body: 'The trees are up.', photos: ['aaaaaaaaaaaa1', 'aaaaaaaaaaaa2'], reveal: 'dylan-2026', layout: '' } };
+  const p = cleanParts(saved);
+  assert.equal(p.reveal, 'dylan-2026');
+  assert.deepEqual(p.story.photos, ['aaaaaaaaaaaa1', 'aaaaaaaaaaaa2']);
+  // A reveal saved in its own place wins over an old one left in the story
+  assert.equal(cleanParts({ ...saved, reveal: '' }).reveal, '');
+  const photos = new Map(p.story.photos.map((id) => [id, { id, w: 1800, h: 2400, alt: 'The tree', focus: '' }]));
+  const brief = { send_date: '2026-11-17', ...briefParts(p, { sale: null, photos, reveals }) };
+  assert.equal(brief.story.headline, 'Christmas is here.');
+  assert.equal(brief.story.photos.length, 2);
+  assert.equal(brief.reveal.name, 'Dylan');
+  const html = render(brief, ['story', 'reveal']);
+  // The story and its collage, then the invite, each tagged with its own part
+  assert.ok(html.indexOf('Christmas is here.') < html.indexOf('Reveal Day'));
+  assert.match(html, /utm_content=story-photo-2/);
+  assert.match(html, /data-part="reveal"/);
+});
+
+test('a week can go with the reveal and no story, but a story started needs its words', () => {
+  assert.deepEqual(checkParts(cleanParts({ subject: 'Hi', reveal: 'dylan-2026' }), { reveals, ready: true }), {});
+  // Photos picked but nothing written: "Your headline" would go out
+  const started = checkParts(cleanParts({ subject: 'Hi', reveal: 'dylan-2026', story: { photos: ['aaaaaaaaaaaa1'] } }), { reveals, ready: true });
+  assert.ok(started['story.headline'] && started['story.body']);
+  // No reveal: the story is the email's own words, so it's needed
+  assert.ok(checkParts(cleanParts({ subject: 'Hi' }), { ready: true })['story.headline']);
 });
 
 test('a reveal before the send day stops the send', () => {
-  const ok = { special: {}, wall: { picks: [1, 2, 3, 4] }, parts: cleanParts({ subject: 'Hi', story: { reveal: 'dylan-2026' } }), photos: new Map(), kids: [{ slug: 'a' }], reveals, catalog: null, check: () => ({}), checkWall: () => ({}), checkParts, sale: null };
+  const ok = { special: {}, wall: { picks: [1, 2, 3, 4] }, parts: cleanParts({ subject: 'Hi', reveal: 'dylan-2026' }), photos: new Map(), kids: [{ slug: 'a' }], reveals, catalog: null, check: () => ({}), checkWall: () => ({}), checkParts, sale: null };
   assert.deepEqual(kitProblems({ ...ok, send: '2026-11-17' }), []);
-  assert.deepEqual(kitProblems({ ...ok, send: '2026-11-19' }), [{ text: 'Dylan’s reveal was Wed, Nov 18, before this email goes out. Pick another, or the showroom story.', section: 'em-story' }]);
+  assert.deepEqual(kitProblems({ ...ok, send: '2026-11-19' }), [{ text: 'Dylan’s reveal was Wed, Nov 18, before this email goes out. Pick another, or no reveal.', section: 'em-reveal' }]);
 });
 
 test('the invite: the charity’s day, time, room and calendar links, the live page, and never an address', () => {
-  const brief = { send_date: '2026-11-17', ...briefParts(cleanParts({ story: { headline: 'Kept', reveal: 'dylan-2026' } }), { sale: null, photos: new Map(), reveals }) };
-  assert.ok(brief.story.reveal && !brief.story.headline);
-  const html = render(brief, ['story']);
+  const brief = { send_date: '2026-11-17', ...briefParts(cleanParts({ reveal: 'dylan-2026' }), { sale: null, photos: new Map(), reveals }) };
+  assert.ok(brief.reveal && !brief.story);
+  const html = render(brief, ['story', 'reveal']);
   for (const words of ['Reveal Day &middot; Wed, Nov 18', 'Dylan&#8217;s <em', 'Wednesday, November 18<br>4:00 PM', 'Therapy Room', 'Email me when it starts']) assert.ok(html.includes(words), words);
   for (const app of ['google', '', 'outlook']) assert.ok(html.includes(`href="${revealCalendar('dylan-2026', app).replace(/&/g, '&amp;')}"`), app || 'apple');
   assert.match(html, /live\/dylan-2026\/\?utm_source=kit[^"]*utm_content=reveal-remind#remind"/);
