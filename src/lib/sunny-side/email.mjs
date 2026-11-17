@@ -587,7 +587,7 @@ export class Email {
   /**
    * A charity reveal still ahead, its own section under the story: the charity's invite to watch it live, built like its own
    * reveal email ("Join Us Live for Dylan’s Reveal Day!", Nov 16, 2026) in its identity: Dark Deep,
-   * a Sunshine Yellow date, the Libre Baskerville line with the key words in yellow italic, the family's
+   * its logo over a centered top, a Sunshine Yellow date, the Libre Baskerville line with the key words in yellow italic, the family's
    * photo, When / Where / Room, and its calendar links, which hold the day, the time and the link to
    * watch, never the family's address. "Get an email" goes to the reveal page's own sign-up (the
    * charity emails the day before, an hour before and when it goes live). Rules on Dark Deep are its
@@ -620,12 +620,18 @@ export class Email {
       `Email me when it starts&nbsp;&#8594;</a>`;
     // 26/32 on a phone, 30/36 on a computer (.soard-h)
     const headline =
-      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:26px;line-height:32px;font-weight:700;letter-spacing:-0.02em;color:${WHITE};mso-line-height-rule:exactly;">` +
+      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:26px;line-height:32px;font-weight:700;letter-spacing:-0.02em;color:${WHITE};text-align:center;mso-line-height-rule:exactly;">` +
       `<span style="display:block;margin-bottom:6px;font-size:20px;line-height:26px;font-weight:400;font-style:italic;color:${SOARD_SOFT};">Join us live for</span>` +
       `${r.name}&#8217;s <em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_YELLOW};">Reveal&nbsp;Day</em>.</h2>`;
+    // The top centered under the charity's logo, as its own invite opens (Peter, 2026-11-17: "there
+    // needs to be the sunshine on a ranney day logo"; the invite in Gmail: 28px over the logo, 32 under it)
+    const top =
+      this.soardLogo('reveal-logo') +
+      Email.gap(S4) +
+      Email.label(`Reveal Day &middot; ${r.short}`, { color: SOARD_YELLOW, mb: 12, font: OUTFIT, track: '0.16em', align: 'center' }) +
+      headline;
     const body =
-      Email.label(`Reveal Day &middot; ${r.short}`, { color: SOARD_YELLOW, mb: 12, font: OUTFIT, track: '0.16em' }) +
-      headline +
+      `<div style="text-align:center;">${top}</div>` +
       Email.gap(S3) +
       // On the column, rounded like the charity's: 536 on a computer, up to 560 where the style block is gone
       this.img(Email.photo(r.photo.src, 1072, 716), COLUMN, 358, r.photo.alt, r.live, 'reveal-photo', 16, '', WIDTH - 2 * PHONE_SIDE) +
@@ -638,7 +644,7 @@ export class Email {
       Email.gap(S1) +
       `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:20px;">${remind}</p>` +
       Email.text('The reveal page turns into the live video the moment we&nbsp;start.', { size: 14, lh: 21, color: WHITE, font: OUTFIT });
-    return this.breather() + this.band(body, { bg: SOARD_DEEP, top: S5, bottom: S5, cls: 'soard', part: 'reveal' });
+    return this.breather() + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S5, cls: 'soard', part: 'reveal' });
   }
 
   /**
@@ -873,13 +879,18 @@ export class Email {
    * `soard` class lets verify.mjs hold the section to the charity's palette and the rest of the email
    * to the store's.
    */
+  /** The charity's logo for its Dark Deep tops, linked to its site: 80px on a phone, 96 on a computer (.soard-mark); the width attribute is Outlook's. */
+  soardLogo(content) {
+    return (
+      `<a href="${escape(this.url(SOARD_HOME, content))}" target="_blank" class="soard-mark" style="display:inline-block;width:80px;color:${WHITE};">` +
+      `<img class="soard-logo soard-mark" src="${SOARD_LOGO_DARK}" width="${SOARD_LOGO_DARK_W}" height="${SOARD_LOGO_DARK_H}" alt="Sunshine on a Ranney Day" ` +
+      `style="display:block;width:80px;height:auto;border:0;margin:0 auto;font-family:${OUTFIT};font-size:14px;font-weight:700;color:${WHITE};"></a>`
+    );
+  }
+
   mission() {
     const m = this.b.mission;
-    // 80px on a phone, 96 on a computer (.soard-mark); the width attribute is Outlook's
-    const logo =
-      `<a href="${escape(this.url(SOARD_HOME, 'charity-logo'))}" target="_blank" class="soard-mark" style="display:inline-block;width:80px;color:${WHITE};">` +
-      `<img class="soard-logo soard-mark" src="${SOARD_LOGO_DARK}" width="${SOARD_LOGO_DARK_W}" height="${SOARD_LOGO_DARK_H}" alt="Sunshine on a Ranney Day" ` +
-      `style="display:block;width:80px;height:auto;border:0;margin:0 auto;font-family:${OUTFIT};font-size:14px;font-weight:700;color:${WHITE};"></a>`;
+    const logo = this.soardLogo('charity-logo');
     // 20/26 on a phone, 24/31 on a computer (.soard-lead)
     const lead = Email.text('Every purchase builds', { size: 20, lh: 26, color: SOARD_SOFT, font: SERIF, cls: 'soard-lead soard-serif', align: 'center', mb: 2, css: 'font-style:italic;' });
     // 32/36 on a phone, 38/42 on a computer (.soard-h)
