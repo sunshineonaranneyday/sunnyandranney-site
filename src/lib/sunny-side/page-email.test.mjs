@@ -287,30 +287,40 @@ test('a scheduled send can be cancelled until it goes; the template, count and u
   assert.equal(broadcastUrl(5), 'https://app.kit.com/campaigns/5/draft');
 });
 
-test('sent emails: what went to subscribers, newest first, tests left out, read-only from Kit', async () => {
-  const list = `GET /broadcasts?status=completed&sent_after=${SENT_AFTER}&per_page=1000&slim=true`;
+test('sent emails: the store’s, newest first, tests and the charity’s left out, read-only from Kit', async () => {
+  // Read with each email's HTML, to tell the store's from the charity's (the Kit account is shared)
+  const list = `GET /broadcasts?status=completed&sent_after=${SENT_AFTER}&per_page=1000`;
+  // As the real ones read on Nov 16, 2026: the store's hand-sent sale links mostly to the store, a charity email only to the charity
+  const STORE = '<a href="https://sunnyandranney.com/shop/?utm_source=kit&amp;utm_campaign=x">Shop</a><a href="https://shop.sunnyandranney.com/">Shop</a><a href="https://sunshineonaranneyday.com/">Learn more</a>';
+  const CHARITY = '<a href="https://sunshineonaranneyday.com/kids/dylan/?ref=sunnyandranney.com">Watch live</a><a href="mailto:hi@sunshineonaranneyday.com">Write</a><a href="{{ unsubscribe_url }}">Unsubscribe</a>';
   const k = fakeKit({
     // Kit's list has no stated order, so it's sorted here
     [list]: {
       broadcasts: [
-        { id: 2, subject: 'Nov 3', preview_text: 'P2', send_at: '2026-11-03T14:00:00Z', status: 'completed' },
-        { id: 3, subject: '[Test] Nov 10', preview_text: null, send_at: '2026-11-09T20:00:00Z', status: 'completed' },
-        { id: 1, subject: 'Nov 10', preview_text: null, send_at: '2026-11-10T14:00:00Z', status: 'completed' },
+        { id: 2, subject: 'Nov 3', preview_text: 'P2', send_at: '2026-11-03T14:00:00Z', status: 'completed', content: STORE },
+        { id: 3, subject: '[Test] Nov 10', preview_text: null, send_at: '2026-11-09T20:00:00Z', status: 'completed', content: STORE },
+        { id: 1, subject: 'Nov 10', preview_text: null, send_at: '2026-11-10T14:00:00Z', status: 'completed', content: STORE },
+        { id: 7, subject: 'Join us live for Dylan’s reveal', preview_text: 'Watch', send_at: '2026-11-16T15:56:00Z', status: 'completed', content: CHARITY },
+        { id: 8, subject: 'Still want our emails?', preview_text: null, send_at: '2026-11-11T15:11:00Z', status: 'completed', content: '<p>One click keeps you on the list.</p>' },
+        // One this admin scheduled is the store's by its label, whatever it links to
+        { id: 9, subject: 'Nov 17', preview_text: 'P9', send_at: '2026-11-17T15:00:00Z', status: 'completed', content: '', description: 'The Sunny Side for Tue, Nov 17, from the store admin' },
       ],
     },
-    'GET /broadcasts/1': { broadcast: { id: 1, subject: 'Nov 10', preview_text: 'P1', send_at: '2026-11-10T14:00:00Z', status: 'completed', content: '<html>sent</html>' } },
-    'GET /broadcasts/3': { broadcast: { id: 3, subject: '[Test] Nov 10', send_at: '2026-11-09T20:00:00Z', status: 'completed', content: '<p>t</p>' } },
-    'GET /broadcasts/4': { broadcast: { id: 4, subject: 'Next week', send_at: '2026-11-24T14:00:00Z', status: 'scheduled', content: '<p>later</p>' } },
-    'GET /broadcasts/6': { broadcast: { id: 6, subject: 'Draft', send_at: null, status: 'draft', content: '<p>d</p>' } },
+    'GET /broadcasts/1': { broadcast: { id: 1, subject: 'Nov 10', preview_text: 'P1', send_at: '2026-11-10T14:00:00Z', status: 'completed', content: STORE } },
+    'GET /broadcasts/3': { broadcast: { id: 3, subject: '[Test] Nov 10', send_at: '2026-11-09T20:00:00Z', status: 'completed', content: STORE } },
+    'GET /broadcasts/4': { broadcast: { id: 4, subject: 'Next week', send_at: '2026-11-24T14:00:00Z', status: 'scheduled', content: STORE } },
+    'GET /broadcasts/6': { broadcast: { id: 6, subject: 'Draft', send_at: null, status: 'draft', content: STORE } },
+    'GET /broadcasts/7': { broadcast: { id: 7, subject: 'Join us live for Dylan’s reveal', send_at: '2026-11-16T15:56:00Z', status: 'completed', content: CHARITY } },
   });
   assert.deepEqual(await sentEmails(k.kit, { now: NOW }), [
+    { id: 9, subject: 'Nov 17', preheader: 'P9', sentAt: '2026-11-17T15:00:00Z' },
     { id: 1, subject: 'Nov 10', preheader: '', sentAt: '2026-11-10T14:00:00Z' },
     { id: 2, subject: 'Nov 3', preheader: 'P2', sentAt: '2026-11-03T14:00:00Z' },
   ]);
-  assert.deepEqual(await sentEmails(k.kit, { now: NOW, limit: 1 }).then((r) => r.map((e) => e.id)), [1]);
-  assert.deepEqual(await sentEmail(k.kit, 1), { id: 1, subject: 'Nov 10', preheader: 'P1', sentAt: '2026-11-10T14:00:00Z', html: '<html>sent</html>', status: 'completed' });
-  // A test, one still scheduled, a draft, or one deleted in Kit isn't a sent email
-  for (const id of [3, 4, 6, 99]) assert.equal(await sentEmail(k.kit, id), null, `broadcast ${id}`);
+  assert.deepEqual(await sentEmails(k.kit, { now: NOW, limit: 1 }).then((r) => r.map((e) => e.id)), [9]);
+  assert.deepEqual(await sentEmail(k.kit, 1), { id: 1, subject: 'Nov 10', preheader: 'P1', sentAt: '2026-11-10T14:00:00Z', html: STORE, status: 'completed' });
+  // A test, one still scheduled, a draft, one deleted in Kit, or the charity's isn't a sent store email
+  for (const id of [3, 4, 6, 7, 99]) assert.equal(await sentEmail(k.kit, id), null, `broadcast ${id}`);
   // Only reads: nothing is ever created, changed or deleted
   assert.ok(k.calls.every((c) => c.key.startsWith('GET ')));
   // Any other refusal is said, not hidden as "nothing sent"

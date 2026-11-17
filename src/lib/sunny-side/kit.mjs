@@ -143,20 +143,52 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 
 /**
- * What has gone out to subscribers, newest first: Kit's completed broadcasts from the last year,
- * tests left out. Kit's list has no stated order, so the year is read whole (up to Kit's 1,000 a
- * page, slim: no bodies) and sorted here.
+ * The store's weekly emails that have gone out, newest first: Kit's completed broadcasts from the
+ * last year that are the store's (isStoreEmail), tests left out. The Kit account is the charity's
+ * too, and most of what it sends is the charity's, so the year is read with each email's HTML (one
+ * request, up to Kit's 1,000; a year was 21 emails and 0.5 MB on Nov 16, 2026) and sorted here,
+ * since Kit's list has no stated order.
  * @returns {Promise<SentEmail[]>}
  */
 export async function sentEmails(kit, { limit = 52, now = Date.now() } = {}) {
-  return (await completed(kit, now)).slice(0, limit).map((b) => ({ id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at }));
+  return (await completed(kit, now, { bodies: true }))
+    .filter(isStoreEmail)
+    .slice(0, limit)
+    .map((b) => ({ id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at }));
 }
 
-/** Kit's completed broadcasts from the last year, tests left out, newest first (slim: no bodies). */
-async function completed(kit, now) {
+/** Kit's completed broadcasts from the last year, tests left out, newest first; with their HTML if asked. */
+async function completed(kit, now, { bodies = false } = {}) {
   const since = new Date(now - 366 * DAY_MS).toISOString().slice(0, 10);
-  const { broadcasts = [] } = await kit.call(`/broadcasts?status=completed&sent_after=${since}&per_page=1000&slim=true`);
+  const { broadcasts = [] } = await kit.call(`/broadcasts?status=completed&sent_after=${since}&per_page=1000${bodies ? '' : '&slim=true'}`);
   return broadcasts.filter((b) => b.send_at && !isTest(b)).sort((a, b) => Date.parse(b.send_at) - Date.parse(a.send_at));
+}
+
+const STORE_HOST = /(^|\.)sunnyandranney\.com$/i;
+const CHARITY_HOST = /(^|\.)sunshineonaranneyday\.com$/i;
+/** The hosts an email's links go to, one per link. */
+function linkHosts(html) {
+  const hosts = [];
+  for (const [, href] of String(html || '').matchAll(/<a\b[^>]*?\bhref\s*=\s*["']([^"']+)["']/gi)) {
+    try {
+      hosts.push(new URL(href.replace(/&amp;/g, '&')).hostname);
+    } catch {
+      // mailto:, tel:, Kit's {{ }} tags: not a site
+    }
+  }
+  return hosts;
+}
+
+/**
+ * Whether a sent email is the store's: one this admin scheduled, or one that links to the store's
+ * site more than to the charity's. Checked against every email the account sent in the year to Nov
+ * 16, 2026: the store's two hand-sent emails linked to the store 2 and 6 times (the charity 1 and 3),
+ * and none of the charity's 19 linked to the store at all.
+ */
+export function isStoreEmail(b) {
+  if (fromThisAdmin(b)) return true;
+  const hosts = linkHosts(b?.content);
+  return hosts.filter((h) => STORE_HOST.test(h)).length > hosts.filter((h) => CHARITY_HOST.test(h)).length;
 }
 
 /**
@@ -168,8 +200,8 @@ async function completed(kit, now) {
 export const fromThisAdmin = (b) => /^The Sunny Side for .*, from the store admin$/.test(b?.description || '');
 
 /**
- * One email as Kit sent it, with its HTML, or null when it isn't one that went to subscribers: a
- * draft, one still scheduled, a test, or one deleted in Kit.
+ * One of the store's emails as Kit sent it, with its HTML, or null when it isn't one that went to
+ * subscribers (a draft, one still scheduled, a test, one deleted in Kit) or isn't the store's.
  * @returns {Promise<(SentEmail & { html: string, status: string }) | null>}
  */
 export async function sentEmail(kit, id) {
@@ -180,7 +212,7 @@ export async function sentEmail(kit, id) {
     if (/** @type {{ status?: number }} */ (err).status === 404) return null;
     throw err;
   }
-  if (!b?.send_at || isTest(b) || !['completed', 'sending'].includes(b.status)) return null;
+  if (!b?.send_at || isTest(b) || !['completed', 'sending'].includes(b.status) || !isStoreEmail(b)) return null;
   return { id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at, html: b.content || '', status: b.status };
 }
 
