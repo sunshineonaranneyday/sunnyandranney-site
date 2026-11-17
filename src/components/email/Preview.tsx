@@ -124,7 +124,7 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
 }
 
 /** The part of the email Staci is working on, which the preview keeps in view. */
-export type Focus = 'offer' | 'wall' | 'photos' | 'story' | 'events' | 'mission';
+export type Focus = 'offer' | 'wall' | 'photos' | 'story' | 'reveal' | 'events' | 'mission';
 
 /**
  * Where a part starts in the email: the first band tagged with it (data-part). The photos are the

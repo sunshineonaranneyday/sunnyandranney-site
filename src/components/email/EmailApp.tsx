@@ -37,7 +37,7 @@ import { type Fits, type Focus, type Spill, Preview } from './Preview';
 import { Products } from './Products';
 import { Sale } from './Sale';
 import { Send } from './Send';
-import { Story } from './Story';
+import { RevealPick, Story } from './Story';
 import { Subject } from './Subject';
 
 const blankWall = (): Wall => ({ label: '', headline: '', picks: [], arranged: 'auto' });
@@ -61,6 +61,7 @@ const SPILL_WHERE: Record<Fixable, [string, string]> = {
   wall: ['a product’s name', 'Give it a shorter name on its tile.'],
   story: ['the story', 'Shorten it, or break it with a space.'],
   photos: ['the story', 'Shorten it, or break it with a space.'],
+  reveal: ['the reveal', 'Those words come from the charity’s site: pick another reveal, or fix them there.'],
   events: ['the events', 'Shorten it in the event.'],
   mission: ['the charity section', 'Those words come from the charity’s site: pick another family, or fix them there.'],
 };
@@ -133,7 +134,7 @@ export default function EmailApp(props: AppProps) {
     const topPhoto = section === 'em-photos' && Boolean(target.closest('label')?.querySelector('input[name="em-hero"]'));
     const part: Focus | null = topPhoto
       ? 'offer'
-      : (({ 'em-sale': 'offer', 'em-products': 'wall', 'em-photos': 'photos', 'em-story': 'story', 'em-events': 'events', 'em-charity': 'mission', 'em-lines': 'offer', 'em-send': 'offer' } as Record<string, Focus>)[section ?? ''] ?? null);
+      : (({ 'em-sale': 'offer', 'em-products': 'wall', 'em-photos': 'photos', 'em-reveal': 'reveal', 'em-story': 'story', 'em-events': 'events', 'em-charity': 'mission', 'em-lines': 'offer', 'em-send': 'offer' } as Record<string, Focus>)[section ?? ''] ?? null);
     if (part && part !== focus) setFocus(part);
   };
 
@@ -244,7 +245,7 @@ export default function EmailApp(props: AppProps) {
           : null;
 
   // The section that fixes it, for the error list's link
-  const SECTION: Record<Fixable, string> = { offer: 'em-sale', wall: 'em-products', story: 'em-story', photos: 'em-story', events: 'em-events', mission: 'em-charity' };
+  const SECTION: Record<Fixable, string> = { offer: 'em-sale', wall: 'em-products', reveal: 'em-reveal', story: 'em-story', photos: 'em-story', events: 'em-events', mission: 'em-charity' };
   const layoutSection = layoutProblem === spillWords && spillAt ? SECTION[spillAt.part] : longNames.size && layoutProblem && !(fold !== null && fold > FIRST_SCREEN) ? 'em-products' : 'em-sale';
 
   // ── Saving ──
@@ -439,12 +440,18 @@ export default function EmailApp(props: AppProps) {
   const lines = saleOk ? linesOf(parts, sale) : { subject: parts.subject, preheader: parts.preheader };
   // Exactly what Kit gets (week-email.ts): the same plain text
   const inbox = { subject: plain(lines.subject), preheader: plain(lines.preheader) };
-  const reveal = story.reveal ? props.reveals.find((r) => r.slug === story.reveal) : null;
-  const storyState = story.reveal
+  const reveal = parts.reveal ? props.reveals.find((r) => r.slug === parts.reveal) : null;
+  const revealState = parts.reveal
     ? reveal
       ? { state: `${reveal.name}’s reveal · ${reveal.short}`, tone: 'ok' as const }
       : { state: 'Pick again', tone: 'bad' as const }
-    : story.headline && story.body ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const } : { state: 'Not written', tone: 'todo' as const };
+    : { state: 'None this week', tone: 'ok' as const };
+  const storyState =
+    story.headline && story.body
+      ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const }
+      : reveal && !story.headline && !story.body && !story.photos.length
+        ? { state: 'None this week', tone: 'ok' as const }
+        : { state: 'Not written', tone: 'todo' as const };
   const checks = [
     { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` },
     // Measured as sent and bare (no style block, no web fonts, as the Gmail app shows it to other accounts).
@@ -524,7 +531,8 @@ export default function EmailApp(props: AppProps) {
           )}
 
           {/* In the order Staci decides things (PAGE_SECTIONS in page-email.mjs): the subject line, the
-              sale, the products, the reveal, the photos, the events and the charity. Send last. */}
+              sale, the products, the reveal, the story, the photos, the events and the charity. Send last.
+              The reveal and the story are each their own section of the email: one never takes the other's place. */}
           <Section n={1} id="em-lines" locked={locked} title="Subject line" state={parts.subject ? 'Written' : 'Not written'} tone={partsErrors.subject || partsErrors.preheader ? 'bad' : parts.subject ? 'ok' : 'todo'}>
             <Subject parts={parts} setParts={setParts} sale={saleOk ? sale : null} shown={shownParts} />
           </Section>
@@ -537,23 +545,27 @@ export default function EmailApp(props: AppProps) {
             <Products wall={wall} setWall={setWall} catalog={catalog} collections={collections} catalogProblem={catalogProblem} shown={shownWall} longNames={longNames} today={today} />
           </Section>
 
-          <Section n={4} id="em-story" locked={locked} title="The reveal" state={storyState.state} tone={storyState.tone}>
-            <Story parts={parts} setParts={setParts} shown={shownParts} reveals={props.reveals} />
+          <Section n={4} id="em-reveal" locked={locked} title="The reveal" state={revealState.state} tone={revealState.tone}>
+            <RevealPick parts={parts} setParts={setParts} shown={shownParts} reveals={props.reveals} />
           </Section>
 
-          <Section n={5} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.reveal ? 'no collage this week' : `${story.photos.length} in the story`}`} tone={partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok'}>
-            <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} reveal={reveal} />
+          <Section n={5} id="em-story" locked={locked} title="The story" state={storyState.state} tone={storyState.tone}>
+            <Story parts={parts} setParts={setParts} shown={shownParts} />
           </Section>
 
-          <Section n={6} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={inEmail ? 'ok' : 'todo'}>
+          <Section n={6} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.photos.length} in the story`} tone={partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok'}>
+            <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} />
+          </Section>
+
+          <Section n={7} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={inEmail ? 'ok' : 'todo'}>
             <Events events={events} setEvents={setEvents} draft={draft} setDraft={setDraft} sendDate={day} sendLabel={sendLabel(day)} today={today} />
           </Section>
 
-          <Section n={7} id="em-charity" locked={locked} title="The charity" state={charityState.state} tone={charityState.tone}>
+          <Section n={8} id="em-charity" locked={locked} title="The charity" state={charityState.state} tone={charityState.tone}>
             <Charity parts={parts} setParts={setParts} kids={props.kids} error={partsErrors.kid} />
           </Section>
 
-          <Section n={8} id="em-send" title="Send" state={sendState.state} tone={sendState.tone}>
+          <Section n={9} id="em-send" title="Send" state={sendState.state} tone={sendState.tone}>
             <Send
               send={send}
               label={label}

@@ -1,6 +1,8 @@
 import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
-import { ALT_DEFAULT, FOCUS, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, addPhoto, cleanAlt, cleanFocus, isJpeg, keyOf, newPhotoId, setAlt, setFocus } from '@/lib/sunny-side/photo-store.mjs';
+import { PHOTO_ID } from '@/lib/sunny-side/parts.mjs';
+import { ALT_DEFAULT, FOCUS, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, addPhoto, cleanAlt, cleanFocus, deletePhoto, isJpeg, keyOf, newPhotoId, setAlt, setFocus } from '@/lib/sunny-side/photo-store.mjs';
+import { photoInKitEmail } from '@/lib/sunny-side/week-store.mjs';
 
 export const prerender = false;
 
@@ -61,4 +63,26 @@ export const PUT: APIRoute = async (context) => {
   if (!alt) return json({ error: 'Say in a few words what’s in the photo.' }, 422);
   if (!(await setAlt(db, id, alt))) return json({ error: 'That photo isn’t in the library anymore.' }, 404);
   return json({ ok: true, id, alt });
+};
+
+/**
+ * Deletes a photo the store doesn't need ({ id }): it leaves the library, so the page never shows it
+ * again. Its file goes too, unless an email scheduled or sent through Kit uses it: that email asks the
+ * site for the photo whenever someone opens it, so the file stays for the inboxes that have it.
+ * The week being worked on drops it on the page, and its next Save leaves it out; until then the
+ * send checks refuse an email whose photo is gone (checkParts). Managers and email-only logins.
+ */
+export const DELETE: APIRoute = async (context) => {
+  const admin = requireRole(context.locals, 'manager', 'email');
+  if (admin instanceof Response) return admin;
+  const body = await readJson(context.request);
+  const id = typeof body?.id === 'string' && PHOTO_ID.test(body.id) ? body.id : '';
+  // `gone` tells the page it's out of the library already (deleted on another page), as it would be now
+  const gone = () => json({ error: 'That photo isn’t in the library anymore.', gone: true }, 404);
+  if (!id) return gone();
+  const db = dbOf(context);
+  const kept = await photoInKitEmail(db, id);
+  if (!(await deletePhoto(db, id))) return gone();
+  if (!kept) await context.locals.runtime.env.PHOTOS?.delete(keyOf(id));
+  return json({ ok: true, id, kept });
 };

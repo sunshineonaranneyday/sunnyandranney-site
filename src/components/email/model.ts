@@ -107,7 +107,7 @@ export interface AppProps {
   tests: TestSent[];
   /** The charity's kids, most recent reveal first (kids.mjs). */
   kids: Kid[];
-  /** The charity's reveals still ahead, soonest first, that the story spot can show (kids.mjs). */
+  /** The charity's reveals still ahead, soonest first, that the email can invite readers to (kids.mjs). */
   reveals: Reveal[];
   /** When the store's emails usually go ("HH:MM" Eastern), from Kit, or null. */
   usualTime: string | null;
@@ -141,7 +141,9 @@ export interface Parts {
   /** A library photo's id, or '' for the store's wide shot. */
   hero: string;
   /** layout: the collage's layout (collage-layouts.mjs), or '' for the one that fits its photos best. */
-  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[]; reveal: string; layout: string };
+  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[]; layout: string };
+  /** A charity reveal still ahead (its kid's slug), its own section under the story, or '' for none. */
+  reveal: string;
   /** The charity kid's slug, or '' for the most recent reveal. */
   kid: string;
   /** One of that family's photos ("cf:" id), or '' for their finished room. */

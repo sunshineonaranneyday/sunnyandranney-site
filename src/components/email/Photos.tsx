@@ -53,8 +53,6 @@ interface Props {
   setParts: (change: (p: Parts) => Parts) => void;
   error?: string;
   local: boolean;
-  /** The charity reveal in the story spot this week, which leaves the collage out of the email */
-  reveal?: { name: string } | null;
 }
 
 /** True when what's being dragged holds files (not text or a link from the page). */
@@ -66,6 +64,15 @@ function Viewfinder({ set }: { set: boolean }) {
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" />
       <circle cx="12" cy="12" r={set ? 3 : 2} fill={set ? 'var(--teal)' : 'currentColor'} stroke="none" />
+    </svg>
+  );
+}
+
+/** The bin on a photo's Delete button. */
+function Trash() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2l1-12M9 7V4.5h6V7" />
     </svg>
   );
 }
@@ -85,9 +92,10 @@ interface Held {
  * collage is drawn the way the email lays it out, and is rearranged by dragging a photo (or tapping
  * it, then its new spot, or with the keyboard); photos come in from the library by dragging them up
  * or ticking them, and go out with their ×. Each photo has a part every crop keeps in view and a
- * few words for people who can't see it.
+ * few words for people who can't see it. A photo the store doesn't need is deleted with its bin, after
+ * a second tap says so (no browser dialog: it would stop the page).
  */
-export function Photos({ photos, setPhotos, parts, setParts, error, local, reveal = null }: Props) {
+export function Photos({ photos, setPhotos, parts, setParts, error, local }: Props) {
   const [uploading, setUploading] = useState<{ done: number; of: number } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [alts, setAlts] = useState<Record<string, string>>({});
@@ -107,6 +115,23 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
   // What a screen reader hears as photos move
   const [said, setSaid] = useState('');
   const focusAfter = useRef<string | null>(null);
+  // Deleting a photo: whether its sheet opened at "Delete it for good?" (its bin), the one going now, what
+  // went wrong, the ones gone (nothing saves to them after), and where keyboard focus goes next
+  const [askDelete, setAskDelete] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const gone = useRef(new Set<string>());
+  const focusNext = useRef<string | null>(null);
+  const openDetails = (id: string, ask: boolean) => {
+    setAskDelete(ask);
+    setDeleteError(null);
+    setDetails(id);
+  };
+  useLayoutEffect(() => {
+    const sel = focusNext.current;
+    focusNext.current = null;
+    if (sel) document.querySelector<HTMLElement>(sel)?.focus();
+  });
 
   // A photo let go anywhere else on the page would open in its place and lose unsaved work
   useEffect(() => {
@@ -341,11 +366,42 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
   }
 
   async function saveAlt(p: Photo) {
+    if (gone.current.has(p.id)) return;
     const alt = (alts[p.id] ?? p.alt).trim();
     if (alt === p.alt) return;
     const res = await call<{ alt: string }>('/api/admin/email/photos/', 'PUT', { id: p.id, alt });
     if (!res.ok) return setProblem(res.error);
     setPhotos(photos.map((x) => (x.id === p.id ? { ...x, alt: res.body.alt } : x)));
+  }
+
+  /** Deletes a photo for good. One in this email comes out of it too, on the page; Save keeps that. */
+  async function deleteFor(p: Photo) {
+    setDeleting(p.id);
+    setDeleteError(null);
+    const res = await call<{ kept: boolean }>('/api/admin/email/photos/', 'DELETE', { id: p.id });
+    setDeleting(null);
+    // Already gone (deleted on another page) is the same as gone now
+    if (!res.ok && !res.body.gone) return setDeleteError(res.error);
+    gone.current.add(p.id);
+    const k = photos.findIndex((x) => x.id === p.id);
+    const next = photos.filter((x) => x.id !== p.id);
+    const inEmail = parts.hero === p.id || story.includes(p.id);
+    setDetails(null);
+    setAskDelete(false);
+    setPhotos(next);
+    if (inEmail) {
+      holdPlace();
+      setParts((x) => ({ ...x, hero: x.hero === p.id ? '' : x.hero, story: { ...x.story, photos: x.story.photos.filter((id) => id !== p.id) } }));
+    }
+    // Nothing left that could bring it back
+    if (undo?.story.includes(p.id)) setUndo(null);
+    if (held?.id === p.id) setHeld(null);
+    if (swapping === p.id) setSwapping(null);
+    if (focusing === p.id) setFocusing(null);
+    const to = next[k] ?? next[k - 1];
+    focusNext.current = to ? `[data-photo="${CSS.escape(to.id)}"]` : '.em-dropzone input';
+    toast(inEmail ? 'Deleted, and taken out of this email. Save to keep that.' : 'Deleted the photo');
+    say(inEmail ? 'Deleted the photo and took it out of this email.' : 'Deleted the photo.');
   }
 
   const toggleStory = (id: string) => {
@@ -396,8 +452,6 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
   const cells = shownLayout ? place(shownLayout.tree) : [];
   const H = shownLayout ? heightAt(shownLayout.tree) : 1;
   const room = COLLAGE_MAX - story.length;
-  // A charity reveal has the story spot: the email leaves the collage out, so it's kept as it is, faded
-  const off = Boolean(parts.story.reveal);
   const fromLibrary = view?.source === 'library';
   const focusPhoto = focusing ? byId.get(focusing) : undefined;
   const detailPhoto = details ? byId.get(details) : undefined;
@@ -436,21 +490,11 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
       )}
       <FieldError id="em-photos-error" message={error} />
 
-      <fieldset class={`em-collage is-${stage}${fromLibrary ? ' is-taking' : ''}${off ? ' is-off' : ''}`} ref={panel}>
-        <legend>The story’s collage{off ? ' · Not in this email' : shownLayout ? ` · ${shownLayout.name}` : ''}</legend>
-        {off && (
-          <p class="em-off-note">
-            <span>
-              This week the story spot is {reveal ? `${reveal.name}’s reveal` : 'the charity’s reveal'}, so the collage isn’t in the email. Its photos and layout stay saved for the showroom story.
-            </span>
-            <a class="btn btn-small" href="#em-story">
-              Change the story spot
-            </a>
-          </p>
-        )}
+      <fieldset class={`em-collage is-${stage}${fromLibrary ? ' is-taking' : ''}`} ref={panel}>
+        <legend>The story’s collage{shownLayout ? ` · ${shownLayout.name}` : ''}</legend>
         {/* The collage's one status line: what to do, what a held photo will do, or the last change and its Undo.
             At the top of the collage, where the page's floating buttons on a phone can't cover it. */}
-        {!off && (n > 0 || stage !== 'rest' || undo) && (
+        {(n > 0 || stage !== 'rest' || undo) && (
           <p class={`em-collage-hint${stage === 'rest' && undo ? ' is-undo' : ''}`}>
             {stage === 'swap' ? (
               <>
@@ -523,7 +567,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
           Space or Enter picks this photo up. The arrow keys then move it, and Space or Enter puts it down; Escape puts it back. Delete takes it out of the collage.
         </p>
         {n > 0 && (
-          <ol class="em-collage-list" ref={collage} inert={off || undefined} style={{ aspectRatio: `600 / ${H.toFixed(3)}` }} aria-label={`The collage, in the email’s order: ${shownLayout?.name ?? ''}`}>
+          <ol class="em-collage-list" ref={collage} style={{ aspectRatio: `600 / ${H.toFixed(3)}` }} aria-label={`The collage, in the email’s order: ${shownLayout?.name ?? ''}`}>
             {shown.map((id, k) => {
               const c = cells[k] ?? { x: 0, y: 0, w: 600, h: H };
               const small = stripW > 0 && (Math.min(c.w, c.h) * stripW) / 600 < SMALL;
@@ -559,7 +603,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
                   <span class="em-collage-n" aria-hidden="true">
                     {k + 1}
                   </span>
-                  {!view && !off && (
+                  {!view && (
                     <>
                       <button type="button" class="em-collage-x" data-nodrag aria-label={`Take ${nameOf(id, k)} out of the collage`} title="Take it out of the collage" onClick={() => remove(id)}>
                         <X />
@@ -574,7 +618,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
             })}
           </ol>
         )}
-        {!off && (room > 0 || (fromLibrary && !view?.swapping && story.length < COLLAGE_MAX)) && (
+        {(room > 0 || (fromLibrary && !view?.swapping && story.length < COLLAGE_MAX)) && (
           <div class={`em-collage-add${n ? '' : ' is-empty'}`} ref={addZone}>
             {fromLibrary ? (
               <span>{n > story.length ? 'Let go to add it here.' : 'Drop it here to add it at the end.'}</span>
@@ -587,7 +631,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
             )}
           </div>
         )}
-        {layout && story.length > 0 && !view && !off && (
+        {layout && story.length > 0 && !view && (
           <LayoutChoices ids={story} byId={byId} current={layout} setChosen={chooseLayout} fit={(ids) => change(ids, 'Moved the photos to the spots that keep the most of them.', layout)} local={local} />
         )}
         <p class="visually-hidden" aria-live="assertive" aria-atomic="true">
@@ -614,15 +658,20 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
             <button
               type="button"
               class="em-photo-img"
+              data-photo={p.id}
               aria-label={`${p.alt || 'A photo'}: its description and what part shows`}
-              onPointerDown={off ? undefined : (e) => drag.startPress(e, p.id, 'library')}
+              onPointerDown={(e) => drag.startPress(e, p.id, 'library')}
               onTouchMove={drag.touchGuard}
               onClick={() => {
-                if (!drag.justDragged()) setDetails(p.id);
+                if (!drag.justDragged()) openDetails(p.id, false);
               }}
             >
               <img src={photoThumb(p, 480, 480, local)} alt="" loading="lazy" draggable={false} style={{ objectPosition: objectPosition(p.focus) }} />
               {story.includes(p.id) && <span class="em-collage-n">{story.indexOf(p.id) + 1}</span>}
+            </button>
+            {/* Its bin opens the photo's sheet at "Delete it for good?": the photo big, so there's no doubt which one */}
+            <button type="button" class="em-photo-delete" data-nodrag data-delete={p.id} aria-label="Delete this photo" title="Delete this photo" onClick={() => openDetails(p.id, true)}>
+              <Trash />
             </button>
             <label class="em-chip">
               <input type="radio" name="em-hero" class="visually-hidden" checked={parts.hero === p.id} onChange={() => setParts((x) => ({ ...x, hero: p.id }))} />
@@ -659,6 +708,11 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
             setDetails(null);
             setFocusing(detailPhoto.id);
           }}
+          inEmail={parts.hero === detailPhoto.id || story.includes(detailPhoto.id)}
+          askFirst={askDelete}
+          deleting={deleting === detailPhoto.id}
+          deleteError={deleteError}
+          onDelete={() => void deleteFor(detailPhoto)}
           onClose={() => setDetails(null)}
         />
       )}
@@ -687,18 +741,40 @@ interface DetailsProps {
   inStory: boolean;
   toggleStory: () => void;
   showFocus: () => void;
+  /** It's this email's top photo or in its collage, so deleting it takes it out of the email too. */
+  inEmail: boolean;
+  /** Opened by its bin: the sheet starts at "Delete it for good?" */
+  askFirst: boolean;
+  deleting: boolean;
+  deleteError: string | null;
+  onDelete: () => void;
   onClose: () => void;
 }
 
 /**
  * One library photo's details, in a sheet: the whole photo, the words saying what's in it (for people
- * who can't see images, and mail apps that block them), its two uses, and what part shows.
+ * who can't see images, and mail apps that block them), its two uses, what part shows, and Delete, which
+ * asks once more in the sheet ("Delete it for good?", Keep or Delete) instead of a browser dialog.
  */
-function PhotoDetails({ photo, local, alt, setAlt, saveAlt, hero, setHero, inStory, toggleStory, showFocus, onClose }: DetailsProps) {
+function PhotoDetails({ photo, local, alt, setAlt, saveAlt, hero, setHero, inStory, toggleStory, showFocus, inEmail, askFirst, deleting, deleteError, onDelete, onClose }: DetailsProps) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [asking, setAsking] = useState(askFirst);
+  const keep = useRef<HTMLButtonElement>(null);
+  const askButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     dialog.current?.showModal();
+    // Opened by its bin: Keep has focus, so Enter can't delete by accident
+    if (askFirst) keep.current?.focus();
   }, []);
+  // Asking again, Keep has focus; done asking, focus goes back to Delete photo. In the same update, so it's never lost to the page.
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    (asking ? keep : askButton).current?.focus();
+  }, [asking]);
   const id = `em-photo-alt-${photo.id}`;
   return (
     <dialog
@@ -744,11 +820,36 @@ function PhotoDetails({ photo, local, alt, setAlt, saveAlt, hero, setHero, inSto
           </button>
         </div>
       </div>
-      <div class="em-dialog-actions">
-        <button type="button" class="btn btn-primary" onClick={() => dialog.current?.close()}>
-          Done
-        </button>
-      </div>
+      {asking ? (
+        <div class="em-photo-sheet-ask" role="group" aria-labelledby="em-photo-sheet-ask">
+          <p id="em-photo-sheet-ask">
+            <strong>Delete this photo for good?</strong> {inEmail ? 'It comes out of this email too.' : 'It isn’t in this email.'}
+          </p>
+          {deleteError && (
+            <p class="em-error" role="alert">
+              {deleteError}
+            </p>
+          )}
+          <div class="em-dialog-actions">
+            <button type="button" class="btn" ref={keep} disabled={deleting} onClick={() => setAsking(false)}>
+              Keep
+            </button>
+            <button type="button" class="btn em-photo-sheet-yes" disabled={deleting} onClick={onDelete}>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div class="em-dialog-actions">
+          <button type="button" class="btn btn-ghost btn-danger em-photo-sheet-delete" ref={askButton} onClick={() => setAsking(true)}>
+            <Trash />
+            <span>Delete photo</span>
+          </button>
+          <button type="button" class="btn btn-primary" onClick={() => dialog.current?.close()}>
+            Done
+          </button>
+        </div>
+      )}
     </dialog>
   );
 }

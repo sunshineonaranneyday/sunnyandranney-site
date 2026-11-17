@@ -53,9 +53,9 @@ export async function weekEmail(context: APIContext, send: string, today: string
   } catch (err) {
     return { ok: false, problems: [err instanceof Error ? err.message : String(err)], status: 502 };
   }
-  // The charity's reveals, only when the story spot shows one: its day and time come from the charity's site
+  // The charity's reveals, only when the email shows one: its day and time come from the charity's site
   let reveals: Awaited<ReturnType<typeof listUpcomingReveals>> | null = null;
-  if (parts.story.reveal) {
+  if (parts.reveal) {
     try {
       reveals = await listUpcomingReveals(env.SOARD_DB, today);
     } catch (err) {

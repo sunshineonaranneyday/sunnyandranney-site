@@ -64,24 +64,45 @@
     ]
   },
   "story": {
-    "reveal": {
-      "name": "Remi and Nico",
-      "long": "Wednesday, November 18",
-      "short": "Wed, Nov 18",
-      "time": "4:00 PM",
-      "room": "Dream Bedroom &amp; Accessible Bathroom",
-      "photo": {
-        "src": "cf:kids/remi-and-nico/1791465769931-RemiNiko-9721.jpg",
-        "alt": "Remi and Nico with their family"
+    "label": "Christmas d&#233;cor &amp; gifts",
+    "headline": "We couldn&#8217;t wait any longer. Christmas is here.",
+    "body": "The trees are up and the shelves are stocked. Come see the Christmas d&#233;cor, gifts and new arrivals, in the showroom only.",
+    "cta": [
+      "Plan your visit",
+      "/visit/"
+    ],
+    "photos": [
+      {
+        "src": "cf:sunny-ranney-interior",
+        "alt": "The showroom floor"
       },
-      "story": "Remi and Nico are sisters who use wheelchairs. Their bathroom door was only two feet wide, too narrow to wheel them through, so SOARD is building them a bathroom and bedroom around their needs, at no cost to their family.",
-      "page": "https://sunshineonaranneyday.com/kids/remi-and-nico/",
-      "live": "https://sunshineonaranneyday.com/live/remi-and-nico/",
-      "calendar": {
-        "google": "https://sunshineonaranneyday.com/api/calendar.ics?reveal=remi-and-nico&watch=1&app=google",
-        "apple": "https://sunshineonaranneyday.com/api/calendar.ics?reveal=remi-and-nico&watch=1",
-        "outlook": "https://sunshineonaranneyday.com/api/calendar.ics?reveal=remi-and-nico&watch=1&app=outlook"
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/vitoswivelchairinpebbletan_lifestyle_r1_lp9qm9n7aeyf8bxk.jpg?v=1774477996",
+        "alt": "A swivel chair in pebble"
+      },
+      {
+        "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/255_harperswcloud20room.jpg?v=1776024853",
+        "alt": "A cloud swivel chair"
       }
+    ]
+  },
+  "reveal": {
+    "name": "Remi and Nico",
+    "long": "Wednesday, November 18",
+    "short": "Wed, Nov 18",
+    "time": "4:00 PM",
+    "room": "Dream Bedroom &amp; Accessible Bathroom",
+    "photo": {
+      "src": "cf:kids/remi-and-nico/1791465769931-RemiNiko-9721.jpg",
+      "alt": "Remi and Nico with their family"
+    },
+    "story": "Remi and Nico are sisters who use wheelchairs. Their bathroom door was only two feet wide, too narrow to wheel them through, so SOARD is building them a bathroom and bedroom around their needs, at no cost to their family.",
+    "page": "https://sunshineonaranneyday.com/kids/remi-and-nico/",
+    "live": "https://sunshineonaranneyday.com/live/remi-and-nico/",
+    "calendar": {
+      "google": "https://sunshineonaranneyday.com/api/calendar.ics?reveal=remi-and-nico&watch=1&app=google",
+      "apple": "https://sunshineonaranneyday.com/api/calendar.ics?reveal=remi-and-nico&watch=1",
+      "outlook": "https://sunshineonaranneyday.com/api/calendar.ics?reveal=remi-and-nico&watch=1&app=outlook"
     }
   },
   "events": [

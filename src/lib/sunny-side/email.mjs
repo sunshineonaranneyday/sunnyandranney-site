@@ -11,6 +11,7 @@
  *   Staci's special           -> brief.sale    kind: "tiers" (2-4) | "percent" | "headline"
  *   Staci's events            -> brief.events  each with dated items; past dates drop out, and the
  *                                                line under the title is written from the dates left
+ *   a reveal still ahead      -> brief.reveal  the charity's invite to watch it live, under the story
  *   the latest reveal         -> brief.mission
  *
  * Design: bold color blocks and edge-to-edge photos, like a bright weekly flyer.
@@ -298,7 +299,7 @@ export const COLLAGE_ROWS = { 1: [1], 2: [2], 3: [1, 2], 4: [1, 3], 5: [1, 2, 2]
  * the admin's preview knows which section a too-wide word is in. Untagged bands (the masthead, the top
  * photo, the visit row, the footer) are the email's own layout.
  */
-export const PARTS = ['offer', 'wall', 'story', 'events', 'mission'];
+export const PARTS = ['offer', 'wall', 'story', 'reveal', 'events', 'mission'];
 
 /** The web-font link as the email writes it, hidden from Outlook. */
 export const FONT_LINK = /<!--\[if !mso\]><!--><link href="https:\/\/fonts\.googleapis\.com[^>]*><!--<!\[endif\]-->/;
@@ -312,7 +313,7 @@ export const FONT_LINK = /<!--\[if !mso\]><!--><link href="https:\/\/fonts\.goog
 export const bareEmail = (html) => html.replace(FONT_LINK, '').replace(/<style[\s\S]*?<\/style>/g, '');
 
 /** Every section, top to bottom. A preview can ask for just the first few. */
-export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'story', 'events', 'mission', 'visit', 'footer'];
+export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'story', 'reveal', 'events', 'mission', 'visit', 'footer'];
 
 /** Builds one issue. Holds the brief so every link can be tagged for its slot. */
 export class Email {
@@ -573,7 +574,6 @@ export class Email {
   story() {
     const s = this.b.story;
     if (!s) return '';
-    if (s.reveal) return this.reveal(s.reveal);
     const href = SITE + s.cta[1];
     return (
       this.band(Email.label(s.label) + Email.h2(s.headline) + Email.text(s.body, { mb: S1 }) + this.link(`${s.cta[0]} &#8594;`, href, 'story-link'), {
@@ -585,7 +585,7 @@ export class Email {
   }
 
   /**
-   * A charity reveal in the story spot: the charity's invite to watch it live, built like its own
+   * A charity reveal still ahead, its own section under the story: the charity's invite to watch it live, built like its own
    * reveal email ("Join Us Live for Dylan’s Reveal Day!", Nov 16, 2026) in its identity: Dark Deep,
    * a Sunshine Yellow date, the Libre Baskerville line with the key words in yellow italic, the family's
    * photo, When / Where / Room, and its calendar links, which hold the day, the time and the link to
@@ -593,7 +593,9 @@ export class Email {
    * charity emails the day before, an hour before and when it goes live). Rules on Dark Deep are its
    * muted gray, the only gray in the charity's palette (verify.mjs holds the section to it).
    */
-  reveal(r) {
+  reveal() {
+    const r = this.b.reveal;
+    if (!r) return '';
     const row = (what, value, first = false, pb = 13) =>
       `<tr><td style="padding:12px 0 ${pb}px;${first ? '' : `border-top:1px solid ${SOARD_MUTED};`}">` +
       Email.label(what, { color: SOARD_YELLOW, mb: 4, font: OUTFIT, track: '0.12em' }) +
@@ -636,7 +638,7 @@ export class Email {
       Email.gap(S1) +
       `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:20px;">${remind}</p>` +
       Email.text('The reveal page turns into the live video the moment we&nbsp;start.', { size: 14, lh: 21, color: WHITE, font: OUTFIT });
-    return this.breather() + this.band(body, { bg: SOARD_DEEP, top: S5, bottom: S5, cls: 'soard', part: 'story' });
+    return this.breather() + this.band(body, { bg: SOARD_DEEP, top: S5, bottom: S5, cls: 'soard', part: 'reveal' });
   }
 
   /**
