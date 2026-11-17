@@ -187,8 +187,8 @@ test('it can go only when it’s finished, and says what’s left, each with the
   assert.deepEqual(kitProblems({ ...ready, special: null, sale: null, wall: wallOf(2), parts: blankParts() }), [
     { text: 'Write the subject line.', section: 'em-lines' },
     { text: 'Set the sale.', section: 'em-sale' },
-    { text: 'Write the story.', section: 'em-story' },
     { text: 'Pick 2 more products.', section: 'em-products' },
+    { text: 'Write the story.', section: 'em-story' },
   ]);
   assert.deepEqual(kitProblems({ ...ready, kids: [] }), [{ text: 'The charity’s kids didn’t load, so the charity section can’t be drawn. Reload the page to try again.', section: 'em-charity' }]);
 });

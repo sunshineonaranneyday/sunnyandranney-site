@@ -482,7 +482,7 @@ export default function EmailApp(props: AppProps) {
           )}
 
           {/* In the order Staci decides things (PAGE_SECTIONS in page-email.mjs): the subject line, the
-              sale, the reveal, the photos, the products, the events and the charity. Send last. */}
+              sale, the products, the reveal, the photos, the events and the charity. Send last. */}
           <Section n={1} id="em-lines" locked={locked} title="Subject line" state={parts.subject ? 'Written' : 'Not written'} tone={partsErrors.subject || partsErrors.preheader ? 'bad' : parts.subject ? 'ok' : 'todo'}>
             <Subject parts={parts} setParts={setParts} sale={saleOk ? sale : null} shown={shownParts} />
           </Section>
@@ -491,16 +491,16 @@ export default function EmailApp(props: AppProps) {
             <Sale form={form} special={special} errors={saleErrors} shown={shownSale} set={set} touch={touch} presets={presets} />
           </Section>
 
-          <Section n={3} id="em-story" locked={locked} title="The reveal" state={storyState.state} tone={storyState.tone}>
+          <Section n={3} id="em-products" locked={locked} title="The products" state={wallState.state} tone={wallState.tone}>
+            <Products wall={wall} setWall={setWall} catalog={catalog} collections={collections} catalogProblem={catalogProblem} shown={shownWall} longNames={longNames} today={today} />
+          </Section>
+
+          <Section n={4} id="em-story" locked={locked} title="The reveal" state={storyState.state} tone={storyState.tone}>
             <Story parts={parts} setParts={setParts} shown={shownParts} reveals={props.reveals} />
           </Section>
 
-          <Section n={4} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.reveal ? 'no collage this week' : `${story.photos.length} in the story`}`} tone={partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok'}>
+          <Section n={5} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.reveal ? 'no collage this week' : `${story.photos.length} in the story`}`} tone={partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok'}>
             <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} reveal={reveal} />
-          </Section>
-
-          <Section n={5} id="em-products" locked={locked} title="The products" state={wallState.state} tone={wallState.tone}>
-            <Products wall={wall} setWall={setWall} catalog={catalog} collections={collections} catalogProblem={catalogProblem} shown={shownWall} longNames={longNames} today={today} />
           </Section>
 
           <Section n={6} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={inEmail ? 'ok' : 'todo'}>

@@ -2,7 +2,7 @@
  * The admin's weekly email page runs in the order Staci decides things
  * =====================================================================
  * PAGE_SECTIONS (page-email.mjs) is the one list of the page's order: the subject line, the sale, the
- * reveal, the photos, the products, the events, the charity, Send. The page's sections, its error
+ * products, the reveal, the photos, the events, the charity, Send. The page's sections, its error
  * list and "Before it can go" all follow it. Reading the page's source keeps this honest without a
  * browser: a section moved in EmailApp.tsx, or one added to it, fails here until the two agree.
  */
@@ -22,9 +22,9 @@ test('the page’s sections are numbered 1, 2, 3… down the page', () => {
   assert.deepEqual(sections.map((s) => s.n), sections.map((_, k) => k + 1));
 });
 
-test('the page runs subject line, sale, reveal, photos, products, events, charity, Send', () => {
+test('the page runs subject line, sale, products, reveal, photos, events, charity, Send', () => {
   assert.deepEqual(sections.map((s) => s.id), PAGE_SECTIONS);
-  assert.match(page, /<Section n=\{3\} id="em-story"[^>]* title="The reveal"/);
+  assert.match(page, /<Section n=\{4\} id="em-story"[^>]* title="The reveal"/);
 });
 
 test('every error the page can show belongs to a section, so its list runs in the page’s order', () => {

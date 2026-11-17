@@ -45,12 +45,12 @@ export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catal
 
 /**
  * The admin page's sections, top to bottom, in the order Staci decides things (Peter, 2026-11-17):
- * the subject line, the sale, the reveal (the story spot: the showroom story or a charity reveal,
- * which says whether the collage is needed), then the photos, the products, the events, the
+ * the subject line, the sale, the products, the reveal (the story spot: the showroom story or a
+ * charity reveal, which says whether the collage is needed), then the photos, the events, the
  * charity, and Send. Not the email's own order (SECTIONS in email.mjs). The page, its error list
  * and "Before it can go" all follow this list; page-order.test.mjs holds them to it.
  */
-export const PAGE_SECTIONS = ['em-lines', 'em-sale', 'em-story', 'em-photos', 'em-products', 'em-events', 'em-charity', 'em-send'];
+export const PAGE_SECTIONS = ['em-lines', 'em-sale', 'em-products', 'em-story', 'em-photos', 'em-events', 'em-charity', 'em-send'];
 
 /** The fields each section of the page holds, by the first part of an error's key (check, checkWall, checkParts). */
 const FIELDS = {
