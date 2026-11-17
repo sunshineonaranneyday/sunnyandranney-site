@@ -337,7 +337,7 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-section .badge { transition: background-color var(--em-mid) var(--em-ease), color var(--em-mid) var(--em-ease); }
 .em-section { transition: opacity var(--em-slow) var(--em-ease); }
 .em-section.is-locked { opacity: 0.55; }
-.em-photo, .em-collage-item, .em-test-person, .em-scheduled, .em-done, .em-todo li { animation: em-in var(--em-mid) var(--em-ease) both; }
+.em-photo, .em-collage-item, .em-person, .em-scheduled, .em-done, .em-todo li { animation: em-in var(--em-mid) var(--em-ease) both; }
 .em-photo .em-photo-img img { transition: transform var(--em-slow) var(--em-ease); }
 .em-photo:hover .em-photo-img img { transform: scale(1.02); }
 .em-photo { transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease); }
@@ -394,17 +394,114 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-send-real.is-set { border-color: var(--sage); box-shadow: inset 0 0 0 1px var(--sage); }
 .em-send-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.875rem; margin-top: 0.875rem; }
 .em-send-row .em-hint { margin: 0; }
-.em-test-list { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.375rem; }
-.em-test-person { display: flex; align-items: center; gap: 0.25rem; min-width: 0; padding: 0 0.25rem 0 0.875rem; border: 1px solid var(--line); border-radius: var(--r-md); }
-/* The name over the whole address, like a mail app's contacts: an address cut to "holly@soardcharity.c…" can't be checked */
-.em-test-person .check { flex: 1; min-width: 0; min-height: 44px; padding-block: 0.5rem; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.625rem; align-items: center; }
-.em-test-person .check input { grid-row: span 2; }
-.em-test-name { font-weight: 700; line-height: 1.25; }
-.em-test-email { min-width: 0; overflow-wrap: break-word; color: var(--ink-3); font-size: 0.875rem; font-weight: 400; line-height: 1.3; }
 .em-nowrap { white-space: nowrap; }
-.em-add-person { padding-left: 0; }
-.em-test-add { margin-top: 0.25rem; animation: em-fade var(--em-mid) var(--em-ease) both; }
-.em-test-add-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; gap: 0.5rem; }
+/*
+ * The people a test goes to, as cards: tap anywhere on one to tick it. Ticked, the face flips
+ * to a check (Gmail's select) and the card takes the ink edge a picked product has. One to a
+ * row on a phone, so a whole email fits; side by side, face over name, once two fit.
+ */
+.em-people { container-type: inline-size; margin: 0 0 0.25rem; }
+.em-test-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+.em-person { position: relative; min-width: 0; display: grid; }
+.em-person-card {
+  position: relative; display: grid; grid-template-columns: 2.5rem minmax(0, 1fr); align-items: center; gap: 0.75rem;
+  width: 100%; min-height: 4.25rem; margin: 0; padding: 0.75rem 0.875rem;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); box-shadow: var(--shadow-sm);
+  font: inherit; font-size: 0.9375rem; font-weight: 500; letter-spacing: 0; text-transform: none; text-align: left; color: var(--ink);
+  cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none;
+  transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease);
+}
+/* The X has its own column, like any row's trailing button: no text runs under it, so a tap on the
+   end of an email ticks that person and never takes them off. (With the X up by the name, the
+   email ran under its 44px target on an iPhone, and its pressed state covered the ".com".) */
+.em-person:has(.em-person-remove) .em-person-card { padding-right: 3.25rem; }
+@media (hover: hover) {
+  .em-person-card:hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); box-shadow: 0 6px 16px rgba(28, 27, 25, 0.08); transform: translateY(-1px); }
+}
+.em-person-card:active { transform: scale(0.985); }
+.em-person-card:has(input:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink), var(--shadow-sm); }
+.em-person-card:has(input:focus-visible), .em-person-card:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/*
+ * The flip is flat: the side going away narrows to nothing, then the other side widens in. A 3D
+ * flip leans on backface-visibility, which Safari ignored here and showed the check's mirror
+ * image on every unticked card. Each state's own transition runs: out at once, in after it.
+ */
+.em-avatar { position: relative; display: block; width: 2.5rem; height: 2.5rem; }
+.em-avatar > span {
+  position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%;
+  font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.02em; line-height: 1;
+}
+/* Every face the same quiet stone, like a phone's contacts: in this admin teal, gold and clay are
+   badges (sent, pending, warning), so a clay face read as something wrong with that person. The
+   ink check is then the only mark on the list. */
+.em-avatar-face {
+  background: var(--sunk); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line);
+  transition: transform 140ms var(--em-ease) 120ms;
+}
+.em-avatar-back { background: var(--ink); color: #fff; transform: scaleX(0); transition: transform 120ms cubic-bezier(0.4, 0, 1, 1); }
+.em-person-card:has(input:checked) .em-avatar-face { transform: scaleX(0); transition: transform 120ms cubic-bezier(0.4, 0, 1, 1); }
+.em-person-card:has(input:checked) .em-avatar-back { transform: none; transition: transform 140ms var(--em-ease) 120ms; }
+.em-avatar svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+
+.em-person-text { display: grid; gap: 0.125rem; min-width: 0; }
+.em-person-name { font-size: 0.9375rem; font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The whole address, always: an address cut to "name@yourbusin…" can't be checked. It breaks
+   only when the card's too narrow, after its "@" or before a "." (breakable) */
+.em-person-email { font-size: 0.8125rem; line-height: 1.3; color: var(--ink-3); overflow-wrap: break-word; }
+/* The domain moves down whole ("name@" over "yourbusiness.com", not ".com" alone on a line), and
+   breaks before a "." only when even a line of its own is too narrow for it */
+.em-person-domain { display: inline-block; max-width: 100%; }
+.em .em-person-remove { position: absolute; top: 50%; right: 0.25rem; transform: translateY(-50%); color: var(--ink-3); }
+.em .em-person-remove:hover { color: var(--ink); }
+
+/* Just taken off: the card holds its place, with the way back */
+.em-person-gone {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-height: 4.25rem; padding: 0.5rem 0.5rem 0.5rem 0.875rem;
+  border: 1px dashed color-mix(in srgb, var(--ink) 22%, var(--line)); border-radius: var(--r-md); background: var(--sunk);
+  font-size: 0.875rem; color: var(--ink-2); animation: em-fade var(--em-mid) var(--em-ease) both;
+}
+.em-person-gone b { color: var(--ink); }
+
+/* Adding someone: a dashed card at the end, which opens into the form across the row */
+.em .em-add-card { border-style: dashed; border-color: color-mix(in srgb, var(--ink) 22%, var(--line)); background: transparent; box-shadow: none; }
+.em-add-card .em-avatar-face { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 22%, var(--line)); }
+.em-person-add.is-open { grid-column: 1 / -1; }
+.em-test-add { padding: 0.75rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunk); animation: em-fade var(--em-mid) var(--em-ease) both; }
+/* Measured against the list (.em-people), not the page: stacked on a phone, name beside email
+   once there's room, and the buttons on the same line once there's room for those too */
+.em-test-add-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+.em-test-add-actions { display: flex; gap: 0.5rem; }
+.em-test-add-actions .btn { flex: 1; }
+@container (min-width: 28rem) {
+  .em-test-add-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); }
+  .em-test-add-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .em-test-add-actions .btn { flex: none; }
+}
+@container (min-width: 44rem) {
+  .em-test-add-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; }
+  .em-test-add-actions { grid-row: 1; grid-column: 3; }
+}
+/* The error sits right under the email it's about, across the row */
+.em-test-add .em-error { grid-column: 1 / -1; margin: 0; }
+
+/* The smallest phones: a smaller face buys the email 14px, so even at 320px an address breaks only
+   after its @ (measured: the longest is 188px, its longest domain 141px) */
+@container (max-width: 17.5rem) {
+  .em-person-card { grid-template-columns: 2rem minmax(0, 1fr); gap: 0.625rem; padding: 0.75rem; }
+  .em-avatar { width: 2rem; height: 2rem; }
+  .em-avatar > span { font-size: 0.8125rem; }
+  .em-avatar svg { width: 1rem; height: 1rem; }
+}
+@container (min-width: 28rem) {
+  .em-test-list { grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr)); gap: 0.625rem; }
+  .em-person-card { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 0.75rem; min-height: 0; padding: 1rem; }
+  /* Side by side the X sits in the face's row, clear of the name and email below it */
+  .em-person:has(.em-person-remove) .em-person-card { padding-right: 1rem; }
+  .em .em-person-remove { top: 0.375rem; right: 0.375rem; transform: none; }
+  .em-person-gone { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0.25rem; padding: 1rem; }
+  .em-person-gone .btn { margin-left: -0.75rem; }
+}
 .em-done { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--sage); font-weight: 600; font-size: 0.875rem; }
 .em-done svg, .em-scheduled-icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 24; animation: em-draw var(--em-slow) var(--em-ease) both 80ms; }
 .em-scheduled { display: flex; gap: 0.75rem; align-items: flex-start; }
@@ -433,7 +530,6 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-dialog .em-hint { margin: 0 0 1rem; }
 .em-dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 @container (max-width: 560px) {
-  .em-test-add-row { grid-template-columns: minmax(0, 1fr); }
   /* Each cell at least as wide as its words ("Other time", "12:00 PM" in bold), as many to a row as fit */
   .em-when .em-seg-row { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(5.75rem, 1fr)); }
   .em-when .em-days .em-seg-row { grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr)); }

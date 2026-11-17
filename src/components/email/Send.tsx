@@ -1,5 +1,5 @@
 /** @jsxImportSource preact */
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { sendLabel } from '@/lib/sunny-side/special.mjs';
 import { checkPerson, cleanPerson, namesOf } from '@/lib/sunny-side/testers.mjs';
 import { type KitSend, type TestPerson, type TestSent, at, send as call, toast, who } from './model';
@@ -94,6 +94,17 @@ function breakable(email: string) {
   return email.split(/(?<=@)|(?=\.)/).flatMap((part, k) => (k ? [<wbr />, part] : [part]));
 }
 
+/** "AB" for Ann Banks, "C" for Cal; you, by your email ("dana.r@" is "DR"). */
+const initials = (p: TestPerson) => {
+  const words = (p.you ? p.email.split('@')[0] : p.name).split(/[\s._-]+/).filter(Boolean);
+  return words.slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+};
+const Tick = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </svg>
+);
+
 export function Send(props: Props) {
   const { send, label, day, days, setDay, today, todo, dirty, saving, saveFirst, me, kitSend, setKitSend, subscribers } = props;
   const [people, setPeople] = useState(props.people);
@@ -104,6 +115,29 @@ export function Send(props: Props) {
   const [adding, setAdding] = useState({ name: '', email: '' });
   const [addError, setAddError] = useState<string | undefined>();
   const [showAdd, setShowAdd] = useState(false);
+  /** Who was just taken off, held in their place with an Undo until the list changes again. */
+  const [gone, setGone] = useState<{ person: TestPerson; at: number; was: boolean; done: Promise<boolean> } | null>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const addCard = useRef<HTMLButtonElement>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
+  /**
+   * Where focus goes once the render that draws it lands: a person's card (by email), the Undo,
+   * the Add card or the form's Name, in the same frame. Not autofocus, which a browser honors once
+   * per page load (the form then opened with nothing focused, so Esc did nothing), and not a
+   * paint later, which on a busy page left the first keys typed going nowhere.
+   */
+  const focusNext = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const want = focusNext.current;
+    if (!want) return;
+    const el =
+      want === 'undo' ? undoButton.current : want === 'add' ? addCard.current : want === 'name' ? nameInput.current : list.current?.querySelector<HTMLInputElement>(`input[value="${CSS.escape(want)}"]`);
+    if (el) {
+      el.focus();
+      focusNext.current = null;
+    }
+  });
   const [wanted, setTime] = useState(props.usualTime && TIMES.some((t) => t.value === props.usualTime) ? props.usualTime : OPENS);
   // Today offers only the times still ahead, and a day with none left isn't offered
   const open = days.filter((d) => timesFor(d, today).length);
@@ -137,13 +171,14 @@ export function Send(props: Props) {
 
   const ready = !todo.length;
   const to = people.filter((p) => chosen.has(p.email)).map((p) => p.email);
-  const choose = (email: string, on: boolean) => {
-    const next = new Set(chosen);
-    if (on) next.add(email);
-    else next.delete(email);
-    setChosen(next);
-    remember([...next]);
-  };
+  const choose = (email: string, on: boolean) =>
+    setChosen((was) => {
+      const next = new Set(was);
+      if (on) next.add(email);
+      else next.delete(email);
+      remember([...next]);
+      return next;
+    });
   const last = props.tests[0];
 
   async function test() {
@@ -199,17 +234,73 @@ export function Send(props: Props) {
     setAdding({ name: '', email: '' });
     setAddError(undefined);
     setShowAdd(false);
+    setGone(null);
+    focusNext.current = person.email;
     toast(`Added ${person.name}`);
   }
 
-  async function remove(p: TestPerson) {
-    const res = await call<{ people: TestPerson[] }>('/api/admin/email/test-people/', 'DELETE', { email: p.email });
-    if (!res.ok) return setProblem(res.error);
-    setPeople(res.body.people);
+  function openAdd() {
+    focusNext.current = 'name';
+    setShowAdd(true);
+  }
+
+  function closeAdd() {
+    focusNext.current = 'add';
+    setShowAdd(false);
+    setAdding({ name: '', email: '' });
+    setAddError(undefined);
+  }
+
+  /** Takes them off at once, leaving an Undo where their card was; if the server says no, they come back. */
+  function remove(p: TestPerson) {
+    const at = people.findIndex((x) => x.email === p.email);
+    const was = chosen.has(p.email);
+    setProblem(null);
+    setPeople((list) => list.filter((x) => x.email !== p.email));
     choose(p.email, false);
+    const done = call<{ people: TestPerson[] }>('/api/admin/email/test-people/', 'DELETE', { email: p.email }).then((res) => {
+      if (res.ok) return true;
+      setPeople((list) => (list.some((x) => x.email === p.email) ? list : [...list.slice(0, at), p, ...list.slice(at)]));
+      setGone((g) => (g?.person.email === p.email ? null : g));
+      if (was) choose(p.email, true);
+      setProblem(res.error);
+      return false;
+    });
+    focusNext.current = 'undo';
+    setGone({ person: p, at, was, done });
+  }
+
+  /** Puts them back where they were, ticked if they were. Waits for the take-off to land first, so it can't undo the undo. */
+  async function undo() {
+    if (!gone) return;
+    const { person, at, was, done } = gone;
+    setGone(null);
+    if (!(await done)) return;
+    setPeople((list) => [...list.slice(0, at), person, ...list.slice(at)]);
+    if (was) choose(person.email, true);
+    focusNext.current = person.email;
+    const res = await call<{ people: TestPerson[] }>('/api/admin/email/test-people/', 'PUT', { name: person.name, email: person.email });
+    if (!res.ok) {
+      // Still off on the server: the Undo card comes back, so it can be tried again
+      setPeople((list) => list.filter((x) => x.email !== person.email));
+      if (was) choose(person.email, false);
+      setGone({ person, at, was, done: Promise.resolve(true) });
+      return setProblem(res.error);
+    }
+    setPeople(res.body.people);
   }
 
   const goes = kitSend && (kitSend.status === 'sending' || kitSend.status === 'completed');
+  const goneCard = gone && (
+    <li class="em-person em-person-gone" key="gone">
+      <span role="status">
+        <b>{gone.person.name}</b> is off the list.
+      </span>
+      <button type="button" class="btn btn-ghost btn-small" ref={undoButton} aria-label={`Undo, put ${gone.person.name} back on the list`} onClick={() => void undo()}>
+        Undo
+      </button>
+    </li>
+  );
 
   return (
     <div class="em-send">
@@ -233,50 +324,94 @@ export function Send(props: Props) {
 
       <div class="em-send-card">
         <h3>Send a test</h3>
-        <p class="em-hint">Kit sends it about a minute later, exactly as subscribers will get it, with “[Test]” before the subject.</p>
-        <ul class="em-test-list">
-          {people.map((p) => (
-            <li class="em-test-person" key={p.email}>
-              <label class="check">
-                <input type="checkbox" checked={chosen.has(p.email)} onChange={(e) => choose(p.email, (e.target as HTMLInputElement).checked)} />
-                <span class="em-test-name">{p.you ? 'You' : p.name}</span>
-                <span class="em-test-email">{breakable(p.email)}</span>
-              </label>
-              {!p.you && (
-                <button type="button" class="btn btn-ghost btn-icon em-remove" aria-label={`Take ${p.name} off the list`} onClick={() => void remove(p)}>
-                  <X />
+        <p class="em-hint">Pick who gets it. Kit sends it about a minute later, exactly as subscribers will get it, with “[Test]” before the subject.</p>
+        <div class="em-people" ref={list}>
+          <ul class="em-test-list" aria-label="Who gets the test">
+            {people.flatMap((p, i) => {
+              const card = (
+                <li class="em-person" key={p.email}>
+                  <label class="em-person-card">
+                    <input type="checkbox" class="visually-hidden" value={p.email} checked={chosen.has(p.email)} onChange={(e) => choose(p.email, (e.target as HTMLInputElement).checked)} />
+                    <span class="em-avatar" aria-hidden="true">
+                      <span class="em-avatar-face">{initials(p)}</span>
+                      <span class="em-avatar-back">
+                        <Tick />
+                      </span>
+                    </span>
+                    <span class="em-person-text">
+                      <span class="em-person-name">{p.you ? 'You' : p.name}</span>
+                      <span class="em-person-email">
+                        {p.email.slice(0, p.email.indexOf('@') + 1)}
+                        <span class="em-person-domain">{breakable(p.email.slice(p.email.indexOf('@') + 1))}</span>
+                      </span>
+                    </span>
+                  </label>
+                  {!p.you && (
+                    <button type="button" class="btn btn-ghost btn-icon em-person-remove" aria-label={`Take ${p.name} off the list`} onClick={() => remove(p)}>
+                      <X />
+                    </button>
+                  )}
+                </li>
+              );
+              return gone && gone.at === i ? [goneCard, card] : [card];
+            })}
+            {gone && gone.at >= people.length && goneCard}
+            <li class={`em-person em-person-add${showAdd ? ' is-open' : ''}`} key="add">
+              {showAdd ? (
+                <form
+                  class="em-test-add"
+                  onSubmit={add}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      closeAdd();
+                    }
+                  }}
+                  noValidate
+                >
+                  <div class="em-test-add-row">
+                    <input ref={nameInput} aria-label="Their name" placeholder="Name" autocomplete="off" value={adding.name} maxLength={40} onInput={(e) => setAdding({ ...adding, name: (e.target as HTMLInputElement).value })} />
+                    <input
+                      type="email"
+                      aria-label="Their email"
+                      placeholder="Email"
+                      autocomplete="off"
+                      value={adding.email}
+                      onInput={(e) => {
+                        setAdding({ ...adding, email: (e.target as HTMLInputElement).value });
+                        setAddError(undefined);
+                      }}
+                      {...(addError ? { 'aria-invalid': true, 'aria-describedby': 'em-test-add-error' } : {})}
+                    />
+                    <FieldError id="em-test-add-error" message={addError} />
+                    <div class="em-test-add-actions">
+                      <button type="button" class="btn btn-ghost" onClick={closeAdd}>
+                        Cancel
+                      </button>
+                      <button type="submit" class="btn btn-dark">
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              ) : (
+                <button type="button" class="em-person-card em-add-card" ref={addCard} onClick={openAdd}>
+                  <span class="em-avatar" aria-hidden="true">
+                    <span class="em-avatar-face">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                    </span>
+                  </span>
+                  <span class="em-person-text">
+                    <span class="em-person-name">Add someone</span>
+                    <span class="em-person-email">Anyone who checks the email</span>
+                  </span>
                 </button>
               )}
             </li>
-          ))}
-        </ul>
-        {showAdd ? (
-          <form class="em-test-add" onSubmit={add} noValidate>
-            <div class="em-test-add-row">
-              <input aria-label="Their name" placeholder="Name" autocomplete="off" value={adding.name} maxLength={40} onInput={(e) => setAdding({ ...adding, name: (e.target as HTMLInputElement).value })} />
-              <input
-                type="email"
-                aria-label="Their email"
-                placeholder="Email"
-                autocomplete="off"
-                value={adding.email}
-                onInput={(e) => {
-                  setAdding({ ...adding, email: (e.target as HTMLInputElement).value });
-                  setAddError(undefined);
-                }}
-                {...(addError ? { 'aria-invalid': true, 'aria-describedby': 'em-test-add-error' } : {})}
-              />
-              <button type="submit" class="btn">
-                Add
-              </button>
-            </div>
-            <FieldError id="em-test-add-error" message={addError} />
-          </form>
-        ) : (
-          <button type="button" class="btn btn-ghost btn-small em-add-person" onClick={() => setShowAdd(true)}>
-            + Add someone
-          </button>
-        )}
+          </ul>
+        </div>
         <div class="em-send-row">
           <button type="button" class="btn btn-dark" onClick={() => void test()} disabled={!ready || !to.length || Boolean(busy) || saving || Boolean(goes)}>
             {busy === 'test' ? 'Sending the test…' : `${dirty ? 'Save and send' : 'Send'} test to ${to.length === 1 && to[0] === me ? 'you' : `${to.length} ${to.length === 1 ? 'person' : 'people'}`}`}
