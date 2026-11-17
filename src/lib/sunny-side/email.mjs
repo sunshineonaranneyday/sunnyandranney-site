@@ -550,6 +550,7 @@ export class Email {
   story() {
     const s = this.b.story;
     if (!s) return '';
+    if (s.reveal) return this.reveal(s.reveal);
     const href = SITE + s.cta[1];
     return (
       this.band(Email.label(s.label) + Email.h2(s.headline) + Email.text(s.body, { mb: S1 }) + this.link(`${s.cta[0]} &#8594;`, href, 'story-link'), {
@@ -558,6 +559,61 @@ export class Email {
         part: 'story',
       }) + (s.photos?.length ? this.collage(s.photos, href) : s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo', 'story') : '')
     );
+  }
+
+  /**
+   * A charity reveal in the story spot: the charity's invite to watch it live, built like its own
+   * reveal email ("Join Us Live for Dylan’s Reveal Day!", Nov 16, 2026) in its identity: Dark Deep,
+   * a Sunshine Yellow date, the Libre Baskerville line with the key words in yellow italic, the family's
+   * photo, When / Where / Room, and its calendar links, which hold the day, the time and the link to
+   * watch, never the family's address. "Get an email" goes to the reveal page's own sign-up (the
+   * charity emails the day before, an hour before and when it goes live). Rules on Dark Deep are its
+   * muted gray, the only gray in the charity's palette (verify.mjs holds the section to it).
+   */
+  reveal(r) {
+    const row = (what, value, first = false, pb = 13) =>
+      `<tr><td style="padding:12px 0 ${pb}px;${first ? '' : `border-top:1px solid ${SOARD_MUTED};`}">` +
+      Email.label(what, { color: SOARD_YELLOW, mb: 4, font: OUTFIT, track: '0.12em' }) +
+      `<div style="font-family:${OUTFIT};font-size:17px;line-height:24px;font-weight:700;color:${WHITE};">${value}</div></td></tr>`;
+    const live =
+      `<a href="${escape(this.url(r.live, 'reveal-where'))}" target="_blank" style="display:inline-block;padding:10px 0;` +
+      `font-family:${OUTFIT};font-weight:700;color:${WHITE};text-decoration:underline;text-underline-offset:3px;">Live on the charity&#8217;s website</a>`;
+    // Three yellow pills sharing the column's width, so the row shrinks with a small phone instead of spilling off it.
+    // The charity's own calendar links, as they are (no tracking added: the file is the invite).
+    const pill = (text, href, pad) =>
+      `<td width="33.33%" style="padding:${pad};"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">` +
+      `<tr><td align="center" bgcolor="${SOARD_YELLOW}" style="background-color:${SOARD_YELLOW};border-radius:999px;">` +
+      `<a href="${escape(href)}" target="_blank" style="display:block;padding:12px 4px;font-family:${OUTFIT};font-size:15px;line-height:20px;font-weight:700;` +
+      `color:${SOARD_DARK};text-decoration:none;border-radius:999px;white-space:nowrap;">${text}</a></td></tr></table></td>`;
+    const pills = Email.T(
+      `<tr>${pill('Google', r.calendar.google, '0 4px 0 0')}${pill('Apple', r.calendar.apple, '0 2px')}${pill('Outlook', r.calendar.outlook, '0 0 0 4px')}</tr>`,
+      'width="100%" style="table-layout:fixed;"',
+    );
+    const remind =
+      `<a href="${escape(this.url(r.live, 'reveal-remind') + '#remind')}" target="_blank" style="display:inline-block;padding:12px 0;` +
+      `font-family:${OUTFIT};font-size:16px;line-height:20px;font-weight:700;color:${SOARD_YELLOW};text-decoration:underline;text-underline-offset:3px;">` +
+      `Email me when it starts&nbsp;&#8594;</a>`;
+    // 26/32 on a phone, 30/36 on a computer (.soard-h)
+    const headline =
+      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:26px;line-height:32px;font-weight:700;letter-spacing:-0.02em;color:${WHITE};mso-line-height-rule:exactly;">` +
+      `<span style="display:block;margin-bottom:6px;font-size:20px;line-height:26px;font-weight:400;font-style:italic;color:${SOARD_SOFT};">Join us live for</span>` +
+      `${r.name}&#8217;s <em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_YELLOW};">Reveal&nbsp;Day</em>.</h2>`;
+    const body =
+      Email.label(`Reveal Day &middot; ${r.short}`, { color: SOARD_YELLOW, mb: 12, font: OUTFIT, track: '0.16em' }) +
+      headline +
+      Email.gap(S3) +
+      // On the column, rounded like the charity's: 536 on a computer, up to 560 where the style block is gone
+      this.img(Email.photo(r.photo.src, 1072, 716), COLUMN, 358, r.photo.alt, r.live, 'reveal-photo', 16, '', WIDTH - 2 * PHONE_SIDE) +
+      Email.gap(S2) +
+      Email.T(row('When', `${r.long}<br>${r.time}`, true) + row('Where', live, false, 3) + row('Room', r.room)) +
+      Email.gap(S2) +
+      Email.text(noWidow(r.story), { size: 16, lh: 25, color: WHITE, mb: S3, font: OUTFIT }) +
+      Email.text('Save it to your calendar', { size: 15, lh: 20, weight: 700, color: WHITE, mb: 12, font: OUTFIT }) +
+      pills +
+      Email.gap(S1) +
+      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:20px;">${remind}</p>` +
+      Email.text('The reveal page turns into the live video the moment we&nbsp;start.', { size: 14, lh: 21, color: WHITE, font: OUTFIT });
+    return this.breather() + this.band(body, { bg: SOARD_DEEP, top: S5, bottom: S5, cls: 'soard', part: 'story' });
   }
 
   /**

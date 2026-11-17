@@ -254,7 +254,9 @@ for (const f of files) {
       const untagged = [...new Set([
         ...tagged('.tile-name', 'wall'), ...tagged('a[href*="utm_content=wall-"]', 'wall'),
         ...tagged('a[href*="utm_content=offer-button"]', 'offer'), ...tagged('a[href*="utm_content=story-"]', 'story'),
-        ...tagged('[bgcolor="#2B7A96"]', 'events'), ...tagged('td.soard', 'mission'),
+        // The charity's look is its section's, and a reveal invite's in the story spot (Email.reveal)
+        ...tagged('[bgcolor="#2B7A96"]', 'events'), ...tagged('td.soard:not([data-part="story"])', 'mission'),
+        ...tagged('a[href*="utm_content=reveal-"]', 'story'),
       ])];
       return {
         unlabeled, longNames, untagged,

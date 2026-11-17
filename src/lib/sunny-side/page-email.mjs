@@ -12,12 +12,12 @@ import { briefParts } from './parts.mjs';
 import { PICKS, previewWall } from './wall.mjs';
 
 /**
- * @param {{ sale: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], catalog: Map<string, any> | null, events: any[], impact: { rooms: string, children: string } | null, send: string, site: string }} week
+ * @param {{ sale: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], reveals?: any[], catalog: Map<string, any> | null, events: any[], impact: { rooms: string, children: string } | null, send: string, site: string }} week
  *   sale as the email takes it (toSale/draftSale); events already brief events; photos the library by id.
  */
-export function pageEmail({ sale, wall, parts, photos, kids, catalog, events, impact, send, site }) {
+export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catalog, events, impact, send, site }) {
   /** @type {Record<string, any>} */
-  const brief = { send_date: send, sale, ...briefParts(parts, { sale, photos, kids }) };
+  const brief = { send_date: send, sale, ...briefParts(parts, { sale, photos, kids, reveals }) };
   // A subject that promises more than the sale can't be drawn; the page says why beside the field
   try {
     lines(brief);
@@ -48,9 +48,9 @@ export function pageEmail({ sale, wall, parts, photos, kids, catalog, events, im
  * fixes each, or [] when it's ready: a sale, 4 to 9 products that pass their checks, and the parts
  * the finished email needs.
  * @returns {{ text: string, section: string }[]}
- * @param {{ special: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], catalog: Map<string, any> | null, send: string, check: Function, checkWall: Function, checkParts: Function, sale: any }} week
+ * @param {{ special: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], reveals?: any[] | null, catalog: Map<string, any> | null, send: string, check: Function, checkWall: Function, checkParts: Function, sale: any }} week
  */
-export function kitProblems({ special, wall, parts, photos, kids, catalog, send, check, checkWall, checkParts, sale }) {
+export function kitProblems({ special, wall, parts, photos, kids, reveals = null, catalog, send, check, checkWall, checkParts, sale }) {
   const out = [];
   const add = (text, section) => out.push({ text, section });
   if (!special) add('Set the sale.', 'em-sale');
@@ -58,10 +58,13 @@ export function kitProblems({ special, wall, parts, photos, kids, catalog, send,
   const n = wall?.picks.length ?? 0;
   if (n < PICKS[0]) add(`Pick ${PICKS[0] - n} more product${PICKS[0] - n === 1 ? '' : 's'}.`, 'em-products');
   else if (Object.keys(checkWall(wall, { catalog: catalog ?? undefined, send })).length) add('Fix the products.', 'em-products');
-  const e = checkParts(parts, { sale, photos, kids, ready: true });
+  const e = checkParts(parts, { sale, photos, kids, reveals, ready: true });
   if (e.photos || e['story.photos']) add(e.photos || 'Fix the story’s photos.', 'em-photos');
   if (e['story.headline'] || e['story.body']) add('Write the story.', 'em-story');
-  else if (Object.keys(e).some((k) => k.startsWith('story.') && k !== 'story.photos')) add('Fix the story.', 'em-story');
+  else if (Object.keys(e).some((k) => k.startsWith('story.') && k !== 'story.photos')) add(e['story.reveal'] || 'Fix the story.', 'em-story');
+  // A reveal invite can't go out after the reveal
+  const reveal = parts.story?.reveal && reveals?.find((r) => r.slug === parts.story.reveal);
+  if (reveal && reveal.day < send) add(`${reveal.name}’s reveal was ${reveal.short}, before this email goes out. Pick another, or the showroom story.`, 'em-story');
   if (e.kid) add(e.kid, 'em-charity');
   if (e.subject || e.preheader) add(e.subject && !parts.subject ? 'Write the subject line.' : 'Fix the subject line.', 'em-lines');
   return out;

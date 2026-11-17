@@ -10,7 +10,7 @@ import { eventsFrom } from '@/lib/sunny-side/event-store.mjs';
 import { pastWeeks, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { IMPACT_PAGE, impactFromPage } from '@/lib/sunny-side/impact.mjs';
 import { broadcastUrl, kitClient, statusOf, subscriberCount, usualTime } from '@/lib/sunny-side/kit.mjs';
-import { listRevealedKids } from '@/lib/sunny-side/kids.mjs';
+import { listRevealedKids, listUpcomingReveals } from '@/lib/sunny-side/kids.mjs';
 import { blankParts } from '@/lib/sunny-side/parts.mjs';
 import { listPhotos, photosByIds } from '@/lib/sunny-side/photo-store.mjs';
 import { testPeople } from '@/lib/sunny-side/testers.mjs';
@@ -59,13 +59,23 @@ async function kidsNow() {
   }
 }
 
-const [past, events, testList, library, impact, kids, usual, subscribers] = await Promise.all([
+/** The charity's reveals still ahead, for the story spot; none if its database or site doesn't answer. */
+async function revealsNow() {
+  try {
+    return await listUpcomingReveals(env.SOARD_DB, today);
+  } catch {
+    return [];
+  }
+}
+
+const [past, events, testList, library, impact, kids, reveals, usual, subscribers] = await Promise.all([
   pastWeeks(db, send, 12),
   eventsFrom(db, today),
   listPeople(db),
   listPhotos(db, 80),
   impactNow(),
   kidsNow(),
+  revealsNow(),
   fromKit('usual time', () => usualTime(kit!)),
   fromKit('subscriber count', () => subscriberCount(kit!)),
 ]);
@@ -105,6 +115,7 @@ const props = {
   kitSend,
   tests,
   kids,
+  reveals,
   usualTime: usual,
   subscribers: Number.isFinite(subscribers) ? subscribers : null,
   impact,
