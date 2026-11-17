@@ -171,8 +171,9 @@ for (const f of files) {
       // Text that spills out of its own box: into a neighbor's padding, a rule, or off the email.
       const spill = [...document.querySelectorAll('p,h1,h2,.tile-name,.tile-price')].filter(t => t.getBoundingClientRect().width && t.scrollWidth > t.clientWidth + 1)
         .map(t => `"${t.textContent.trim().slice(0, 12)}"`);
-      // HTML codes that ended up as visible text (an escaped or mangled &nbsp;, &amp;, &#8594; ...).
-      const codes = [...new Set(document.body.innerText.match(/&[a-z]+;|&#x?[0-9a-f]+;/gi) || [])];
+      // HTML codes that ended up as text (an escaped or mangled &nbsp;, &amp;, &#8594; ...), hidden text
+      // too: the preview line an inbox shows is hidden in the email, and the title is the subject.
+      const codes = [...new Set(`${document.body.textContent} ${document.title}`.match(/&[a-z]+;|&#x?[0-9a-f]+;/gi) || [])];
       // Every product on the wall is shoppable at a glance: one link with its name and price, and the
       // name fits two lines.
       const tiles = links.filter(a => /utm_content=wall-\d/.test(a.getAttribute('href')));
@@ -188,6 +189,8 @@ for (const f of files) {
         broken: [...document.images].filter(i => !i.naturalWidth).length,
         headingsOk: heads.filter(x => x === 'H1').length === 1 && heads[0] === 'H1',
         offerY: offer ? Math.round(offer.getBoundingClientRect().bottom + scrollY) : null,
+        // The sale's fine print goes under its button, never beside it (a floated button let it ride up)
+        beside: Boolean(offer && document.querySelector('.fine') && document.querySelector('.fine').getBoundingClientRect().top < offer.getBoundingClientRect().bottom - 1),
       };
     }, [BRAND, CHARITY]);
     const name = f.split('/').pop().replace('.html', '');
@@ -201,7 +204,8 @@ for (const f of files) {
       m.unlabeled && `${m.unlabeled} products without a name and price`,
       m.longNames.length && 'product names over two lines ' + m.longNames.join(' '),
       r.w < 600 && m.offerY > FIRST_SCREEN && `sale button below the first screen (${m.offerY}px)`,
-      m.offerY === null && 'no sale button'].filter(Boolean);
+      m.offerY === null && 'no sale button',
+      m.beside && 'fine print beside the sale button, not under it'].filter(Boolean);
     if (problems.length) failures++;
     console.log(`${problems.length ? 'FAIL' : 'pass'}  ${name.padEnd(34)} ${r.n.padEnd(14)} ${(m.h / 700).toFixed(2)} screens  sale button ${m.offerY ?? '-'}px  ${problems.join('; ')}`);
     await ctx.close();

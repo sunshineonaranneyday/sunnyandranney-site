@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { NEW_DAYS, NO_PHOTO_WHY, SHOWS, SORTS, haystack, matches, needsShortName, unpickable } from '@/lib/sunny-side/catalog.mjs';
 import { NAME_MAX } from '@/lib/sunny-side/product.mjs';
-import { PICKS, ROWS, WALL_DEFAULTS, WALL_LIMITS, arrange, shortName, tileName } from '@/lib/sunny-side/wall.mjs';
+import { PICKS, ROWS, WALL_DEFAULTS, WALL_LIMITS, arrange, tileNames } from '@/lib/sunny-side/wall.mjs';
 import { type Catalog, type Pick, type Product, type Wall, fieldId, thumb, usd } from './model';
 import { Counter, FieldError, useFlip } from './parts';
 import { X } from './Sale';
@@ -34,6 +34,8 @@ export function Products({ wall, setWall, catalog, collections, catalogProblem, 
   const [drag, setDrag] = useState<{ from: number; over: number | null } | null>(null);
   const picks = wall.picks;
   const n = picks.length;
+  // What each tile says: hers, else the store's, else shortened for her, never two alike (wall.mjs)
+  const names = tileNames(picks, catalog ?? undefined);
   const rows = ROWS[n as keyof typeof ROWS] as number[] | undefined;
 
   /** Changes the picks; while the wall is arranged for her, it's arranged again. */
@@ -43,10 +45,8 @@ export function Products({ wall, setWall, catalog, collections, catalogProblem, 
     const k = picks.findIndex((x) => x.handle === p.handle);
     if (k >= 0) return change(picks.filter((_, i) => i !== k));
     if (n >= PICKS[1]) return;
-    // A suggested short name that another tile already says would make two tiles look alike, so she writes one
-    const taken = new Set(picks.map((x) => tileName(x, catalog?.get(x.handle)).toLowerCase()));
-    const suggested = needsShortName(p) ? shortName(p.name) : '';
-    change([...picks, { handle: p.handle, photo: p.photos[0].url, name: taken.has(suggested.toLowerCase()) ? '' : suggested }]);
+    // No name stored: every tile's name is worked out from all the picks together (tileNames), shortened for her
+    change([...picks, { handle: p.handle, photo: p.photos[0].url, name: '' }]);
   };
   const move = (from: number, to: number) => {
     if (to < 0 || to >= n || from === to) return;
@@ -114,6 +114,7 @@ export function Products({ wall, setWall, catalog, collections, catalogProblem, 
                   <Tile
                     key={picks[i].handle}
                     pick={picks[i]}
+                    shownName={names[i]}
                     index={i}
                     count={n}
                     wide={Boolean(rows) && row.length === 1}
@@ -172,6 +173,8 @@ export function Products({ wall, setWall, catalog, collections, catalogProblem, 
 
 interface TileProps {
   pick: Pick;
+  /** The name the tile shows (tileNames): hers, the store's, or shortened for her. */
+  shownName: string;
   index: number;
   count: number;
   wide: boolean;
@@ -189,8 +192,8 @@ interface TileProps {
 }
 
 /** One product as the email shows it: the photo cropped the email's way, the name and price, and its controls. */
-function Tile({ pick, index, count, wide, product, loading, error, longName, dragging, target, onDragStart, onMove, onRemove, onPhoto, onName }: TileProps) {
-  const name = tileName(pick, product) || (loading ? 'Loading…' : pick.handle);
+function Tile({ pick, shownName, index, count, wide, product, loading, error, longName, dragging, target, onDragStart, onMove, onRemove, onPhoto, onName }: TileProps) {
+  const name = shownName || product?.name || (loading ? 'Loading…' : pick.handle);
   const photos = product?.photos ?? [];
   const at = photos.findIndex((p) => p.url === pick.photo);
   const step = (d: number) => photos.length > 1 && onPhoto(photos[(Math.max(at, 0) + d + photos.length) % photos.length].url);
@@ -239,7 +242,8 @@ function Tile({ pick, index, count, wide, product, loading, error, longName, dra
             <label for={nameId}>
               Name on the tile <Counter value={pick.name} limit={NAME_MAX} />
             </label>
-            <input id={nameId} value={pick.name} placeholder={product?.name} onInput={(e) => onName((e.target as HTMLInputElement).value)} />
+            <input id={nameId} value={pick.name} placeholder={shownName || product?.name} onInput={(e) => onName((e.target as HTMLInputElement).value)} />
+            {!pick.name && shownName && shownName !== product?.name && !longName && !error && <p class="em-hint">Shortened for the tile. Type to change it.</p>}
             {longName && !error && <p class="em-error">Runs past two lines on a small phone. Shorten it.</p>}
           </div>
         )}

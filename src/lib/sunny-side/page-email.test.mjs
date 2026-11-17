@@ -129,9 +129,15 @@ test('the subject and preview line go to Kit as plain text, never HTML codes an 
   // As week-email.ts hands them to Kit: an apostrophe is ’, not "&#8217;", and & is &
   const p = cleanParts({ subject: "Santa's here & so is {upto} off", preheader: "Kids' crafts every Saturday" });
   const sale = { kind: 'percent', percent: 20, what: 'everything.' };
-  const l = lines({ ...briefParts(p, { sale, photos: new Map(), kids: [] }), sale });
-  assert.match(l.subject, /&#8217;/, 'the brief itself is HTML');
-  assert.deepEqual({ subject: plain(l.subject), preheader: plain(l.preheader) }, { subject: 'Santa’s here & so is 20% off', preheader: 'Kids’ crafts every Saturday' });
+  const brief = { ...briefParts(p, { sale, photos: new Map(), kids: [] }), sale, send_date: '2026-11-17' };
+  const l = lines(brief);
+  assert.deepEqual(l, { subject: 'Santa’s here & so is 20% off', preheader: 'Kids’ crafts every Saturday' }, 'plain text, curly quotes as characters');
+  assert.deepEqual({ subject: plain(l.subject), preheader: plain(l.preheader) }, l, 'and plain() leaves plain text alone');
+  // The email escapes them once: its title and hidden preview line read as written, never "&amp;#8217;"
+  const html = render(brief, ['masthead']);
+  assert.match(html, /<title>Santa’s here &amp; so is 20% off<\/title>/);
+  assert.match(html, />Kids’ crafts every Saturday&#847;/);
+  assert.doesNotMatch(html, /&amp;(#\d+|[a-z]+);/, 'nothing escaped twice anywhere');
   assert.equal(plain('&lt;3 &amp;amp; &quot;x&quot;&nbsp;y'), '<3 &amp; "x" y', '&amp; last: nothing decoded twice');
 });
 
