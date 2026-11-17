@@ -50,7 +50,14 @@ test('the whole email from the admin: every part in order, the store’s photos 
   assert.match(html, /Christmas is&nbsp;here\./);
   assert.match(html, /utm_content=story-photo-3/);
   assert.match(html, />233</); // the charity's numbers
-  assert.match(html, /\{\{ unsubscribe_url \}\}/); // Kit's tags stay for Kit
+  // Kit fills one thing, the unsubscribe link's address, which only it can make for each subscriber.
+  // Nothing else is left for Kit: a {{ tag }} anywhere a reader sees it showed as those words in the
+  // Nov 16, 2026 test ("{{ address }}"), and in the admin's preview.
+  assert.deepEqual([...html.matchAll(/\{\{[^}]*\}\}|\{%[^%]*%\}/g)].map((m) => m[0]), ['{{ unsubscribe_url }}']);
+  assert.match(html, /href="\{\{ unsubscribe_url \}\}"[^>]*>Unsubscribe</);
+  const shown = html.replace(/<style[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ');
+  assert.doesNotMatch(shown, /\{\{|\{%/, 'no Kit tag shows as text');
+  assert.match(shown, /Sunny &amp; Ranney &middot; 109A Oak Street, Roswell, GA&nbsp;30075/); // the store's mailing address, written in
   // Nothing written yet: the store's wide shot, no story, the charity's most recent reveal
   const bare = pageEmail({ sale, wall: wallOf(4), parts: blankParts(), photos, kids, catalog, events: [], impact: null, send: SEND, site: SITE });
   assert.deepEqual(bare.sections, ['masthead', 'hero', 'offer', 'wall', 'mission', 'visit', 'footer']);
