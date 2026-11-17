@@ -79,6 +79,18 @@ test('a week saved while the reveal took the story’s place keeps both: the rev
   assert.match(html, /data-part="reveal"/);
 });
 
+test('the reveal opens with the charity’s logo, centered over the date and headline, as its own invite does', () => {
+  const brief = { send_date: '2026-11-17', ...briefParts(cleanParts({ subject: 'Hi', reveal: 'dylan-2026' }), { sale: null, photos: new Map(), reveals }) };
+  const html = render(brief, ['reveal']);
+  const at = html.indexOf('data-part="reveal"');
+  const logo = html.indexOf('brand-logo-dark-bg-tagline-display', at);
+  assert.ok(at > -1 && logo > at, 'the logo is in the reveal');
+  assert.ok(logo < html.indexOf('Reveal Day &middot;', at), 'above the date');
+  assert.match(html, /utm_content=reveal-logo"[^>]*class="soard-mark"[^>]*><img class="soard-logo soard-mark" [^>]*width="96" height="90" alt="Sunshine on a Ranney Day"/);
+  assert.match(html, /text-align:center;">Reveal Day &middot; Wed, Nov 18<\/p>/);
+  assert.match(html, /<h2 class="soard-h soard-serif" [^>]*text-align:center;/);
+});
+
 test('a week can go with the reveal and no story, but a story started needs its words', () => {
   assert.deepEqual(checkParts(cleanParts({ subject: 'Hi', reveal: 'dylan-2026' }), { reveals, ready: true }), {});
   // Photos picked but nothing written: "Your headline" would go out
