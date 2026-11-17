@@ -104,9 +104,11 @@ export function checkParts(p, { sale = null, photos = null, kids = null, reveals
   }
   if (s.photos.length > COLLAGE_MAX) e['story.photos'] = `The collage holds ${COLLAGE_MAX} photos at most. Take ${s.photos.length - COLLAGE_MAX} out.`;
   if (photos) {
-    const gone = [p.hero, ...s.photos].filter((id) => id && !photos.has(id));
+    // A reveal in the story spot leaves the collage out, so only the photos the email uses are held to it
+    const used = [p.hero, ...(s.reveal ? [] : s.photos)];
+    const gone = used.filter((id) => id && !photos.has(id));
     if (gone.length) e.photos = 'A photo this email uses isn’t in the library anymore. Pick another.';
-    const noAlt = [p.hero, ...s.photos].filter((id) => id && photos.get(id) && !photos.get(id).alt);
+    const noAlt = used.filter((id) => id && photos.get(id) && !photos.get(id).alt);
     if (noAlt.length) e.photos = `${noAlt.length === 1 ? 'A photo' : `${noAlt.length} photos`} in the email need${noAlt.length === 1 ? 's' : ''} a few words saying what’s in ${noAlt.length === 1 ? 'it' : 'them'}, for people who can’t see images.`;
   }
   if (kids) {

@@ -24,6 +24,8 @@ interface Props {
   setOrder: (ids: string[]) => void;
   move: (k: number, by: number) => void;
   local: boolean;
+  /** The collage isn't in this week's email (a reveal has the story spot): drawn faded, nothing to change */
+  off?: boolean;
 }
 
 /**
@@ -31,7 +33,7 @@ interface Props {
  * each drawn with her own photos so she can see which suits them. The one that keeps the most of her
  * photos is marked "Best fit"; nothing picked means that one.
  */
-export function CollageLayouts({ ids, byId, chosen, setChosen, setOrder, move, local }: Props) {
+export function CollageLayouts({ ids, byId, chosen, setChosen, setOrder, move, local, off = false }: Props) {
   const n = ids.length;
   const ratios = ids.map((id) => ratioOf(byId.get(id)));
   const current = layoutFor(chosen, ratios);
@@ -51,7 +53,7 @@ export function CollageLayouts({ ids, byId, chosen, setChosen, setOrder, move, l
   const cells = place(current.tree);
 
   return (
-    <div class="em-layouts">
+    <div class={`em-layouts${off ? ' is-off' : ''}`}>
       <ol class="em-bento" ref={box} style={{ aspectRatio: `600 / ${H.toFixed(3)}` }} aria-label={`The collage: ${current.name}`}>
         {ids.map((id, k) => {
           const c = cells[k];
@@ -67,6 +69,7 @@ export function CollageLayouts({ ids, byId, chosen, setChosen, setOrder, move, l
                 type="button"
                 class="em-bento-photo"
                 aria-pressed={picked === id}
+                disabled={off}
                 aria-label={`${cellWords(current.tree, k)}${p?.alt ? `: ${p.alt}` : ''}`}
                 onClick={() => setPicked(picked === id ? null : id)}
               >
@@ -77,7 +80,7 @@ export function CollageLayouts({ ids, byId, chosen, setChosen, setOrder, move, l
           );
         })}
       </ol>
-      {n > 1 && (
+      {n > 1 && !off && (
         <div class="em-bento-bar" aria-live="polite">
           {at >= 0 ? (
             <>
@@ -97,7 +100,7 @@ export function CollageLayouts({ ids, byId, chosen, setChosen, setOrder, move, l
           )}
         </div>
       )}
-      {gain >= 3 && (
+      {gain >= 3 && !off && (
         <p class="em-fit">
           <span>Some photos are cropped more than they need to be.</span>
           <button type="button" class="btn" onClick={() => setOrder(fitted.items)}>
@@ -106,7 +109,7 @@ export function CollageLayouts({ ids, byId, chosen, setChosen, setOrder, move, l
         </p>
       )}
 
-      {list.length > 1 && (
+      {list.length > 1 && !off && (
         <div class="em-layout-pick" role="radiogroup" aria-label={`Layouts for ${n} photos`}>
           {list.map((l) => {
             const on = l.id === current.id;

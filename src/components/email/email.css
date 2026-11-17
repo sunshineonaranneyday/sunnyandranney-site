@@ -316,6 +316,12 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-bento-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.5rem; min-height: 44px; }
 .em-bento-bar .em-hint { margin: 0; }
 .em-bento-which { font-weight: 700; font-size: 0.875rem; margin-right: 0.25rem; }
+/* A reveal has the story spot: the collage is kept but left out of the email, and drawn so */
+.em-off-note { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0 0 0.75rem; padding: 0.75rem 0.875rem; border-radius: var(--r-md); background: var(--panel); border: 1px solid var(--line); font-size: 0.875rem; color: var(--ink-2); }
+.em-off-note span { flex: 1 1 14rem; }
+.em-off-note .btn { min-height: 44px; }
+.em-layouts.is-off .em-bento { opacity: 0.45; filter: grayscale(0.6); }
+.em-layouts.is-off .em-bento-photo { cursor: default; }
 .em-fit { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.75rem; font-size: 0.875rem; color: var(--ink-2); margin: 0; }
 /* The layouts for this many photos, each drawn with her photos */
 .em-layout-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); gap: 0.5rem; }

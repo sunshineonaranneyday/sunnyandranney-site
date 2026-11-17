@@ -40,6 +40,8 @@ interface Props {
   setParts: (change: (p: Parts) => Parts) => void;
   error?: string;
   local: boolean;
+  /** The charity reveal in the story spot this week, which leaves the collage out of the email */
+  reveal?: { name: string } | null;
 }
 
 /** True when what's being dragged holds files (not text or a link from the page). */
@@ -50,7 +52,7 @@ const holdsFiles = (e: DragEvent) => Boolean(e.dataTransfer?.types.includes('Fil
  * kept in the store's library, and used as the email's top photo and the story's collage. Each has
  * a few words for people who can't see it.
  */
-export function Photos({ photos, setPhotos, parts, setParts, error, local }: Props) {
+export function Photos({ photos, setPhotos, parts, setParts, error, local, reveal = null }: Props) {
   const [uploading, setUploading] = useState<{ done: number; of: number } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [alts, setAlts] = useState<Record<string, string>>({});
@@ -184,7 +186,17 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
       <FieldError id="em-photos-error" message={error} />
 
       <fieldset class="em-collage">
-        <legend>The story’s collage{layout ? ` · ${layout.name}` : ''}</legend>
+        <legend>The story’s collage{parts.story.reveal ? ' · Not in this email' : layout ? ` · ${layout.name}` : ''}</legend>
+        {parts.story.reveal && (
+          <p class="em-off-note">
+            <span>
+              This week the story spot is {reveal ? `${reveal.name}’s reveal` : 'the charity’s reveal'}, so the collage isn’t in the email. Its photos and layout stay saved for the showroom story.
+            </span>
+            <a class="btn btn-small" href="#em-story">
+              Change the story spot
+            </a>
+          </p>
+        )}
         {story.length ? (
           <CollageLayouts
             ids={story}
@@ -194,6 +206,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
             setOrder={(ids) => setStory(() => ids)}
             move={move}
             local={local}
+            off={Boolean(parts.story.reveal)}
           />
         ) : (
           <p class="em-hint">Tick “In the story” on up to {COLLAGE_MAX} photos below.</p>

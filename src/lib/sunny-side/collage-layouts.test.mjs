@@ -127,3 +127,18 @@ test('each photo’s spot in words, for a screen reader', () => {
   assert.equal(cellWords(t(1, 'wide'), 0), 'photo 1 of 1, full width, wide');
   assert.equal(cellWords(t(5, 'tall-row'), 4), 'photo 5 of 5, bottom right, wide');
 });
+
+test('with a reveal in the story spot the collage is left out, so its photos aren’t held to the email’s checks', async () => {
+  const { checkParts } = await import('./parts.mjs');
+  const ids = ['aaaaaaaaaaaa1', 'aaaaaaaaaaaa2'];
+  const photos = new Map([
+    [ids[0], { id: ids[0], w: 1800, h: 2400, alt: 'The tree by the door' }],
+    [ids[1], { id: ids[1], w: 1800, h: 2400, alt: '' }],
+  ]);
+  const week = (reveal) => cleanParts({ hero: ids[0], story: { headline: 'h', body: 'b', photos: ids, reveal } });
+  assert.match(checkParts(week(''), { photos }).photos, /A photo in the email needs a few words/);
+  assert.equal(checkParts(week('dylan'), { photos }).photos, undefined);
+  // The top photo is still in the email either way
+  const bareHero = new Map(photos).set(ids[0], { ...photos.get(ids[0]), alt: '' });
+  assert.match(checkParts(week('dylan'), { photos: bareHero }).photos, /A photo in the email needs/);
+});

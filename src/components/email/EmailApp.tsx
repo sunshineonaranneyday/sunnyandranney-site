@@ -461,8 +461,8 @@ export default function EmailApp(props: AppProps) {
             <Subject parts={parts} setParts={setParts} sale={saleOk ? sale : null} shown={shownParts} />
           </Section>
 
-          <Section n={2} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.photos.length} in the story`} tone={partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok'}>
-            <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} />
+          <Section n={2} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.reveal ? 'no collage this week' : `${story.photos.length} in the story`}`} tone={partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok'}>
+            <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} reveal={reveal} />
           </Section>
 
           <Section n={3} id="em-sale" locked={locked} title="The sale" state={saleState.state} tone={saleState.tone}>
