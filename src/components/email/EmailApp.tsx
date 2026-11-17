@@ -337,11 +337,15 @@ export default function EmailApp(props: AppProps) {
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return;
     const onScreen = new Set<Element>();
+    // On a phone the preview is a sheet over the page (below), there whether open or not: it never counts.
+    // Worked out again when the screen changes size: an iPad turned upright makes the preview a sheet
+    // without moving it, and the button stayed hidden as if the preview were still in view.
+    const update = () => setSeesPreview([...onScreen].some((el) => getComputedStyle(el).position !== 'fixed'));
     const seen = (entries: IntersectionObserverEntry[]) => {
-      // On a phone the preview is a sheet over the page (below), there whether open or not: it never counts
-      for (const e of entries) e.isIntersecting && getComputedStyle(e.target).position !== 'fixed' ? onScreen.add(e.target) : onScreen.delete(e.target);
-      setSeesPreview(onScreen.size > 0);
+      for (const e of entries) e.isIntersecting ? onScreen.add(e.target) : onScreen.delete(e.target);
+      update();
     };
+    window.addEventListener('resize', update);
     // The preview counts once it fills the lower part of the screen; Send as soon as any of it shows
     const watches = [
       ['em-preview', '0px 0px -25% 0px'],
@@ -353,7 +357,10 @@ export default function EmailApp(props: AppProps) {
       w.observe(el);
       return [w];
     });
-    return () => watches.forEach((w) => w.disconnect());
+    return () => {
+      watches.forEach((w) => w.disconnect());
+      window.removeEventListener('resize', update);
+    };
   }, []);
 
   // On a phone or upright iPad the preview is a sheet over the page: "See the preview" opens it at the
@@ -363,9 +370,18 @@ export default function EmailApp(props: AppProps) {
   const [previewing, setPreviewing] = useState(false);
   const jump = useRef<HTMLButtonElement>(null);
   const back = useRef<HTMLButtonElement>(null);
+  // Whatever opened the preview gets focus back when it closes: the button, or, if it isn't showing, what had focus
+  const opener = useRef<HTMLElement | null>(null);
+  const openPreview = () => {
+    opener.current = document.activeElement as HTMLElement | null;
+    setPreviewing(true);
+  };
   const closePreview = () => {
     setPreviewing(false);
-    requestAnimationFrame(() => jump.current?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => {
+      const to = [jump.current, opener.current].find((el) => el?.isConnected && getComputedStyle(el).visibility === 'visible' && getComputedStyle(el).display !== 'none');
+      to?.focus({ preventScroll: true });
+    });
   };
   useEffect(() => {
     if (!previewing) return;
@@ -609,7 +625,7 @@ export default function EmailApp(props: AppProps) {
           <Preview focus={focus} brief={brief} sections={sections} problem={null} checks={checks} onFit={setFit} />
         </div>
       </div>
-      <button type="button" class="em-jump btn btn-dark" ref={jump} aria-haspopup="dialog" onClick={() => setPreviewing(true)}>
+      <button type="button" class="em-jump btn btn-dark" ref={jump} aria-haspopup="dialog" onClick={openPreview}>
         See the preview
       </button>
     </div>
