@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Miniflare } from 'miniflare';
 import { Email, lines, plain, render, usePhotoOrigin } from './email.mjs';
 import { broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, statusOf, subscriberCount, templateFor, usualTime } from './kit.mjs';
-import { cfIdOf, kidFor, missionOf, photosDate, revealedKids, roomsPhrase } from './kids.mjs';
+import { KID_PHOTOS, cfIdOf, kidFor, missionOf, photosDate, photosOf, revealedKids, roomsPhrase } from './kids.mjs';
 import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
 import { DEFAULT_HERO, arrangeCollage, blankParts, briefParts, checkParts, cleanParts, linesOf } from './parts.mjs';
@@ -338,6 +338,42 @@ test('the charity’s kids: the most recent reveal first, by its recorded date, 
   assert.equal(cfIdOf('https://elsewhere.com/a.jpg'), null);
   assert.equal(roomsPhrase(['Chair Lift', 'Dream Bedroom', 'Accessible Bathroom']), 'chair lift, dream bedroom and accessible bathroom');
   assert.equal(photosDate([{ url: '/kids/x/photo-11/public' }]), null);
+});
+
+test('a family’s photos: the finished room first, then their page’s photo, accent and gallery, each once', () => {
+  const cf = (n) => `https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ/kids/ava/${n}/public`;
+  const d = {
+    beforeAfterPhotos: [{ before: cf('before-1'), after: cf('after-1'), afterAlt: 'Ava’s new bathroom, with its roll-in shower' }, { after: cf('after-2') }, { after: 'https://elsewhere.com/x.jpg' }],
+    heroImage: cf('hero'),
+    accentImage: cf('after-2'),
+    photos: [{ url: cf('hero'), alt: 'Ava laughing' }, { url: cf('g-1'), alt: '' }, { url: cf('after-1') }, ...Array.from({ length: 40 }, (_, i) => ({ url: cf(`g-${i + 2}`) }))],
+  };
+  const photos = photosOf(d, 'Ava’s new accessible bathroom');
+  assert.deepEqual(photos.slice(0, 4), [
+    { src: 'cf:kids/ava/after-1', alt: 'Ava’s new bathroom, with its roll-in shower', after: true },
+    { src: 'cf:kids/ava/after-2', alt: 'Ava’s new accessible bathroom', after: true },
+    { src: 'cf:kids/ava/hero', alt: 'Ava laughing' },
+    { src: 'cf:kids/ava/g-1', alt: 'Ava’s new accessible bathroom' },
+  ]);
+  assert.equal(photos.length, KID_PHOTOS);
+  assert.equal(new Set(photos.map((p) => p.src)).size, photos.length);
+
+  // The family as the page gets it starts on the finished room; a family without one, on their page's photo
+  const [withRoom] = revealedKids([{ slug: 'ava', name: 'Ava', status: 'completed', data: JSON.stringify({ ...d, heroSummary: 'Ava got a new bathroom.', roomTypes: ['Accessible Bathroom'] }) }], [], '2026-11-16');
+  assert.equal(withRoom.photo.src, 'cf:kids/ava/after-1');
+  assert.equal(kids[0].photo.src, 'cf:kids/ava/1791000000000-a.jpg');
+  assert.ok(!kids[0].photo.after);
+
+  // The photo she picks goes in the email; one no longer on their page falls back to the finished room
+  assert.equal(missionOf(withRoom, 'cf:kids/ava/g-1').photo.src, 'cf:kids/ava/g-1');
+  assert.equal(missionOf(withRoom, 'cf:kids/ava/gone').photo.src, 'cf:kids/ava/after-1');
+  const brief = (kidPhoto) => briefParts(cleanParts({ kid: 'ava', kidPhoto }), { sale, photos: new Map(), kids: [withRoom] }).mission.photo.src;
+  assert.equal(brief('cf:kids/ava/hero'), 'cf:kids/ava/hero');
+  assert.equal(brief(''), 'cf:kids/ava/after-1');
+  // Only a photo id of the charity's is kept
+  assert.equal(cleanParts({ kidPhoto: 'https://evil.com/x.jpg' }).kidPhoto, '');
+  assert.equal(cleanParts({ kidPhoto: 'cf:kids/ava/../x' }).kidPhoto, '');
+  assert.equal(cleanParts({ kidPhoto: 'cf:kids/ava/photo-09' }).kidPhoto, 'cf:kids/ava/photo-09');
 });
 
 test('the people who check it: the sender first as “You”, then the list by name', () => {

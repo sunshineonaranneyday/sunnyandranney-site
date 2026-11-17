@@ -89,7 +89,7 @@ const OUTFIT = "'Outfit', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 // It's served as the "public" variant because Cloudflare turns resized opaque PNGs into JPEGs,
 // which smudge the warm gray around the lettering.
 const SOARD_LOGO = `${CF}/email/soard-logo-warm-tile/public`;
-const LOGO_INSET = 6; // the tile's margin at 132px wide (20 of 436), taken out of the padding around it
+const LOGO_W = 88; // the charity's logo, small: it signs the section, the headline leads it
 const SOARD_HOME = 'https://sunshineonaranneyday.com/';
 // The site's highlighter behind its key italic word: Sunshine Yellow at 30% over the lower half.
 const HIGHLIGHT = 'linear-gradient(rgba(255,218,36,0) 52%, rgba(255,218,36,0.3) 52%)';
@@ -733,29 +733,35 @@ export class Email {
    */
   mission() {
     const m = this.b.mission;
+    // Compact, about one phone screen (it was nearly two): a small logo, the charity's line, the
+    // finished room, the family's story in the charity's own words with its caption run in, and a text
+    // link, so the store's sale stays the email's one big button.
     const logo =
-      `<a href="${escape(this.url(SOARD_HOME, 'charity-logo'))}" target="_blank" style="display:block;width:132px;color:${SOARD_DARK};">` +
-      `<img class="soard-logo" src="${SOARD_LOGO}" width="132" height="121" alt="Sunshine on a Ranney Day" ` +
-      `style="display:block;width:132px;height:auto;border:0;border-radius:8px;"></a>`;
-    // The logo's own row, its padding short by the tile's margin, so the lettering sits exactly where
-    // a transparent logo's would: on the column, 40px down (32 and 20 on phones, via ptl and pxl).
-    const logoRow = this.band(logo, { bg: SOARD_WARM, top: S5 - LOGO_INSET, side: S4 - LOGO_INSET, bottom: 0, cls: 'soard ptl pxl' });
+      `<a href="${escape(this.url(SOARD_HOME, 'charity-logo'))}" target="_blank" style="display:block;width:${LOGO_W}px;color:${SOARD_DARK};">` +
+      `<img class="soard-logo" src="${SOARD_LOGO}" width="${LOGO_W}" height="${Math.round((LOGO_W * 121) / 132)}" alt="Sunshine on a Ranney Day" ` +
+      `style="display:block;width:${LOGO_W}px;height:auto;border:0;border-radius:6px;"></a>`;
     const headline =
-      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:34px;line-height:40px;font-weight:700;` +
+      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:30px;line-height:36px;font-weight:700;` +
       `letter-spacing:-0.02em;color:${SOARD_DARK};mso-line-height-rule:exactly;">Every purchase builds a&nbsp;` +
       `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_DARK};background-image:${HIGHLIGHT};">` +
       `dream&nbsp;room</em>.</h2>`;
-    const hero = this.band(
+    const words = (m.caption ? `<strong style="font-weight:700;">${m.caption}</strong> ` : '') + noWidow(m.story);
+    const link =
+      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:24px;">` +
+      // A text link, padded to the 44px a thumb needs; the story's gap below is short by that padding
+      `<a href="${escape(this.url(m.url, 'mission-link'))}" target="_blank" style="display:inline-block;padding:10px 0;font-family:${OUTFIT};font-weight:700;color:${SOARD_DARK};text-decoration:underline;text-underline-offset:3px;">` +
+      `${m.cta}&nbsp;&#8594;</a></p>`;
+    const body =
+      logo +
+      Email.gap(S2) +
       Email.label('Where 100% of our profits go', { color: SOARD_MUTED, font: OUTFIT, track: '0.1em' }) +
-        headline +
-        Email.gap(S3) +
-        this.img(Email.photo(m.photo.src, 1072, 604), 536, 302, m.photo.alt, m.url, 'mission-photo', 24) +
-        (m.caption ? Email.gap(S1) + Email.text(m.caption, { size: 13, lh: 18, weight: 600, color: SOARD_MUTED, font: OUTFIT, mb: S2 }) : Email.gap(S3)) +
-        Email.text(m.story, { size: 17, lh: 27, color: SOARD_DARK, mb: S3, font: OUTFIT }) +
-        this.button(`${m.cta} &#8594;`, m.url, 'mission-button', SOARD_YELLOW, SOARD_DARK, 'left', { pill: true, font: OUTFIT }),
-      { bg: SOARD_WARM, top: S3 - LOGO_INSET, cls: 'soard' }, // 24px under the lettering, as before
-    );
-    return this.breather() + logoRow + hero + (m.impact ? this.impact(m.impact) : '');
+      headline +
+      Email.gap(S3) +
+      this.img(Email.photo(m.photo.src, 1072, 536), 536, 268, m.photo.alt, m.url, 'mission-photo', 16) +
+      Email.gap(S2) +
+      Email.text(words, { size: 16, lh: 25, color: SOARD_DARK, mb: S2 - 10, font: OUTFIT }) +
+      link;
+    return this.breather() + this.band(body, { bg: SOARD_WARM, top: S4, bottom: S4, cls: 'soard' }) + (m.impact ? this.impact(m.impact) : '');
   }
 
   /** The charity's impact strip: its own numbers, as its site shows them, Sunshine Yellow on Dark Deep. */
@@ -872,9 +878,7 @@ export class Email {
 ${tiers}
     .cap4 { font-size:13px !important; line-height:18px !important; }
     .spot { font-size:21px !important; line-height:26px !important; }
-    .pxl { padding-left:${20 - LOGO_INSET}px !important; padding-right:${20 - LOGO_INSET}px !important; }
-    .ptl { padding-top:${S4 - LOGO_INSET}px !important; }
-    .soard-h { font-size:28px !important; line-height:34px !important; }
+    .soard-h { font-size:26px !important; line-height:32px !important; }
     .tile-cap { padding-left:20px !important; padding-right:8px !important; }
     .soard-stat { font-size:32px !important; line-height:36px !important; }
     .stack { display:block !important; width:100% !important; text-align:left !important; }
