@@ -149,14 +149,23 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * @returns {Promise<SentEmail[]>}
  */
 export async function sentEmails(kit, { limit = 52, now = Date.now() } = {}) {
+  return (await completed(kit, now)).slice(0, limit).map((b) => ({ id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at }));
+}
+
+/** Kit's completed broadcasts from the last year, tests left out, newest first (slim: no bodies). */
+async function completed(kit, now) {
   const since = new Date(now - 366 * DAY_MS).toISOString().slice(0, 10);
   const { broadcasts = [] } = await kit.call(`/broadcasts?status=completed&sent_after=${since}&per_page=1000&slim=true`);
-  return broadcasts
-    .filter((b) => b.send_at && !isTest(b))
-    .sort((a, b) => Date.parse(b.send_at) - Date.parse(a.send_at))
-    .slice(0, limit)
-    .map((b) => ({ id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at }));
+  return broadcasts.filter((b) => b.send_at && !isTest(b)).sort((a, b) => Date.parse(b.send_at) - Date.parse(a.send_at));
 }
+
+/**
+ * The weekly emails this admin scheduled: it labels each one in Kit (send.ts, "The Sunny Side for
+ * Tue, Nov 17, from the store admin"). The Kit account is the charity's too, so its reveal days and
+ * newsletters go out from it at their own times, and the store's emails before this admin were sent
+ * by hand whenever they were ready (Nov 3 at 5:29 PM, Nov 10 at 9:52 PM).
+ */
+export const fromThisAdmin = (b) => /^The Sunny Side for .*, from the store admin$/.test(b?.description || '');
 
 /**
  * One email as Kit sent it, with its HTML, or null when it isn't one that went to subscribers: a
@@ -175,9 +184,13 @@ export async function sentEmail(kit, id) {
   return { id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at, html: b.content || '', status: b.status };
 }
 
-/** The time of day the store's emails usually go, from what it has sent (tests left out), as "HH:MM" Eastern, or null. */
+/**
+ * The time of day the store's weekly email usually goes, as "HH:MM" Eastern: the most common time of
+ * the ones this admin scheduled, or null before it has scheduled any. (Counting every send in the
+ * account, the charity's too, it came out 3:31 PM on Nov 16, 2026: the charity's last email's time.)
+ */
 export async function usualTime(kit, now = Date.now()) {
-  const sent = await sentEmails(kit, { limit: 30, now });
+  const sent = (await completed(kit, now)).filter(fromThisAdmin).slice(0, 30).map((b) => ({ sentAt: b.send_at }));
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const counts = new Map();
   for (const b of sent) {

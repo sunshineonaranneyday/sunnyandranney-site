@@ -28,6 +28,16 @@ export const KINDS = {
  * discounted 20% at the register; no other discount came close.
  */
 export const USUAL_PERCENT = 20;
+/**
+ * The store's spend-more sale as it last went out, before this admin kept sales: the Nov 3, 2026
+ * email ("Our Spend More, Save More Sale Is BACK!"). The ready-made spend-more sale starts here
+ * until one is saved in the admin; after that it starts from the last one saved.
+ */
+export const STORE_TIERS = Object.freeze([
+  { spend: 250, percent: 10 },
+  { spend: 500, percent: 15 },
+  { spend: 1000, percent: 20 },
+]);
 
 /** The big line over the deal, by kind: the store's words, not a field to fill. A percent sale's number is its own. */
 export const SALE_HEADLINES = { tiers: 'Spend more, save more.', headline: 'New in the showroom this week.' };

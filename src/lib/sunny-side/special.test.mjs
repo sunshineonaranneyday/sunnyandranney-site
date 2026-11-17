@@ -1,28 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Email, amount, escape, lines, noWidow, offerClaims, offerLine, render } from './email.mjs';
-import {
-  blank,
-  check,
-  clean,
-  defaults,
-  draftSale,
-  USUAL_PERCENT,
-  usualEnds,
-  forKind,
-  isSendDate,
-  emailToWorkOn,
-  isSendDay,
-  nextSend,
-  previewBrief,
-  sendDays,
-  sendLabel,
-  summary,
-  termsLine,
-  toSale,
-  thisWeeksSend,
-  typeset,
-} from './special.mjs';
+import { STORE_TIERS, USUAL_PERCENT, blank, check, clean, defaults, draftSale, emailToWorkOn, forKind, isSendDate, isSendDay, nextSend, previewBrief, sendDays, sendLabel, summary, termsLine, thisWeeksSend, toSale, typeset, usualEnds } from './special.mjs';
 import { WORKWEEK_START_DAY } from '../time-clock/hours.mjs';
 import { impactFromPage } from './impact.mjs';
 
@@ -337,4 +316,11 @@ test('the charity section shows its live numbers, and leaves the strip out witho
   assert.match(html, /utm_content=charity-logo/);
   const none = new Email({ ...brief, mission: { ...brief.mission, impact: undefined } }).mission();
   assert.doesNotMatch(none, /Room makeovers/);
+});
+
+test('the ready-made spend-more sale starts on the store’s own amounts, a sale ready to go', () => {
+  // The Nov 3, 2026 email: Spend $250 → Save 10%, $500 → 15%, $1,000 → 20%
+  assert.deepEqual(STORE_TIERS, [{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }, { spend: 1000, percent: 20 }]);
+  const sale = clean({ kind: 'tiers', tiers: STORE_TIERS.map((t) => ({ ...t })), ends: '2026-11-22' });
+  assert.deepEqual(check(sale, '2026-11-17'), {});
 });

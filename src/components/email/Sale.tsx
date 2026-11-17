@@ -18,7 +18,9 @@ const filled = (tiers: SaleForm['tiers']) => tiers.some((t) => t.spend.trim() ||
 
 /**
  * The week's sale: three ready-made sales, already filled in. She taps one and changes a number
- * if she needs to; the last day comes set to the week's Sunday. Nothing to write: the label, the
+ * if she needs to; the last day comes set to the week's Sunday. Spend more, save more starts on the
+ * last amounts saved here, else the store's own from its Nov 3 email (Peter, 2026-11-16: "why
+ * doesn't this have info already filled in"). Nothing to write: the label, the
  * words, the button and the fine print are the store's for each (special.mjs, defaults), and the
  * preview beside it shows them. (Peter, 2026-11-16: "pick a ready-made sale".)
  */
@@ -31,17 +33,13 @@ export function Sale({ form, special, errors, shown, set, touch, presets }: Prop
     set({ tiers: [...form.tiers, { spend: '', percent: '' }] });
     window.setTimeout(() => document.getElementById(fieldId(`tiers.${form.tiers.length}.spend`))?.focus(), 0);
   };
-  const presetTiers = presets.tiers?.map((t) => ({ spend: money(t.spend), percent: String(t.percent) })) ?? null;
+  const presetTiers = presets.tiers.map((t) => ({ spend: money(t.spend), percent: String(t.percent) }));
 
   /** Taps a ready-made sale: it comes filled in, keeping anything already typed for it this week. */
   const choose = (k: Kind) => {
     if (k === 'percent') set({ kind: k, percent: form.percent.trim() || String(presets.percent), ends: form.ends || presets.ends });
-    else if (k === 'tiers') {
-      const tiers = filled(form.tiers) ? form.tiers : (presetTiers ?? [{ spend: '', percent: '' }, { spend: '', percent: '' }]);
-      set({ kind: k, tiers, ends: form.ends || presets.ends });
-      // With no amounts to carry over, the first one is where she starts
-      if (!filled(tiers)) window.setTimeout(() => document.getElementById(fieldId('tiers.0.spend'))?.focus(), 0);
-    } else set({ kind: k });
+    else if (k === 'tiers') set({ kind: k, tiers: filled(form.tiers) ? form.tiers : presetTiers, ends: form.ends || presets.ends });
+    else set({ kind: k });
   };
 
   const percentShown = kind === 'percent' ? form.percent.trim() || '?' : String(presets.percent);
@@ -56,19 +54,15 @@ export function Sale({ form, special, errors, shown, set, touch, presets }: Prop
         </button>
         <button type="button" class="em-sale-card" aria-pressed={kind === 'tiers'} onClick={() => choose('tiers')}>
           <span class="em-sale-card-title">Spend more, save more</span>
-          {tiersShown ? (
-            <span class="em-sale-card-sub">
-              {tiersShown
-                .filter((t) => t.spend || t.percent)
-                .map((t) => (
-                  <span class="em-sale-card-line">
-                    ${t.spend || '?'} → {t.percent || '?'}% off
-                  </span>
-                ))}
-            </span>
-          ) : (
-            <span class="em-sale-card-sub">Set the amounts the first time</span>
-          )}
+          <span class="em-sale-card-sub">
+            {tiersShown
+              .filter((t) => t.spend || t.percent)
+              .map((t) => (
+                <span class="em-sale-card-line">
+                  ${t.spend || '?'} → {t.percent || '?'}% off
+                </span>
+              ))}
+          </span>
         </button>
         <button type="button" class="em-sale-card" aria-pressed={kind === 'headline'} onClick={() => choose('headline')}>
           <span class="em-sale-card-title">No sale this week</span>
