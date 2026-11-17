@@ -44,6 +44,7 @@
  */
 
 import { icsUrl, photoPath } from './addresses.mjs';
+import { CLASSIC, LAYOUTS, layoutOf, paddings, solve } from './collage-layouts.mjs';
 import { money } from './product.mjs';
 
 // ── Tokens ──────────────────────────────────────────────────────────────────
@@ -284,10 +285,12 @@ export function offerClaims(line, sale, where) {
 const WALL_ROWS = { 4: [2, 2], 5: [1, 2, 2], 6: [2, 2, 2], 7: [1, 2, 2, 2], 8: [2, 2, 2, 2], 9: [1, 2, 2, 2, 2] };
 /** What each photo shows at 600px with the gutters taken out (3:2 for the lead, square for pairs). Outlook sizes images by these. */
 const SHAPE = { 1: [600, 400], 2: [298, 298] };
-/** The story's collage, by how many photos: one wide, then rows of two or three, like a bento box. */
-/** @type {Record<number, number[]>} */
+/**
+ * The story's classic collage, by how many photos: one wide, then rows of two or three. It's the first
+ * of each count's layouts (collage-layouts.mjs), which the brief's story.layout picks from.
+ * @type {Record<number, number[]>}
+ */
 export const COLLAGE_ROWS = { 1: [1], 2: [2], 3: [1, 2], 4: [1, 3], 5: [1, 2, 2] };
-const COLLAGE_SHAPE = { 1: [600, 300], 2: [298, 298], 3: [197, 197] };
 
 /**
  * The parts of the email Staci writes or picks, each band tagged with its own (Email.band's `part`), so
@@ -331,14 +334,14 @@ export class Email {
   }
 
   /** A photo `w` by `h` (Outlook's size), as wide as its cell up to `max`: its own width, or the column's for a photo on the column. */
-  img(src, w, h, alt, href, slot, radius = 0, cls = '', max = w) {
+  img(src, w, h, alt, href, slot, radius = 0, cls = '', max = w, shape = [w, h]) {
     const c = cls ? ` class="${cls}"` : '';
     // A store photo shown straight from the site (the admin, run locally) isn't cropped by the
     // resizing, so the browser crops it to the same shape, keeping the preview's measurements true
-    const crop = photoDirect && src.includes('/media/email/') ? `aspect-ratio:${w}/${h};object-fit:cover;` : '';
+    const crop = photoDirect && src.includes('/media/email/') ? `aspect-ratio:${shape[0]}/${shape[1]};object-fit:cover;` : '';
     const tag =
       `<img${c} src="${escape(src)}" width="${w}" height="${h}" alt="${escape(alt)}" style="display:block;width:100%;` +
-      `max-width:${max}px;height:auto;${crop}border:0;border-radius:${radius}px;">`;
+      `max-width:${typeof max === 'number' && !Number.isInteger(max) ? px(max) : `${max}px`};height:auto;${crop}border:0;border-radius:${radius}px;">`;
     if (!href) return tag;
     return `<a href="${escape(this.url(href, slot))}" target="_blank" style="display:block;color:${CHARCOAL};">${tag}</a>`;
   }
@@ -557,7 +560,7 @@ export class Email {
         top: S5,
         bottom: S2,
         part: 'story',
-      }) + (s.photos?.length ? this.collage(s.photos, href) : s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo', 'story') : '')
+      }) + (s.photos?.length ? this.collage(s.photos, href, s.layout) : s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo', 'story') : '')
     );
   }
 
@@ -617,29 +620,46 @@ export class Email {
   }
 
   /**
-   * The story's photos, edge to edge: the first wide, then rows of two or three (COLLAGE_ROWS),
-   * each cropped to its cell around what's in it. Gutters are split inside the cells, as on the
-   * wall, so the outer photos touch the edges; rows after the first sit a gutter below.
+   * The story's photos, edge to edge, in the layout the brief names (story.layout, one of
+   * collage-layouts.mjs's for that many photos; the classic one when it names none): photos side by
+   * side are cells of one row, stacked photos rows of one table, each cut its own table. Every cell's
+   * share of the width and its padding come from solve(), so the photos on each side of a cut end
+   * level at every width, with the same 4px gutters as the wall, split inside the cells so the outer
+   * photos touch the edges. Each photo is cropped to its cell around what's in it, asked for at
+   * twice its size in its cell's exact shape, so it fills its cell to the pixel.
    */
-  collage(photos, href) {
-    const layout = COLLAGE_ROWS[photos.length];
-    if (!layout) throw new Error(`story.photos: the collage takes 1 to 5 photos, not ${photos.length}`);
-    let rows = '';
+  collage(photos, href, layout = CLASSIC) {
+    const n = photos.length;
+    if (!LAYOUTS[n]) throw new Error(`story.photos: the collage takes 1 to 5 photos, not ${n}`);
+    const chosen = layoutOf(layout, n);
+    if (!chosen) throw new Error(`story.layout: "${layout}" isn't a layout for ${n} photos (${LAYOUTS[n].map((l) => l.id).join(', ')})`);
     let i = 0;
-    layout.forEach((n, r) => {
-      const [cw, ch] = COLLAGE_SHAPE[n];
-      let tds = '';
-      photos.slice(i, i + n).forEach((ph, k) => {
-        const left = (GUTTER * k) / n, right = (GUTTER * (n - 1 - k)) / n;
-        tds +=
-          `<td width="${pct(100 / n)}%" valign="top" style="padding:${r ? GUTTER : 0}px ${px(right)} 0 ${px(left)};">` +
-          this.img(Email.photo(ph.src, cw * 2, ch * 2), cw, ch, ph.alt, href, `story-photo-${i + k + 1}`) +
-          '</td>';
+    const fixed = 'width="100%" style="table-layout:fixed;"';
+    const draw = (t, s, w) => {
+      if (Array.isArray(t)) {
+        const ph = photos[i++];
+        const h = s.A * w;
+        const k = Math.max(1, Math.round((2 * w) / t[0]));
+        return this.img(Email.photo(ph.src, k * t[0], k * t[1]), Math.round(w), Math.round(h), ph.alt, href, `story-photo-${i}`, 0, '', w, t);
+      }
+      if (t.down) {
+        return Email.T(t.down.map((c, k) => `<tr><td${k ? ` style="padding-top:${GUTTER}px;"` : ''}>${draw(c, s.kids[k], w)}</td></tr>`).join(''), fixed);
+      }
+      // The gutter goes inside a cell of its own table, never on the shared row's cells: given a fixed
+      // row whose cells are padded unevenly, Chromium takes each cell's share of the row less all the
+      // padding, and WebKit takes the cell's own padding from its share, so a big photo beside a stack
+      // came out 1.3px narrower in Chromium than in WebKit. Inside a table of one cell, they agree.
+      const pads = paddings(s.c, GUTTER);
+      const tds = t.across.map((c, k) => {
+        const [left, right] = pads[k];
+        const inner = draw(c, s.kids[k], s.f[k] * w + s.c[k]);
+        const padded = left || right ? Email.T(`<tr><td style="padding:0 ${px(right)} 0 ${px(left)};">${inner}</td></tr>`, fixed) : inner;
+        return `<td width="${pct(100 * s.f[k])}%" valign="top">${padded}</td>`;
       });
-      rows += '<tr><td>' + Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"') + '</td></tr>';
-      i += n;
-    });
-    return this.band(Email.T(rows), { top: 0, side: 0, bottom: 0, part: 'story' });
+      return Email.T(`<tr>${tds.join('')}</tr>`, fixed);
+    };
+    const tree = chosen.tree;
+    return this.band(Email.T(`<tr><td>${draw(tree, solve(tree, GUTTER), 600)}</td></tr>`), { top: 0, side: 0, bottom: 0, part: 'story' });
   }
 
   /** The dates still ahead on send day, in order. Month, day and weekday all come from "date". */

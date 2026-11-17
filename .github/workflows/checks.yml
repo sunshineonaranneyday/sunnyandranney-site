@@ -53,3 +53,5 @@ jobs:
         run: |
           node scripts/sunny-side/build.mjs --tests
           node scripts/sunny-side/verify.mjs
+      - name: Every collage layout lines up
+        run: node scripts/sunny-side/collages.mjs

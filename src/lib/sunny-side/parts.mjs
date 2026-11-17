@@ -10,6 +10,7 @@
  */
 
 import { fillLine, lines, offerClaims, plain } from './email.mjs';
+import { LAYOUT_ID, layoutFor, ratioOf } from './collage-layouts.mjs';
 import { KID_PHOTO, KID_SLUG, kidFor, missionOf, revealOf } from './kids.mjs';
 import { typeset } from './special.mjs';
 
@@ -42,6 +43,8 @@ export function cleanParts(p) {
       // A charity reveal still ahead (its kid's slug) takes the story spot: the charity's invite to
       // watch it live, in the charity's words. '' is the showroom story, written above.
       reveal: typeof s.reveal === 'string' && KID_SLUG.test(s.reveal) ? s.reveal : '',
+      // The collage's layout (collage-layouts.mjs), or '' for the one that fits her photos best
+      layout: typeof s.layout === 'string' && LAYOUT_ID.test(s.layout) ? s.layout : '',
     },
     // '' shows the charity's most recent reveal
     kid: typeof p?.kid === 'string' && KID_SLUG.test(p.kid) ? p.kid : '',
@@ -160,11 +163,21 @@ export function briefParts(p, { sale, photos, kids = [], reveals = [], photoSrc 
             headline: typeset(s.headline || 'Your headline'),
             body: typeset(s.body || 'A few lines about what’s new in the showroom.').replace(/\n/g, '<br>'),
             cta: [typeset(s.cta || STORY_DEFAULTS.cta), s.link || STORY_DEFAULTS.link],
-            photos: s.photos.filter((id) => photos.has(id)).slice(0, COLLAGE_MAX).map(pic),
+            ...collageOf(s, photos, pic),
           }
         : null,
     mission: kid ? missionOf(kid, p.kidPhoto) : null,
   };
+}
+
+/**
+ * The story's photos and the layout the email draws them in: the one she picked while it's made for
+ * this many photos, else the one that keeps the most of them (collage-layouts.mjs, layoutFor).
+ */
+function collageOf(s, photos, pic) {
+  const ids = s.photos.filter((id) => photos.has(id)).slice(0, COLLAGE_MAX);
+  if (!ids.length) return { photos: [] };
+  return { photos: ids.map(pic), layout: layoutFor(s.layout, ids.map((id) => ratioOf(photos.get(id)))).id };
 }
 
 /** The collage in the order the email draws it, arranged for her: the widest photo leads. */
