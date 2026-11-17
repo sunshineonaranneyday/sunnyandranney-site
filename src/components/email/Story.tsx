@@ -7,7 +7,7 @@ import { FieldError, TextField } from './parts';
 
 /**
  * The story spot, under the products: what's new in the showroom this week (its photos are the
- * collage above), or, in a week with a charity reveal coming, the charity's invite to watch it live.
+ * collage, picked in Photos), or, in a week with a charity reveal coming, the charity's invite to watch it live.
  * The invite is the charity's own words, photo, day and time (kids.mjs), so there's nothing to write.
  */
 export function Story({ parts, setParts, shown, reveals }: { parts: Parts; setParts: (change: (p: Parts) => Parts) => void; shown: (key: string) => string | undefined; reveals: Reveal[] }) {
