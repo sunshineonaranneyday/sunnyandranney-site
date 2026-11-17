@@ -2,7 +2,7 @@
 export const prerender = false;
 
 /**
- * The emails that have gone out, newest first, read from Kit: what subscribers got, to check what
+ * The store’s weekly emails that have gone out, newest first, read from Kit: what subscribers got, to check what
  * was sent last week or before. Read-only: the one email being worked on is at /admin/email/.
  */
 
@@ -32,7 +32,7 @@ const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', we
       <div>
         <p class="crumb"><a href="/admin/email/">Weekly email</a></p>
         <h1>Sent emails</h1>
-        <p class="muted">What went out to subscribers, newest first, exactly as Kit sent it. These can’t change.</p>
+        <p class="muted">The store’s weekly emails as they went out, newest first, exactly as Kit sent them. These can’t change. The charity’s emails, sent from the same Kit account, aren’t listed.</p>
       </div>
     </div>
 
