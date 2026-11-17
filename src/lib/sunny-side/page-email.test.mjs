@@ -309,24 +309,35 @@ test('who a Kit filter reaches: one kind, any of its ids; everyone, mixes, exclu
 });
 
 test('the count is the store segment’s, worked out the way the segment is made, or none rather than a wrong one', async () => {
-  const filterKey = 'POST /subscribers/filter';
-  const counts = ({ onTag = 3115, viaFilter = 3115, both = 274 } = {}) => ({
+  const filterKey = 'POST /subscribers/filter?include_total_count=true&per_page=1000';
+  const people = (n) => Array.from({ length: n }, (_, i) => ({ id: i + 1 }));
+  // As Kit answered live on Nov 17, 2026 (tag lists), and its filter either with a total or with everyone on one page
+  const counts = ({ onStore = 3115, onNoMarketing = 424, filterNoMarketing = 424, both = 274, total = true, more = false } = {}) => ({
     ...LISTS,
-    'GET /tags/25380314/subscribers?status=active&include_total_count=true&per_page=1': { subscribers: [], pagination: { total_count: onTag } },
-    [filterKey]: (b) => ({ subscribers: [], pagination: { total_count: b.all.filter((c) => c.type === 'tags').length === 2 ? both : viaFilter } }),
+    'GET /tags/25380314/subscribers?status=active&include_total_count=true&per_page=1': { subscribers: [], pagination: { total_count: onStore } },
+    'GET /tags/25389847/subscribers?status=active&include_total_count=true&per_page=1': { subscribers: [], pagination: { total_count: onNoMarketing } },
+    [filterKey]: (b) => {
+      const n = b.all.filter((c) => c.type === 'tags').length === 2 ? both : filterNoMarketing;
+      return total
+        ? { subscribers: people(Math.min(n ?? 0, 10)), pagination: { has_next_page: n > 10, per_page: 10, total_count: n } }
+        : { subscribers: people(more ? 10 : n ?? 0), pagination: { has_next_page: more, per_page: more ? 10 : 1000 } };
+    },
   });
   const k = fakeKit(counts());
   assert.equal(await subscriberCount(k.kit), 2841, 'Nov 17, 2026: Kit’s own segment count');
-  const asked = k.calls.filter((c) => c.key === filterKey).map((c) => c.body);
-  assert.deepEqual(asked.find((b) => b.all.length === 3), { all: [
+  assert.deepEqual(k.calls.filter((c) => c.key === filterKey).map((c) => c.body).find((b) => b.all.length === 3), { all: [
     { type: 'tags', any: [{ type: 'ids', matching: [25380314] }] },
     { type: 'tags', any: [{ type: 'ids', matching: [25389847] }] },
     { type: 'subscriber_state', states: ['active'] },
   ] });
-  // Kit's filter counting the tag differently from the tag's own list, or an impossible overlap: no number, and why
-  await assert.rejects(subscriberCount(fakeKit(counts({ viaFilter: 50 })).kit), /the tag’s list has 3115 active, Kit’s filter 50, on both tags 274/);
-  await assert.rejects(subscriberCount(fakeKit(counts({ both: 4000 })).kit), /on both tags 4000/);
-  await assert.rejects(subscriberCount(fakeKit(counts({ both: null })).kit), /on both tags NaN/);
+  // No total from Kit's filter, but everyone on one page: counted from the page
+  assert.equal(await subscriberCount(fakeKit(counts({ total: false })).kit), 2841);
+  // No total and more pages: no number, and the log says what Kit sent
+  await assert.rejects(subscriberCount(fakeKit(counts({ total: false, more: true })).kit), /found NaN on the no-marketing tag \(total none, 10 listed, per page 10, more true\)/);
+  // Kit's filter counting the no-marketing tag differently from the tag's own list, or an impossible overlap: no number, and why
+  await assert.rejects(subscriberCount(fakeKit(counts({ filterNoMarketing: 50 })).kit), /no-marketing tag’s 424; Kit’s filter found 50 on the no-marketing tag/);
+  await assert.rejects(subscriberCount(fakeKit(counts({ both: 500 })).kit), /and 500 on both/);
+  await assert.rejects(subscriberCount(fakeKit(counts({ onStore: null })).kit), /store tag’s list has NaN active/);
   // A tag the segment is made of is gone: no number
   const noTag = counts();
   noTag['GET /tags?per_page=1000'] = { tags: [{ id: 1, name: 'Donors' }], pagination: { has_next_page: true, end_cursor: 'c1' } };
