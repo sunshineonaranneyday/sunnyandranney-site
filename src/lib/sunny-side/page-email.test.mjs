@@ -185,10 +185,10 @@ test('it can go only when it’s finished, and says what’s left, each with the
   const ready = { special, wall: wallOf(4), parts: story(2), photos, kids, catalog, send: SEND, check, checkWall, checkParts, sale };
   assert.deepEqual(kitProblems(ready), []);
   assert.deepEqual(kitProblems({ ...ready, special: null, sale: null, wall: wallOf(2), parts: blankParts() }), [
+    { text: 'Write the subject line.', section: 'em-lines' },
     { text: 'Set the sale.', section: 'em-sale' },
     { text: 'Pick 2 more products.', section: 'em-products' },
     { text: 'Write the story.', section: 'em-story' },
-    { text: 'Write the subject line.', section: 'em-lines' },
   ]);
   assert.deepEqual(kitProblems({ ...ready, kids: [] }), [{ text: 'The charity’s kids didn’t load, so the charity section can’t be drawn. Reload the page to try again.', section: 'em-charity' }]);
 });

@@ -53,19 +53,20 @@ export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catal
 export function kitProblems({ special, wall, parts, photos, kids, reveals = null, catalog, send, check, checkWall, checkParts, sale }) {
   const out = [];
   const add = (text, section) => out.push({ text, section });
+  // In the page's order, which is the email's: subject line, photos, sale, products, story, charity
+  const e = checkParts(parts, { sale, photos, kids, reveals, ready: true });
+  if (e.subject || e.preheader) add(e.subject && !parts.subject ? 'Write the subject line.' : 'Fix the subject line.', 'em-lines');
+  if (e.photos || e['story.photos']) add(e.photos || 'Fix the story’s photos.', 'em-photos');
   if (!special) add('Set the sale.', 'em-sale');
   else if (Object.keys(check(special, send)).length) add('Fix the sale.', 'em-sale');
   const n = wall?.picks.length ?? 0;
   if (n < PICKS[0]) add(`Pick ${PICKS[0] - n} more product${PICKS[0] - n === 1 ? '' : 's'}.`, 'em-products');
   else if (Object.keys(checkWall(wall, { catalog: catalog ?? undefined, send })).length) add('Fix the products.', 'em-products');
-  const e = checkParts(parts, { sale, photos, kids, reveals, ready: true });
-  if (e.photos || e['story.photos']) add(e.photos || 'Fix the story’s photos.', 'em-photos');
   if (e['story.headline'] || e['story.body']) add('Write the story.', 'em-story');
   else if (Object.keys(e).some((k) => k.startsWith('story.') && k !== 'story.photos')) add(e['story.reveal'] || 'Fix the story.', 'em-story');
   // A reveal invite can't go out after the reveal
   const reveal = parts.story?.reveal && reveals?.find((r) => r.slug === parts.story.reveal);
   if (reveal && reveal.day < send) add(`${reveal.name}’s reveal was ${reveal.short}, before this email goes out. Pick another, or the showroom story.`, 'em-story');
   if (e.kid) add(e.kid, 'em-charity');
-  if (e.subject || e.preheader) add(e.subject && !parts.subject ? 'Write the subject line.' : 'Fix the subject line.', 'em-lines');
   return out;
 }
