@@ -21,6 +21,7 @@
 import { chromium, webkit } from 'playwright';
 import { readdirSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { GMAIL_STRIPS, MODES, SWEEP } from './inboxes.mjs';
 
 const root = new URL('./out/', import.meta.url).pathname;
 const dirs = [root, join(root, 'tests')].filter(existsSync);
@@ -47,16 +48,6 @@ const runs = [
 ];
 mkdirSync(join(root, 'shots'), { recursive: true });
 const engines = { chromium: await chromium.launch(), webkit: await webkit.launch() };
-// Declarations Gmail removes from inline styles: negative margins, positioning, flex and grid.
-const GMAIL_STRIPS = /(?:margin[a-z-]*\s*:[^;"]*-\d[^;"]*|position\s*:[^;"]*|display\s*:\s*(?:inline-)?(?:flex|grid)[^;"]*);?/gi;
-/** The email as each kind of inbox gets it: as sent; as Gmail serves it; bare, with no style block either. */
-const MODES = {
-  sent: (src) => src,
-  gmail: (src) => src.replace(GMAIL_STRIPS, ''),
-  bare: (src) => src.replace(GMAIL_STRIPS, '').replace(/<style[\s\S]*?<\/style>/g, ''),
-};
-/** Every width the sweep lays each email out at: 320 to 700 in 10s, and both sides of each media query. */
-const SWEEP = [...new Set([...Array.from({ length: 39 }, (_, k) => 320 + 10 * k), 374, 375, 620, 621])].sort((a, b) => a - b);
 /** The sweep's stand-in for every photo: a blank pixel (a const up here, since the sweep runs in the loop below). */
 const BLANK = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
 /**
@@ -214,16 +205,25 @@ for (const f of files) {
         && getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)';
       const inCard = el => { for (let a = el.parentElement; a; a = a.parentElement) if (isCard(a)) return true; return false; };
       // Photo rows and card rows start and end on the column, or (photos) run the full email width.
-      // The logo and small marks (the pig, Greg) are exempt.
+      // The logo and small marks (the pig, Greg) are exempt; a collage's photos never are, however
+      // small a bento box draws them on a phone.
+      const collagePhoto = i => /utm_content=story-photo-\d/.test(i.closest('a')?.getAttribute('href') ?? '');
       const blocks = [...document.images].filter(i => {
-        const q = i.getBoundingClientRect(); return q.width >= 120 && !/(^|\s)(soard-)?logo(\s|$)/.test(i.className);
+        const q = i.getBoundingClientRect(); return (q.width >= 120 || collagePhoto(i)) && !/(^|\s)(soard-)?logo(\s|$)/.test(i.className);
       }).concat([...document.querySelectorAll('td')].filter(isCard));
+      // A row is everything that shares its height: photos side by side, and a bento box's stacked
+      // photos beside its big one, which start lower but sit inside the big one's height.
       const byRow = {};
-      for (const el of blocks) { const q = el.getBoundingClientRect(); if (q.width) (byRow[Math.round(q.top + scrollY)] ||= []).push(q); }
+      const rects = blocks.map(el => el.getBoundingClientRect()).filter(q => q.width).sort((a, b) => a.top - b.top);
+      let rowTop = null, rowBottom = -Infinity;
+      for (const q of rects) {
+        if (q.top >= rowBottom - 1) { rowTop = Math.round(q.top + scrollY); rowBottom = q.bottom; } else rowBottom = Math.max(rowBottom, q.bottom);
+        (byRow[rowTop] ||= []).push(q);
+      }
       const drift = [], col = x => Math.round(x - box.left);
       for (const [y, rs] of Object.entries(byRow)) {
         rs.sort((a, b) => a.left - b.left);
-        const l = rs[0].left, r = rs.at(-1).right;
+        const l = Math.min(...rs.map(q => q.left)), r = Math.max(...rs.map(q => q.right));
         const onColumn = near(l, L) && near(r, R), fullBleed = near(l, box.left) && near(r, box.right);
         if (!onColumn && !fullBleed) drift.push(`row@${y} ${col(l)}-${col(r)}`);
       }

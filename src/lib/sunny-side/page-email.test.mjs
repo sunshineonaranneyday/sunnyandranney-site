@@ -69,16 +69,25 @@ test('the whole email from the admin: every part in order, the store’s photos 
   assert.equal(pageEmail({ sale, wall: null, parts: cleanParts({ subject: '50% off!' }), photos, kids, catalog, events: [], impact, send: SEND, site: SITE }).brief.subject, 'The Sunny Side');
 });
 
-test('the collage lays out 1 to 5 photos edge to edge: one wide, then rows of two or three', () => {
-  const cells = (n) => {
-    const html = render(pageEmail({ sale, wall: null, parts: story(n), photos, kids, catalog: null, events: [], impact, send: SEND, site: SITE }).brief, ['story']);
+test('the collage lays out 1 to 5 photos edge to edge, in the layout she picks or the one that fits them best', () => {
+  const cells = (n, layout = '') => {
+    const parts = story(n);
+    parts.story.layout = layout;
+    const html = render(pageEmail({ sale, wall: null, parts, photos, kids, catalog: null, events: [], impact, send: SEND, site: SITE }).brief, ['story']);
     return [...html.matchAll(/width="(\d+)" height="(\d+)" alt="Photo/g)].map((m) => `${m[1]}x${m[2]}`);
   };
-  assert.deepEqual(cells(1), ['600x300']);
-  assert.deepEqual(cells(2), ['298x298', '298x298']);
-  assert.deepEqual(cells(3), ['600x300', '298x298', '298x298']);
-  assert.deepEqual(cells(4), ['600x300', '197x197', '197x197', '197x197']);
-  assert.deepEqual(cells(5), ['600x300', '298x298', '298x298', '298x298', '298x298']);
+  // The classic layouts: one wide, then rows of two or three
+  assert.deepEqual(cells(1, 'wide'), ['600x300']);
+  assert.deepEqual(cells(2, 'pair'), ['298x298', '298x298']);
+  assert.deepEqual(cells(3, 'wide-top'), ['600x300', '298x298', '298x298']);
+  assert.deepEqual(cells(4, 'wide-top'), ['600x300', '197x197', '197x197', '197x197']);
+  assert.deepEqual(cells(5, 'wide-top'), ['600x300', '298x298', '298x298', '298x298', '298x298']);
+  // A bento box: the big square beside two small ones, level at the bottom (398.67 = 2 × 197.33 + 4)
+  assert.deepEqual(cells(3, 'big-left'), ['399x399', '197x197', '197x197']);
+  // Nothing picked: the layout that keeps the most of these photos (two 4:5 portraits, then a 2:1)
+  assert.deepEqual(cells(3), ['317x423', '279x209', '279x209'], 'tall beside two');
+  // A layout made for another count falls back to the best fit
+  assert.deepEqual(cells(2, 'big-left'), cells(2));
   // The widest photo leads when arranged
   assert.equal(arrangeCollage(ids.slice(0, 4), photos)[0], ids[2]);
   assert.deepEqual(arrangeCollage(ids.slice(0, 2), photos), ids.slice(0, 2));

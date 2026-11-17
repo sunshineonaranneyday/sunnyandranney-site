@@ -1,11 +1,13 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { photoPath } from '@/lib/sunny-side/addresses.mjs';
-import { COLLAGE_ROWS, Email } from '@/lib/sunny-side/email.mjs';
-import { COLLAGE_MAX, DEFAULT_HERO, arrangeCollage } from '@/lib/sunny-side/parts.mjs';
+import { layoutFor, ratioOf } from '@/lib/sunny-side/collage-layouts.mjs';
+import { Email } from '@/lib/sunny-side/email.mjs';
+import { COLLAGE_MAX, DEFAULT_HERO } from '@/lib/sunny-side/parts.mjs';
 import { ALT_DEFAULT, PHOTO_MAX_SIDE } from '@/lib/sunny-side/photo-store.mjs';
 import { type Parts, type Photo, send as call, toast } from './model';
-import { FieldError, useFlip } from './parts';
+import { CollageLayouts } from './Layouts';
+import { FieldError } from './parts';
 
 /** A photo as the page shows it: straight from the site on a developer's machine, else cropped by the resizing. */
 export const photoThumb = (id: string, w: number, h: number, local: boolean) => (local ? photoPath(id) : Email.photo(`photo:${id}`, w, h));
@@ -30,14 +32,6 @@ async function shrink(file: File): Promise<{ blob: Blob; w: number; h: number }>
   if (!blob) throw new Error(`${file.name} couldn’t be made ready to upload.`);
   return { blob, w, h };
 }
-
-const LAYOUT_WORDS: Record<number, string> = {
-  1: 'One wide photo.',
-  2: 'Two side by side.',
-  3: 'One wide, then two below.',
-  4: 'One wide, then three below.',
-  5: 'One wide, then two rows of two.',
-};
 
 interface Props {
   photos: Photo[];
@@ -78,17 +72,8 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
   }, []);
   const byId = new Map(photos.map((p) => [p.id, p]));
   const story = parts.story.photos;
-  /** How many photos share photo k's row in the email (COLLAGE_ROWS), so the strip here is laid out the same way. */
-  const rowSize = (k: number) => {
-    let start = 0;
-    for (const n of COLLAGE_ROWS[story.length] ?? [story.length]) {
-      if (k < start + n) return n;
-      start += n;
-    }
-    return 1;
-  };
-  const collage = useRef<HTMLOListElement>(null);
-  useFlip(collage, story);
+  // The layout the email draws the collage in: hers, or the one that keeps the most of these photos
+  const layout = story.length ? layoutFor(parts.story.layout, story.map((id) => ratioOf(byId.get(id)))) : undefined;
   const setStory = (change: (ids: string[]) => string[]) => setParts((p) => ({ ...p, story: { ...p.story, photos: change(p.story.photos) } }));
 
   async function upload(files: FileList | File[] | null) {
@@ -199,31 +184,19 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
       <FieldError id="em-photos-error" message={error} />
 
       <fieldset class="em-collage">
-        <legend>The story’s collage{story.length ? ` · ${LAYOUT_WORDS[story.length] ?? ''}` : ''}</legend>
+        <legend>The story’s collage{layout ? ` · ${layout.name}` : ''}</legend>
         {story.length ? (
-          <ol class="em-collage-list" ref={collage}>
-            {story.map((id, k) => (
-              <li data-flip={id} key={id} class={`em-collage-item is-row-${rowSize(k)}`}>
-                <img src={rowSize(k) === 1 ? photoThumb(id, 600, 300, local) : photoThumb(id, 300, 300, local)} alt="" />
-                <span class="em-collage-n">{k + 1}</span>
-                <span class="em-collage-moves">
-                  <button type="button" class="btn btn-ghost btn-icon" aria-label={`Move photo ${k + 1} earlier`} disabled={k === 0} onClick={() => move(k, -1)}>
-                    ←
-                  </button>
-                  <button type="button" class="btn btn-ghost btn-icon" aria-label={`Move photo ${k + 1} later`} disabled={k === story.length - 1} onClick={() => move(k, 1)}>
-                    →
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ol>
+          <CollageLayouts
+            ids={story}
+            byId={byId}
+            chosen={parts.story.layout}
+            setChosen={(id) => setParts((p) => ({ ...p, story: { ...p.story, layout: id } }))}
+            setOrder={(ids) => setStory(() => ids)}
+            move={move}
+            local={local}
+          />
         ) : (
           <p class="em-hint">Tick “In the story” on up to {COLLAGE_MAX} photos below.</p>
-        )}
-        {story.length >= 3 && (
-          <button type="button" class="btn btn-small" onClick={() => setStory((ids) => arrangeCollage(ids, byId))}>
-            Put the widest first
-          </button>
         )}
       </fieldset>
 
