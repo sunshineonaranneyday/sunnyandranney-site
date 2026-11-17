@@ -1,6 +1,7 @@
-// Builds the weekly email from its brief: node scripts/sunny-side/build.mjs [--local] [brief.json ...]
+// Builds the weekly email from its brief: node scripts/sunny-side/build.mjs [--local] [--tests] [brief.json ...]
 // With no briefs named, every brief in briefs/ goes to out/ and every stress test in tests/ to out/tests/,
-// which verify.mjs then holds to the standard. The email itself is src/lib/sunny-side/email.mjs, the
+// which verify.mjs then holds to the standard. --tests builds the stress tests alone: they need nothing
+// but this repo (no admin database, no store pages), so the pull request check builds them. The email itself is src/lib/sunny-side/email.mjs, the
 // same code the admin uses to preview the week's special.
 //
 // A brief whose "sale", "wall" or "events" is "admin" takes what Staci set at /admin/email/: the
@@ -26,7 +27,8 @@ const HERE = new URL('.', import.meta.url).pathname;
 const ROOT = join(HERE, '..', '..');
 const args = process.argv.slice(2);
 const local = args.includes('--local');
-const briefs = args.filter((a) => a !== '--local');
+const testsOnly = args.includes('--tests');
+const briefs = args.filter((a) => a !== '--local' && a !== '--tests');
 
 const ADMIN = 'admin.sunnyandranney.com/admin/email/';
 
@@ -190,7 +192,8 @@ async function attempt(path, out) {
 if (briefs.length) {
   for (const path of briefs) await attempt(path, join(HERE, 'out'));
 } else {
-  for (const [folder, out] of [['briefs', join(HERE, 'out')], ['tests', join(HERE, 'out', 'tests')]]) {
+  const folders = [['briefs', join(HERE, 'out')], ['tests', join(HERE, 'out', 'tests')]].filter(([folder]) => !testsOnly || folder === 'tests');
+  for (const [folder, out] of folders) {
     const files = readdirSync(join(HERE, folder)).filter((f) => f.endsWith('.json')).sort();
     const current = new Set(files.map((f) => `${basename(f, '.json')}.html`));
     mkdirSync(out, { recursive: true });

@@ -115,6 +115,22 @@ export interface AppProps {
   impact: { rooms: string; children: string } | null;
   /** True on a developer's machine, whose uploads aren't on the live site. */
   local: boolean;
+  /** The signed-in login is the owner's, the one shown problems in the email's own layout. */
+  owner: boolean;
+  /** Problems in the email's own layout the preview reported (layout-store.mjs); the owner's only, else empty. */
+  layoutReports: LayoutReport[];
+}
+
+/** A word in the email's own layout the preview measured too wide for a phone (layout-store.mjs). */
+export interface LayoutReport {
+  word: string;
+  over: number;
+  width: number;
+  send: string;
+  seenBy: string;
+  firstSeen: string;
+  lastSeen: string;
+  times: number;
 }
 
 export interface Parts {

@@ -32,7 +32,7 @@ import {
 } from './model';
 import { Section } from './parts';
 import { Photos } from './Photos';
-import { type Fit, type Focus, type Spill, Preview } from './Preview';
+import { type Fits, type Focus, type Spill, Preview } from './Preview';
 import { Products } from './Products';
 import { Sale } from './Sale';
 import { Send } from './Send';
@@ -51,17 +51,23 @@ function draftEvent(ev: StoreEvent): StoreEvent | null {
   return { ...ev, id: ev.id || 'new-event', title: ev.title || 'Your event', when: ev.when || 'What’s on', dates };
 }
 
-/** Where too-wide words are, in the page's words, and what to do: always what and where, never "something". */
-const SPILL_WHERE: Record<Spill['part'], [string, string]> = {
+/**
+ * Where too-wide words are, in the page's words, and what to do: always what and where, never
+ * "something". Only what can be fixed here: a word in the email's own layout is code, so it's
+ * reported to the owner (layout.ts) and never shown to whoever is setting up the email.
+ */
+type Fixable = Exclude<Spill['part'], 'layout'>;
+const SPILL_WHERE: Record<Fixable, [string, string]> = {
   offer: ['the sale', 'Shorten it.'],
   wall: ['a product’s name', 'Give it a shorter name on its tile.'],
   story: ['the story', 'Shorten it, or break it with a space.'],
   photos: ['the story', 'Shorten it, or break it with a space.'],
   events: ['the events', 'Shorten it in the event.'],
   mission: ['the charity section', 'Those words come from the charity’s site: pick another family, or fix them there.'],
-  layout: ['the email’s own layout', 'That isn’t anything typed here, so it doesn’t stop saving: tell Peter.'],
 };
-const spillMessage = (s: Spill) => `“${s.word}” in ${SPILL_WHERE[s.part][0]} is ${s.over} px too wide for a small phone (320 px). ${SPILL_WHERE[s.part][1]}`;
+const spillMessage = (s: Spill & { part: Fixable }) => `“${s.word}” in ${SPILL_WHERE[s.part][0]} is ${s.over} px too wide for a small phone (320 px). ${SPILL_WHERE[s.part][1]}`;
+/** Each measuring frame's phone width (Preview: the smallest phone, a phone, the smallest phone bare). */
+const FRAME_WIDTH = { small: 320, phone: 390, bare: 320 } as const;
 
 /** "YYYY-MM-DD" in the store's time zone. */
 const easternDay = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(iso));
@@ -96,7 +102,10 @@ export default function EmailApp(props: AppProps) {
   const [catalogProblem, setCatalogProblem] = useState<string | null>(null);
   const [events, setEvents] = useState<EventRecord[]>(props.events);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [fit, setFit] = useState<{ small: Fit | null; phone: Fit | null }>({ small: null, phone: null });
+  const [fit, setFit] = useState<Fits>({ small: null, phone: null, bare: null });
+  // The owner's view of problems in the email's own layout: those reported from this page before (layout-store.mjs)
+  const [layoutReports, setLayoutReports] = useState(props.layoutReports);
+  const reported = useRef(new Set<string>());
   const [focus, setFocus] = useState<Focus>('offer');
   /** The part of the email Staci is working on, from where her focus or tap is. */
   const follow = (e: Event) => {
@@ -165,23 +174,47 @@ export default function EmailApp(props: AppProps) {
     [sale, wall, parts, photosById, catalog, shownEvents, day],
   );
 
-  const fold = fit.small && fit.phone ? Math.max(fit.small.buttonAt, fit.phone.buttonAt) : null;
-  // What's too wide for a small phone, named, with where to fix it (the 320 px phone first: it's the tightest)
-  const spillAt = [...(fit.small?.spills ?? []), ...(fit.phone?.spills ?? [])][0] ?? null;
+  const frames = (['small', 'phone', 'bare'] as const).map((k) => [k, fit[k]] as const);
+  const fold = fit.small && fit.phone ? Math.max(...frames.map(([, f]) => f?.buttonAt ?? 0)) : null;
+  // What's too wide for a small phone, named, with where to fix it (the 320 px phone first: it's the
+  // tightest). Words in the email's own layout aren't hers to fix: they go to the owner instead.
+  const spills = frames.flatMap(([k, f]) => (f?.spills ?? []).map((s) => ({ ...s, width: FRAME_WIDTH[k] })));
+  const spillAt = (spills.find((s) => s.part !== 'layout') as (Spill & { part: Fixable }) | undefined) ?? null;
+  const layoutSpills = spills.filter((s) => s.part === 'layout');
   const spill = Boolean(spillAt);
   const spillWords = spillAt ? spillMessage(spillAt) : null;
-  const longNames = useMemo(() => new Set([...(fit.small?.longNames ?? []), ...(fit.phone?.longNames ?? [])]), [fit]);
+  const longNames = useMemo(() => new Set(frames.flatMap(([, f]) => f?.longNames ?? [])), [fit]);
+  // A layout problem is reported once per word for each page load: the owner sees it on this page
+  useEffect(() => {
+    for (const s of layoutSpills) {
+      if (reported.current.has(s.word)) continue;
+      reported.current.add(s.word);
+      void call('/api/admin/email/layout/', 'POST', { word: s.word, over: s.over, width: s.width, send }).then((res) => {
+        if (res.ok && props.owner) {
+          const now = new Date().toISOString();
+          setLayoutReports((list) => [{ word: s.word, over: s.over, width: s.width, send, seenBy: props.test.me, firstSeen: now, lastSeen: now, times: 1 }, ...list.filter((r) => r.word !== s.word)]);
+        }
+      });
+    }
+  }, [layoutSpills.map((s) => s.word).join('|')]);
+  async function clearLayoutReports() {
+    const res = await call('/api/admin/email/layout/', 'DELETE', {});
+    if (res.ok) {
+      setLayoutReports([]);
+      reported.current.clear();
+    } else toast(res.error, 'error');
+  }
   const layoutProblem =
     fold !== null && fold > FIRST_SCREEN
       ? `On a phone the sale button lands ${fold - FIRST_SCREEN} px below the first screen.${form.kind === 'tiers' ? ' Use fewer tiers.' : ''}`
-      : spillWords && spillAt!.part !== 'layout'
+      : spillWords
         ? spillWords
         : longNames.size
           ? `${longNames.size === 1 ? 'A product name runs' : `${longNames.size} product names run`} past two lines on a small phone. Give ${longNames.size === 1 ? 'it' : 'them'} a shorter name.`
           : null;
 
   // The section that fixes it, for the error list's link
-  const SECTION: Record<Spill['part'], string> = { offer: 'em-sale', wall: 'em-products', story: 'em-story', photos: 'em-story', events: 'em-events', mission: 'em-charity', layout: 'em-preview' };
+  const SECTION: Record<Fixable, string> = { offer: 'em-sale', wall: 'em-products', story: 'em-story', photos: 'em-story', events: 'em-events', mission: 'em-charity' };
   const layoutSection = layoutProblem === spillWords && spillAt ? SECTION[spillAt.part] : longNames.size && layoutProblem && !(fold !== null && fold > FIRST_SCREEN) ? 'em-products' : 'em-sale';
 
   // ── Saving ──
@@ -335,7 +368,9 @@ export default function EmailApp(props: AppProps) {
   const storyState = story.headline && story.body ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const } : { state: 'Not written', tone: 'todo' as const };
   const checks = [
     { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` },
-    { ok: fold === null ? null : !spill, text: spillWords ?? 'Everything fits a small phone (320 px).' },
+    // Measured as sent and bare (no style block, no web fonts, as the Gmail app shows it to other accounts).
+    // A word in the email's own layout isn't hers, so it never makes this untrue for her: it goes to the owner.
+    { ok: fold === null ? null : !spill, text: spillWords ?? (layoutSpills.length ? 'Everything set up here fits a small phone (320 px).' : 'Everything fits a small phone (320 px), even in the Gmail app.') },
     ...(wallReady && fold !== null ? [{ ok: !longNames.size, text: longNames.size ? `${longNames.size} product name${longNames.size === 1 ? '' : 's'} run past two lines.` : 'Every product name fits two lines.' }] : []),
     ...(!wallReady ? [{ ok: null, text: n ? `Pick ${Math.max(PICKS[0] - n, 0) || 'no more than 9'} more to see the products here.` : `The products show here once ${PICKS[0]} are picked.` }] : []),
   ];
@@ -484,6 +519,23 @@ export default function EmailApp(props: AppProps) {
         </div>
 
         <div class="em-side" id="em-preview">
+          {props.owner && layoutReports.length > 0 && (
+            <section class="em-owner card" aria-labelledby="em-owner-title">
+              <h2 id="em-owner-title">Only you see this: the email’s own layout</h2>
+              <ul>
+                {layoutReports.map((r) => (
+                  <li key={r.word}>
+                    “{r.word}” was {r.over} px too wide at {r.width} px, seen by {who(r.seenBy)} on {at.format(new Date(r.lastSeen))}
+                    {r.times > 1 ? ` (${r.times} times)` : ''}.
+                  </li>
+                ))}
+              </ul>
+              <p class="em-hint">Nothing typed on this page fixes it, so no one else is shown it. It’s a fix to the email’s code, which verify.mjs checks at every width from 320 to 700 px on every pull request.</p>
+              <button type="button" class="btn btn-small" onClick={() => void clearLayoutReports()}>
+                Clear, it’s fixed
+              </button>
+            </section>
+          )}
           <Preview focus={focus} brief={brief} sections={sections} problem={null} checks={checks} onFit={setFit} />
         </div>
       </div>

@@ -306,7 +306,8 @@ test('the charity section shows its live numbers, and leaves the strip out witho
   // the band), the finished room at 2:1, the caption run into the story, and a text link, so the
   // store's sale keeps the email's one big button
   assert.match(html, /soard-logo-warm-tile\/public" width="88" height="81"/);
-  assert.match(html, /w=1072,h=536,[^"]*" width="536" height="268"/);
+  // On the column: 536 wide on a computer (and Outlook's size), up to 560 where the style block is gone
+  assert.match(html, /w=1120,h=560,[^"]*" width="536" height="268" alt="A family" style="display:block;width:100%;max-width:560px;/);
   assert.match(html, /<strong style="font-weight:700;">Ages 14 and 12\.<\/strong> Story\.<\/p>/);
   assert.match(html, /utm_content=mission-link"[^>]*padding:10px 0;[^>]*>See their reveal&nbsp;&#8594;<\/a>/);
   assert.doesNotMatch(html, /mission-button|bgcolor="#FFDA24"/, 'no yellow button in the charity section');
@@ -314,6 +315,11 @@ test('the charity section shows its live numbers, and leaves the strip out witho
   assert.match(html, />208\+</);
   assert.match(html, /\$0</);
   assert.match(html, /utm_content=charity-logo/);
+  // The numbers wrap by their own widths, centered, like the charity's site: no table cell squeezes
+  // them, and no media query is needed for two to sit across a 320px phone (140 each, 280 of column)
+  assert.equal((html.match(/<div class="stat" style="display:inline-block;vertical-align:top;width:100%;max-width:140px;/g) || []).length, 3);
+  assert.match(html, /<div style="font-size:0;line-height:0;text-align:center;">/);
+  assert.doesNotMatch(html, /table-layout:fixed/, 'the strip is not three fixed cells');
   const none = new Email({ ...brief, mission: { ...brief.mission, impact: undefined } }).mission();
   assert.doesNotMatch(none, /Room makeovers/);
 });
