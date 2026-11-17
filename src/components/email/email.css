@@ -48,6 +48,23 @@
   .em .em-jump { display: none; }
 }
 @media (min-width: 1024px) { .em .em-jump { bottom: 1.5rem; } }
+/* Below that width the preview is a sheet over the page (EmailApp.tsx, previewing): a tap away, and back
+   to the same spot, instead of 11 screens down the page. Closed, it stays laid out out of sight, so its
+   measuring frames keep checking the email; it never takes the page's length. */
+@container (max-width: 939.98px) {
+  .em-side {
+    position: fixed; inset: var(--topbar, 0px) 0 0 0; z-index: 30; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding: 0 0.75rem calc(1rem + env(safe-area-inset-bottom, 0px)); background: var(--bg);
+    visibility: hidden; opacity: 0; transform: translateY(1.5rem);
+    transition: opacity var(--em-mid) var(--em-ease), transform var(--em-mid) var(--em-ease), visibility 0s linear var(--em-mid);
+  }
+  .em.is-previewing .em-side { visibility: visible; opacity: 1; transform: none; transition: opacity var(--em-mid) var(--em-ease), transform var(--em-mid) var(--em-ease), visibility 0s; }
+  /* The sheet already starts under the admin's top bar, so its own bar sticks to the sheet's top */
+  .em-side { --sticky-top: 0px; }
+  .em-side-bar { position: sticky; top: var(--sticky-top, 0px); z-index: 2; display: flex; align-items: center; margin: 0 -0.75rem 0.75rem; padding: 0.5rem 0.75rem; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .em.is-previewing .em-jump { visibility: hidden; pointer-events: none; }
+}
+@container (min-width: 940px) { .em-side-bar { display: none; } }
 
 /* ── Sections ── */
 .em-section { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.75rem; }
@@ -132,53 +149,57 @@
 .em-extras-now { color: var(--ink-3); font-size: 0.875rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 12rem; }
 .em-extras-body { padding-top: 0.75rem; }
 
-/* ── The products, laid out the way the email lays them out ── */
-.em-wall-hint { margin: 0 0 0.75rem; }
-.em-wall { display: grid; gap: 0.75rem; touch-action: pan-y; }
+/* ── The products, laid out the way the email lays them out, and arranged as the collage is (drag.ts):
+   the photo is what's dragged, tapped, or picked up with Space or Enter ── */
+.em-wall-panel .em-wall-line { margin-bottom: 0.75rem; }
+.em-wall-panel:is(.is-tap, .is-key, .is-drag) .em-wall-line { color: var(--ink); font-weight: 600; }
+/* Positioned, so each tile's place can be read without the slide it may be in (homeRect) */
+.em-wall { position: relative; display: grid; gap: 0.75rem; }
 .em-wall-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.75rem; }
 .em-wall-row-1 { grid-template-columns: minmax(0, 1fr); }
 .em-wall-row-free { grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); }
-.em-tile { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); overflow: hidden; transition: box-shadow 0.15s var(--ease), opacity 0.15s var(--ease); }
+.em-tile { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); overflow: hidden; transition: box-shadow 0.15s var(--ease), opacity 0.15s var(--ease), transform 0.15s var(--ease); }
 .em-tile.is-bad { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
-.em-tile.is-dragged { opacity: 0.45; }
-.em-tile.is-target { box-shadow: 0 0 0 3px var(--teal); }
-.em-wall.is-dragging, .em-wall.is-dragging * { cursor: grabbing; user-select: none; }
+/* Where the held product lands if she lets go; the one picked up; and, while one is, every spot it can go */
+.em-tile.is-placeholder { box-shadow: 0 0 0 2px var(--teal); }
+.em-tile.is-placeholder .em-tile-pick img { opacity: 0.35; }
+.em-tile.is-held { position: relative; z-index: 2; transform: scale(1.02); box-shadow: 0 0 0 3px var(--teal), 0 12px 28px rgba(28, 27, 25, 0.24); }
+.em-tile.is-choice { outline: 2px dashed color-mix(in srgb, var(--teal) 70%, transparent); outline-offset: 2px; }
+.em-tile.is-choice .em-tile-pick:focus-visible .em-collage-here { opacity: 1; }
+@media (hover: hover) { .em-tile.is-choice .em-tile-pick:hover .em-collage-here { opacity: 1; } }
+@media (hover: none) { .em-tile.is-choice .em-collage-here { opacity: 0.9; background: color-mix(in srgb, var(--ink) 22%, transparent); } }
 .em-tile-photo { position: relative; aspect-ratio: 1; background: var(--sunk); }
 .em-tile-wide .em-tile-photo { aspect-ratio: 3 / 2; }
 .em-tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.em-tile-grip, .em-tile-remove {
-  position: absolute; top: 0.375rem; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+.em-tile-pick {
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: grab;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.em-tile-pick img { pointer-events: none; -webkit-user-drag: none; transition: opacity var(--em-fast) var(--em-ease); }
+.em-tile-pick:focus-visible { outline: 3px solid var(--teal); outline-offset: -3px; }
+.em-tile-remove {
+  position: absolute; top: 0.375rem; right: 0.375rem; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
   border: 0; border-radius: 10px; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--ink); box-shadow: var(--shadow-sm); cursor: pointer;
 }
-.em-tile-grip { left: 0.375rem; cursor: grab; touch-action: none; }
-.em-tile-remove { right: 0.375rem; }
-.em-tile-grip:focus-visible, .em-tile-remove:focus-visible, .em-tile-photos button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-tile-remove:focus-visible, .em-tile-photos button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .em-tile-photos {
   position: absolute; left: 50%; bottom: 0.375rem; transform: translateX(-50%); display: flex; align-items: center; gap: 0.125rem;
   padding: 0 0.125rem; border-radius: 999px; background: color-mix(in srgb, var(--panel) 90%, transparent); box-shadow: var(--shadow-sm); white-space: nowrap;
 }
 .em-tile-photos span { font-size: 0.75rem; font-weight: 600; color: var(--ink-2); padding: 0 0.25rem; }
-.em-tile-photos button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 1.25rem; line-height: 1; cursor: pointer; }
-.em-tile-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.625rem 0.75rem 0.375rem; flex: 1; }
+.em-tile-photos button { width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 1.25rem; line-height: 1; cursor: pointer; }
+.em-tile-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.625rem 0.75rem 0.625rem; flex: 1; }
 .em-tile-name { font-weight: 700; line-height: 1.3; }
 .em-tile-meta { font-size: 0.875rem; color: var(--ink-2); }
 .em-low { color: var(--clay); font-weight: 600; }
 .em-tile-rename { margin-top: 0.5rem; }
-.em-tile-rename input { min-height: 40px; }
-.em-tile-move { display: flex; align-items: center; justify-content: space-between; gap: 0.25rem; margin-top: auto; padding-top: 0.25rem; }
-.em-tile-move .btn { padding-inline: 0.5rem; min-width: 44px; }
 .em-tile, .em-tile-body, .em-tile-rename { min-width: 0; }
 .em-tile-name { overflow-wrap: anywhere; }
-/* Two tiles across a phone: the moves and the photo count go to arrows and numbers, and the tile's
-   place goes on its own line above its arrows, which keep their 44px (two of them and "3 of 6" don't
-   fit a tile on a 320px phone) */
+/* Two tiles across a phone: "Photo 2 of 3" becomes "2 of 3" so the photo's arrows keep their 44px */
 @container (max-width: 560px) {
   .em-wide-only { display: none; }
   .em-tile-body { padding-inline: 0.5rem; }
-  .em-tile-move { flex-wrap: wrap; row-gap: 0; }
-  .em-tile-place { order: -1; flex: 0 0 100%; text-align: center; }
 }
-.em-tile-place { font-size: 0.75rem; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
 
 .em-empty {
   display: grid; gap: 0.375rem; width: 100%; padding: 2rem 1.25rem; text-align: center; cursor: pointer;
@@ -346,15 +367,14 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 @media (hover: none) { .em-collage-item.is-choice .em-collage-here { opacity: 0.9; background: color-mix(in srgb, var(--ink) 22%, transparent); } }
 .em-collage-n { position: absolute; top: 6px; left: 6px; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 12px; background: var(--ink); color: var(--panel); font-size: 0.8125rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; pointer-events: none; }
 /* A photo's × and its "what part shows": drawn small on the photo, 44px to tap */
-.em-collage-x, .em-collage-focus, .em-photo-focus {
+.em-collage-x, .em-collage-focus {
   position: absolute; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%;
   background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--ink); box-shadow: 0 1px 3px rgba(28, 27, 25, 0.28); cursor: pointer;
   transition: background-color var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease);
 }
-.em-collage-x::before, .em-collage-focus::before, .em-photo-focus::before { content: ''; position: absolute; inset: -7px; }
+.em-collage-x::before, .em-collage-focus::before { content: ''; position: absolute; inset: -7px; }
 .em-collage-x { top: 6px; right: 6px; }
 .em-collage-focus { right: 6px; bottom: 6px; }
-.em-photo-focus { top: 6px; right: 6px; }
 .em-collage-x svg { width: 16px; height: 16px; }
 /* A spot under 92px on a side (a small spot of some layouts on a phone) has no room for a 44px button
    that leaves its middle free to tap: its buttons go, and a tap picks it up, as on any spot, with Take
@@ -363,8 +383,8 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-collage-item.is-small .em-collage-x, .em-collage-item.is-small .em-collage-focus { display: none; }
 .em-collage-item.is-small .em-collage-n { top: 4px; left: 4px; min-width: 20px; height: 20px; padding: 0 5px; font-size: 0.75rem; }
 .em-collage-item.is-small .em-collage-here { font-size: 0.6875rem; letter-spacing: 0.06em; }
-@media (hover: hover) { .em-collage-x:hover, .em-collage-focus:hover, .em-photo-focus:hover { background: var(--panel); transform: scale(1.08); } }
-.em-collage-x:focus-visible, .em-collage-focus:focus-visible, .em-photo-focus:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+@media (hover: hover) { .em-collage-x:hover, .em-collage-focus:hover { background: var(--panel); transform: scale(1.08); } }
+.em-collage-x:focus-visible, .em-collage-focus:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
 /* Room for more: where a library photo can be dropped at the end, and what to do when the collage is empty */
 .em-collage-add {
   display: grid; place-items: center; min-height: 3.25rem; margin: 0 0 0.75rem; padding: 0.625rem 0.875rem; border: 2px dashed color-mix(in srgb, var(--ink) 18%, var(--line));
@@ -407,17 +427,45 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-ghost.is-lifted img { transform: scale(1.05); box-shadow: 0 22px 44px rgba(28, 27, 25, 0.3), 0 6px 12px rgba(28, 27, 25, 0.16); }
 html.em-holding, html.em-holding * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 @media (prefers-reduced-motion: reduce) { .em-ghost img { transition: none; } }
-.em-library { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
-.em-photo { display: grid; gap: 0.375rem; align-content: start; padding: 0.5rem; border: 1px solid var(--line); border-radius: var(--r-md); }
-.em-photo.is-hero { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.em-photo-img { position: relative; display: block; cursor: grab; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
-.em-photo-img img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--sunk); -webkit-user-drag: none; }
+/* The library, compact: three across a phone, each photo with its two uses as 44px toggles (.em-chip) */
+.em-library { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 0.75rem 0.5rem; }
+.em-photo { display: grid; gap: 0.375rem; align-content: start; min-width: 0; }
+.em-photo-img {
+  position: relative; display: block; width: 100%; padding: 0; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: grab;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.em-photo-img.is-still { cursor: default; }
+.em-photo-img:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+.em-photo-img img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--sunk); -webkit-user-drag: none; pointer-events: none; }
+/* The top photo, outlined in ink on the photo itself */
+.em-photo.is-hero .em-photo-img img { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--ink); }
 /* The library photo being carried up to the collage, and the one waiting for her to pick what it replaces */
 .em-photo.is-lifted .em-photo-img img { opacity: 0.35; }
-.em-photo.is-waiting { border-color: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); }
-.em-photo-name { font-weight: 700; font-size: 0.875rem; }
-.em-photo-alt { font-size: 0.8125rem; min-height: 44px; }
-.em-photo .check { min-height: 32px; font-size: 0.875rem; }
+.em-photo.is-waiting .em-photo-img img { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--teal); }
+.em-photo-name { font-weight: 700; font-size: 0.8125rem; line-height: 1.3; }
+/* A use of a photo, as a toggle: a real radio or tick box inside, ticked in ink */
+.em-chip {
+  position: relative; display: flex; align-items: center; justify-content: center; gap: 0.25rem; min-height: 44px; margin: 0; padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink-2); cursor: pointer;
+  font-size: 0.8125rem; font-weight: 600; line-height: 1.2; letter-spacing: 0; text-transform: none; text-align: center;
+  transition: background-color var(--em-fast) var(--em-ease), color var(--em-fast) var(--em-ease), border-color var(--em-fast) var(--em-ease);
+}
+.em-chip:has(input:checked) { background: var(--ink); border-color: var(--ink); color: var(--panel); }
+.em-chip:has(input:checked)::before { content: '✓'; font-weight: 700; }
+.em-chip:has(input:focus-visible) { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-chip:has(input:disabled) { opacity: 0.5; cursor: default; }
+@media (hover: hover) { .em-chip:not(:has(input:checked)):hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); color: var(--ink); } }
+/* One photo's details (PhotoDetails in Photos.tsx): the whole photo beside its words, uses and what part shows */
+dialog.em-photo-sheet { width: min(44rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; }
+.em-photo-sheet-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.em-photo-sheet-img { display: block; justify-self: center; width: min(100%, calc(40vh * var(--r, 1))); max-height: 40vh; border-radius: 8px; overflow: hidden; background: var(--sunk); }
+.em-photo-sheet-img img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.em-photo-sheet-fields { display: grid; gap: 0.75rem; align-content: start; min-width: 0; }
+.em-photo-sheet-fields .field { margin: 0; }
+.em-photo-sheet-uses { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; }
+.em-photo-sheet-focus { justify-content: flex-start; gap: 0.5rem; white-space: normal; text-align: left; }
+@media (min-width: 640px) { .em-photo-sheet-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } .em-photo-sheet-img { max-height: 60vh; width: 100%; } }
+@media (max-width: 640px) { dialog.em-photo-sheet { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; } }
 .em input[type='radio'] { width: 1.25rem; min-height: 1.25rem; height: 1.25rem; flex: none; accent-color: var(--ink); box-shadow: none; }
 
 /* ── The story, the charity, the subject ── */
@@ -703,3 +751,17 @@ dialog.em-focus { width: min(58rem, calc(100vw - 2rem)); max-height: calc(100dvh
 .em-owner h2 { font-size:.9375rem;margin:0 0 .375rem }
 .em-owner ul { margin:0 0 .5rem;padding-left:1.125rem;font-size:.875rem }
 .em-owner .em-hint { margin:0 0 .625rem }
+
+/* ── On a touch screen ──
+   iPhone Safari zooms the page into any text field under 16px when it's tapped, and leaves it zoomed with
+   the page's right edge off screen (seen in iOS Safari, 2026-11-17): every field on the page is 16px here.
+   And everything tapped is at least 44px each way (Apple's Human Interface Guidelines), the small
+   buttons and tick boxes included. scripts/check-email-phone.mjs holds the page to both. */
+@media (pointer: coarse) {
+  .em :is(input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']), select, textarea) { font-size: 16px; }
+  .em .btn { min-height: 44px; }
+  .em .check { min-height: 44px; }
+  .em .em-tap-link { display: inline-flex; align-items: center; min-height: 44px; }
+  /* The status line's tallest is the Undo bar with its 44px button: reserved, so photos never shift under it */
+  .em-collage-hint { min-height: 3.5rem; }
+}

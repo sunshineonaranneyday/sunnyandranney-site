@@ -52,7 +52,7 @@ export interface Landed {
 
 interface Options {
   story: string[];
-  /** The collage's grid: its items carry data-id. */
+  /** The grid the photos sit in: each spot carries data-id, inside a positioned grid (homeRect). */
   list: RefObject<HTMLElement>;
   /** The whole collage panel: letting go anywhere on it counts. */
   zone: RefObject<HTMLElement>;
@@ -108,7 +108,7 @@ export function homeRect(item: HTMLElement): DOMRect {
 /** The id of the collage photo whose spot holds the point, or ''. */
 function idAt(list: HTMLElement | null, x: number, y: number): string {
   if (!list) return '';
-  for (const item of list.querySelectorAll<HTMLElement>(':scope > [data-id]')) {
+  for (const item of list.querySelectorAll<HTMLElement>('[data-id]')) {
     if (inside(homeRect(item), x, y)) return item.dataset.id!;
   }
   return '';
@@ -274,7 +274,7 @@ export function useCollageDrag(options: Options) {
   };
 
   /** The spot a photo sits in now, or the place it was picked up from. */
-  const spotOf = (id: string) => o.current.list.current?.querySelector<HTMLElement>(`:scope > [data-id="${CSS.escape(id)}"]`) ?? null;
+  const spotOf = (id: string) => o.current.list.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"]`) ?? null;
 
   const drop = (cancel: boolean) => {
     const p = press.current;

@@ -5,12 +5,12 @@ import { heightAt, layoutFor, layoutOf, place, ratioOf } from '@/lib/sunny-side/
 import { insertAt, moveTo, spotWords, swapAt } from '@/lib/sunny-side/collage.mjs';
 import { Email } from '@/lib/sunny-side/email.mjs';
 import { COLLAGE_MAX, DEFAULT_HERO } from '@/lib/sunny-side/parts.mjs';
-import { ALT_DEFAULT, PHOTO_MAX_SIDE, withFocus } from '@/lib/sunny-side/photo-store.mjs';
+import { ALT_DEFAULT, ALT_MAX, PHOTO_MAX_SIDE, withFocus } from '@/lib/sunny-side/photo-store.mjs';
 import { type Landed, useCollageDrag } from './drag';
-import { FocusPicker, objectPosition } from './FocusPicker';
+import { FocusPicker, objectPosition, wholePhoto } from './FocusPicker';
 import { LayoutChoices } from './Layouts';
 import { type Parts, type Photo, send as call, toast } from './model';
-import { FieldError, useFlip } from './parts';
+import { Counter, FieldError, useFlip } from './parts';
 import { X } from './Sale';
 
 /**
@@ -97,6 +97,8 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
   const depth = useRef(0);
   // The photo whose "what part shows" is open
   const [focusing, setFocusing] = useState<string | null>(null);
+  // The library photo whose details are open: its description, what part shows, and where it's used
+  const [details, setDetails] = useState<string | null>(null);
   // The last change to the collage, which Undo puts back
   const [undo, setUndo] = useState<{ text: string; story: string[]; layout: string; at: number } | null>(null);
   const [held, setHeld] = useState<Held | null>(null);
@@ -398,6 +400,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
   const off = Boolean(parts.story.reveal);
   const fromLibrary = view?.source === 'library';
   const focusPhoto = focusing ? byId.get(focusing) : undefined;
+  const detailPhoto = details ? byId.get(details) : undefined;
   const usesOf = (id: string) => [...(parts.hero === id ? ['the top photo'] : []), ...(story.includes(id) ? [`spot ${story.indexOf(id) + 1} in the collage`] : [])];
   /** The crops the email makes of a photo, for "what part shows": the top photo's, and its spot in the collage (or a square one). */
   const cropsOf = (id: string) => {
@@ -592,38 +595,42 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
         </p>
       </fieldset>
 
+      {/* The library, compact: each photo with its two uses as big toggles; a tap opens its description and
+          what part shows (as Shopify keeps a photo's alt text in its media details); press and hold, or a
+          mouse drag, carries it up to the collage */}
       <ul class="em-library" aria-label="The store’s photos">
         <li class={`em-photo${parts.hero ? '' : ' is-hero'}`}>
-          <span class="em-photo-img">
+          <span class="em-photo-img is-still">
             <img src={Email.photo(DEFAULT_HERO.src, 480, 480)} alt="" loading="lazy" />
           </span>
           <span class="em-photo-name">The store’s wide shot</span>
-          <label class="check">
-            <input type="radio" name="em-hero" checked={!parts.hero} onChange={() => setParts((x) => ({ ...x, hero: '' }))} /> Top photo
+          <label class="em-chip">
+            <input type="radio" name="em-hero" class="visually-hidden" checked={!parts.hero} onChange={() => setParts((x) => ({ ...x, hero: '' }))} />
+            <span>Top photo</span>
           </label>
         </li>
         {shownLibrary.map((p) => (
           <li class={`em-photo${parts.hero === p.id ? ' is-hero' : ''}${story.includes(p.id) ? ' is-story' : ''}${view?.id === p.id ? ' is-lifted' : ''}${swapping === p.id ? ' is-waiting' : ''}`} key={p.id}>
-            <span class="em-photo-img" onPointerDown={off ? undefined : (e) => drag.startPress(e, p.id, 'library')} onTouchMove={drag.touchGuard}>
+            <button
+              type="button"
+              class="em-photo-img"
+              aria-label={`${p.alt || 'A photo'}: its description and what part shows`}
+              onPointerDown={off ? undefined : (e) => drag.startPress(e, p.id, 'library')}
+              onTouchMove={drag.touchGuard}
+              onClick={() => {
+                if (!drag.justDragged()) setDetails(p.id);
+              }}
+            >
               <img src={photoThumb(p, 480, 480, local)} alt="" loading="lazy" draggable={false} style={{ objectPosition: objectPosition(p.focus) }} />
               {story.includes(p.id) && <span class="em-collage-n">{story.indexOf(p.id) + 1}</span>}
-              <button type="button" class="em-photo-focus" data-nodrag aria-label="Choose what part of this photo shows" title="Choose what part shows" onClick={() => setFocusing(p.id)}>
-                <Viewfinder set={Boolean(p.focus)} />
-              </button>
-            </span>
-            <input
-              class="em-photo-alt"
-              aria-label="What’s in this photo, for people who can’t see it"
-              value={alts[p.id] ?? p.alt}
-              maxLength={120}
-              onInput={(e) => setAlts({ ...alts, [p.id]: (e.target as HTMLInputElement).value })}
-              onBlur={() => void saveAlt(p)}
-            />
-            <label class="check">
-              <input type="radio" name="em-hero" checked={parts.hero === p.id} onChange={() => setParts((x) => ({ ...x, hero: p.id }))} /> Top photo
+            </button>
+            <label class="em-chip">
+              <input type="radio" name="em-hero" class="visually-hidden" checked={parts.hero === p.id} onChange={() => setParts((x) => ({ ...x, hero: p.id }))} />
+              <span>Top photo</span>
             </label>
-            <label class="check">
-              <input type="checkbox" checked={story.includes(p.id)} onChange={() => toggleStory(p.id)} /> In the story
+            <label class="em-chip">
+              <input type="checkbox" class="visually-hidden" checked={story.includes(p.id)} onChange={() => toggleStory(p.id)} />
+              <span>In the story</span>
             </label>
           </li>
         ))}
@@ -632,6 +639,28 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
         <button type="button" class="btn btn-small" onClick={() => setShowAll(!showAll)}>
           {showAll ? 'Show fewer' : `Show all ${photos.length} photos`}
         </button>
+      )}
+      {detailPhoto && (
+        <PhotoDetails
+          photo={detailPhoto}
+          local={local}
+          alt={alts[detailPhoto.id] ?? detailPhoto.alt}
+          setAlt={(alt) => setAlts({ ...alts, [detailPhoto.id]: alt })}
+          saveAlt={() => void saveAlt(detailPhoto)}
+          hero={parts.hero === detailPhoto.id}
+          setHero={() => setParts((x) => ({ ...x, hero: detailPhoto.id }))}
+          inStory={story.includes(detailPhoto.id)}
+          toggleStory={() => {
+            // Into a full collage: the sheet steps aside for her to tap the photo it replaces
+            if (!story.includes(detailPhoto.id) && story.length >= COLLAGE_MAX) setDetails(null);
+            toggleStory(detailPhoto.id);
+          }}
+          showFocus={() => {
+            setDetails(null);
+            setFocusing(detailPhoto.id);
+          }}
+          onClose={() => setDetails(null)}
+        />
       )}
       {focusPhoto && (
         <FocusPicker
@@ -644,5 +673,82 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
         />
       )}
     </div>
+  );
+}
+
+interface DetailsProps {
+  photo: Photo;
+  local: boolean;
+  alt: string;
+  setAlt: (alt: string) => void;
+  saveAlt: () => void;
+  hero: boolean;
+  setHero: () => void;
+  inStory: boolean;
+  toggleStory: () => void;
+  showFocus: () => void;
+  onClose: () => void;
+}
+
+/**
+ * One library photo's details, in a sheet: the whole photo, the words saying what's in it (for people
+ * who can't see images, and mail apps that block them), its two uses, and what part shows.
+ */
+function PhotoDetails({ photo, local, alt, setAlt, saveAlt, hero, setHero, inStory, toggleStory, showFocus, onClose }: DetailsProps) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+  const id = `em-photo-alt-${photo.id}`;
+  return (
+    <dialog
+      class="em-dialog em-photo-sheet"
+      ref={dialog}
+      aria-labelledby="em-photo-sheet-title"
+      onClose={() => {
+        saveAlt();
+        onClose();
+      }}
+      onClick={(e) => {
+        if (e.target === dialog.current) dialog.current?.close();
+      }}
+    >
+      <h2 id="em-photo-sheet-title">This photo</h2>
+      <div class="em-photo-sheet-body">
+        <span class="em-photo-sheet-img" style={{ aspectRatio: `${photo.w} / ${photo.h}`, '--r': (photo.w / photo.h).toFixed(4) }}>
+          <img src={wholePhoto(photo, local, 900)} alt="" />
+        </span>
+        <div class="em-photo-sheet-fields">
+          <div class="field">
+            <label for={id}>
+              What’s in it <Counter value={alt} limit={ALT_MAX} />
+            </label>
+            <input id={id} value={alt} maxLength={ALT_MAX} onInput={(e) => setAlt((e.target as HTMLInputElement).value)} onBlur={saveAlt} aria-describedby={`${id}-hint`} />
+            <p class="em-hint" id={`${id}-hint`}>
+              Read out to people who can’t see images, and shown when a mail app blocks them.
+            </p>
+          </div>
+          <div class="em-photo-sheet-uses">
+            <label class="em-chip">
+              <input type="radio" name="em-hero-sheet" class="visually-hidden" checked={hero} onChange={setHero} />
+              <span>Top photo</span>
+            </label>
+            <label class="em-chip">
+              <input type="checkbox" class="visually-hidden" checked={inStory} onChange={toggleStory} />
+              <span>In the story</span>
+            </label>
+          </div>
+          <button type="button" class="btn em-photo-sheet-focus" onClick={showFocus}>
+            <Viewfinder set={Boolean(photo.focus)} />
+            <span>What part shows</span>
+          </button>
+        </div>
+      </div>
+      <div class="em-dialog-actions">
+        <button type="button" class="btn btn-primary" onClick={() => dialog.current?.close()}>
+          Done
+        </button>
+      </div>
+    </dialog>
   );
 }
