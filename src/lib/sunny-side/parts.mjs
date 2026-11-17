@@ -9,7 +9,7 @@
  * the tests share it.
  */
 
-import { fillLine, lines, offerClaims } from './email.mjs';
+import { fillLine, lines, offerClaims, plain } from './email.mjs';
 import { KID_SLUG, kidFor, missionOf } from './kids.mjs';
 import { typeset } from './special.mjs';
 
@@ -136,8 +136,11 @@ export function briefParts(p, { sale, photos, kids = [], photoSrc = (id) => `pho
   const kid = kidFor(p.kid, kids);
   const { subject, preheader } = linesOf(p, sale);
   return {
-    subject: typeset(subject).replace(/&amp;/g, '&'),
-    preheader: typeset(preheader).replace(/&amp;/g, '&'),
+    // Plain text with curly quotes as characters: the email escapes these once where it writes them
+    // (its <title> and hidden preview line), and Kit takes them as plain text. As HTML they were
+    // escaped twice, and an inbox showed "kids&#8217;".
+    subject: plain(typeset(subject)),
+    preheader: plain(typeset(preheader)),
     hero: p.hero && photos.has(p.hero) ? pic(p.hero) : DEFAULT_HERO,
     story:
       s.headline || s.body || s.photos.length

@@ -340,7 +340,10 @@ export class Email {
     const u = escape(this.url(href, slot));
     const width = 56 + 9 * [...text.replace(/&#8594;/g, 'x').replace(/&#8217;/g, "'").replace(/&amp;/g, '&')].length;
     const radius = pill ? 999 : R_BTN;
+    // In a full-width row of its own: a table with align= floats, and whatever came after it (the
+    // sale's fine print) sat beside the button on a computer instead of under it
     return (
+      `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${align}">` +
       `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="${align}" class="btn" ` +
       `style="border-collapse:separate;"><tr><td bgcolor="${bg}" style="border-radius:${radius}px;background-color:${bg};">` +
       `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" ` +
@@ -349,7 +352,7 @@ export class Email {
       `</v:roundrect><![endif]--><!--[if !mso]><!-->` +
       `<a href="${u}" target="_blank" style="display:inline-block;padding:16px 28px;font-family:${font};font-size:16px;` +
       `line-height:20px;font-weight:700;color:${fg};text-decoration:none;border-radius:${radius}px;border:2px solid ${bg};">${text}</a>` +
-      `<!--<![endif]--></td></tr></table>`
+      `<!--<![endif]--></td></tr></table></td></tr></table>`
     );
   }
 
@@ -456,7 +459,7 @@ export class Email {
     }
     out += this.button(`${s.cta} &#8594;`, SITE + s.url, 'offer-button', CHARCOAL, WHITE);
     // fine print after the button, so it never pushes the button down
-    if (s.details) out += Email.gap(S2) + Email.text(s.details, { size: 15, lh: 22 });
+    if (s.details) out += Email.gap(S2) + Email.text(s.details, { size: 15, lh: 22, cls: 'fine' });
     return this.band(out, { bg: GOLD, top: S4 });
   }
 

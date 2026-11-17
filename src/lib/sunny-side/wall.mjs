@@ -61,8 +61,49 @@ export function shortName(name) {
   return s.length <= NAME_MAX && words.length >= 2 ? s : '';
 }
 
-/** The name a tile shows: Staci's short name, or the store's name cleaned up. */
+/** The name a tile shows on its own: Staci's short name, or the store's name cleaned up. */
 export const tileName = (pick, product) => pick.name || (product ? displayName(product.title) : '');
+
+/** The store's name with its finish kept and words dropped before it until it fits: "Knox Nesting Table, Natural". '' when it can't. */
+function withFinish(full) {
+  const m = full.match(/^(.*?),\s*([^,]+)$/);
+  if (!m) return '';
+  let base = m[1].trim().split(/\s+/);
+  while (base.length > 2) {
+    base = base.slice(0, -1);
+    const name = `${base.join(' ')}, ${m[2].trim()}`;
+    if (name.length <= NAME_MAX) return name;
+  }
+  return '';
+}
+
+/**
+ * What every tile says, in order: Staci's name if she typed one, else the store's if it fits, else
+ * shortened for her (shortName), never two alike: when shortening would make two tiles read the same
+ * ("Knox Nesting Table Set" for two colors), each keeps its finish ("Knox Nesting Table, Natural").
+ * '' only where no clean short name exists, the one time she's asked. The page, its checks and the
+ * email all name tiles by this.
+ */
+export function tileNames(picks, catalog) {
+  const full = picks.map((p) => {
+    const product = catalog?.get(p.handle);
+    return product ? displayName(product.title) : '';
+  });
+  // Products that are the same piece in different finishes share the name before the comma
+  const base = (n) => n.replace(/,[^,]*$/, '').trim().toLowerCase();
+  const count = new Map();
+  picks.forEach((p, k) => !p.name && full[k] && count.set(base(full[k]), (count.get(base(full[k])) ?? 0) + 1));
+  const used = new Set(picks.filter((p) => p.name).map((p) => p.name.toLowerCase()));
+  return picks.map((p, k) => {
+    if (p.name) return p.name;
+    const twins = count.get(base(full[k])) > 1;
+    let name = full[k].length <= NAME_MAX ? full[k] : twins ? withFinish(full[k]) : shortName(full[k]);
+    if (name && used.has(name.toLowerCase())) name = withFinish(full[k]);
+    if (name && used.has(name.toLowerCase())) name = '';
+    if (name) used.add(name.toLowerCase());
+    return name;
+  });
+}
 
 const daysBetween = (from, to) => (Date.parse(to) - Date.parse(from)) / 86400000;
 
@@ -86,10 +127,11 @@ export function checkWall(w, { catalog, send } = {}) {
   }
   const seen = new Set();
   const names = new Map();
-  w.picks.forEach((p) => {
+  const auto = tileNames(w.picks, catalog);
+  w.picks.forEach((p, k) => {
     const key = `picks.${p.handle}`;
     const product = catalog?.get(p.handle);
-    const name = tileName(p, product) || p.handle;
+    const name = auto[k] || tileName(p, product) || p.handle;
     if (!HANDLE.test(p.handle)) return void (e[key] = 'That isn’t a product on the website.');
     if (seen.has(p.handle)) return void (e[key] = `${name} is in twice.`);
     seen.add(p.handle);
@@ -99,7 +141,8 @@ export function checkWall(w, { catalog, send } = {}) {
     if (!product) return void (e[key] = `${name} isn’t on the website anymore. Take it out.`);
     if (product.qty <= 0) return void (e[key] = `${name} is sold out. Take it out or pick another.`);
     if (!p.photo.startsWith('cf:') && !product.photos.some((ph) => ph.url === p.photo)) return void (e[key] = `Pick one of ${name}’s own photos.`);
-    if (!p.name && displayName(product.title).length > NAME_MAX) return void (e[key] = `Give ${displayName(product.title)} a short name for its tile (${NAME_MAX} characters at most).`);
+    // Asked only when no clean short name exists for it (autoName)
+    if (!auto[k]) return void (e[key] = `${displayName(product.title)} is too long for a tile and can’t be shortened on its own. Give it a short name (${NAME_MAX} characters at most).`);
     const shown = name.toLowerCase();
     if (names.has(shown)) return void (e[key] = `Two products would both say “${name}”. Give this one a name that tells them apart, like its color.`);
     names.set(shown, p.handle);
@@ -171,9 +214,10 @@ export function toWall(w, site) {
  */
 export function previewWall(w, catalog, site) {
   const wall = toWall(w, site);
+  const names = tileNames(w.picks, catalog);
   wall.photos = wall.photos.map((ph, k) => {
     const product = catalog.get(w.picks[k].handle);
-    const name = ph.name || typeset(product ? displayName(product.title) : w.picks[k].handle);
+    const name = ph.name || typeset(names[k] || (product ? displayName(product.title) : w.picks[k].handle));
     return { ...ph, name, price: product?.price || 1 };
   });
   return wall;

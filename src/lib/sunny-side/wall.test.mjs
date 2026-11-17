@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Email, render } from './email.mjs';
 import { previewBrief, toSale, clean } from './special.mjs';
-import { arrange, checkWall, cleanWall, previewWall, shortName, toWall } from './wall.mjs';
+import { arrange, checkWall, cleanWall, previewWall, shortName, tileNames, toWall } from './wall.mjs';
 
 const SITE = 'https://sunnyandranney.com';
 const SEND = '2026-11-17';
@@ -39,7 +39,8 @@ test('each product is checked against the store: listed, in stock, its own photo
   assert.match(errs(pickOf(sold))['picks.sold'], /is sold out/);
   assert.match(errs({ handle: 'gone', photo: photo('gone').url, name: '' })['picks.gone'], /isn’t on the website anymore/);
   assert.match(errs({ ...pickOf(ok[0]), handle: 'a' })['picks.a'], /is in twice/);
-  assert.match(errs(pickOf(long))['picks.long'], /Give Lullaby Power Glider Recliner, Pebble a short name/);
+  // Asked only when it can't be shortened on its own
+  assert.match(errs(pickOf(long))['picks.long'], /Lullaby Power Glider Recliner, Pebble is too long for a tile and can’t be shortened on its own/);
   assert.equal(errs(pickOf(long, { name: 'Lullaby Glider' }))['picks.long'], undefined);
   assert.match(errs(pickOf(long, { name: 'x'.repeat(29) }))['picks.long'], /too long for a tile/);
   assert.match(errs(pickOf(long, { photo: photo('someone-else').url, name: 'Lullaby Glider' }))['picks.long'], /one of Lullaby Glider’s own photos/);
@@ -64,6 +65,28 @@ test('the title can only call the products new if every one is', () => {
   assert.deepEqual(checkWall(w(fresh, 'Just landed this week.'), { catalog: cat, send: SEND }), {});
   assert.match(checkWall(w([...fresh.slice(0, 3), cat.get('old')], 'New this week.'), { catalog: cat, send: SEND }).headline, /old isn’t \(new means added in the last 30 days\)/);
   assert.deepEqual(checkWall(w([...fresh.slice(0, 3), cat.get('old')], 'Our picks this week.'), { catalog: cat, send: SEND }), {});
+});
+
+test('every tile is named for her: shortened when too long, never two alike, asked only when it can’t be', () => {
+  const names = ['Knox Nesting Table Set, Chestnut', 'Knox Nesting Table Set, Natural', 'Rosalie Dining Side Chair Nat/Grey', 'Hamlin Swivel Chair, Beamer Blue', 'Hamlin Swivel Chair, Pebble', 'Dovely Sofa, Natural', 'Lullaby Power Glider Recliner, Pebble'];
+  const cat = catalogOf(...names.map((title, k) => item(`p${k}`, { title })));
+  const picks = names.map((_, k) => ({ handle: `p${k}`, photo: '', name: '' }));
+  assert.deepEqual(tileNames(picks, cat), [
+    'Knox Nesting Table, Chestnut', // two colors of one piece: each keeps its color
+    'Knox Nesting Table, Natural',
+    'Rosalie Dining Side Chair', // the finish goes
+    'Hamlin Swivel, Beamer Blue', // a twin keeps its color, a word goes to make room
+    'Hamlin Swivel Chair, Pebble', // fits as it is
+    'Dovely Sofa, Natural',
+    '', // no clean short name: the one time she's asked
+  ]);
+  // One Knox alone needs no color; her own name always wins, and a twin of it keeps its color
+  assert.deepEqual(tileNames([picks[1]], cat), ['Knox Nesting Table Set']);
+  assert.deepEqual(tileNames([{ ...picks[1] }, { ...picks[0], name: 'Knox Nesting Table Set' }], cat), ['Knox Nesting Table, Natural', 'Knox Nesting Table Set']);
+  // Picked with no name, the wall is ready: the email names the tile the same way
+  const four = [picks[0], picks[1], picks[2], picks[3]].map((p, k) => ({ ...p, photo: cat.get(`p${k}`).photos[0].url }));
+  assert.deepEqual(checkWall(cleanWall({ picks: four }), { catalog: cat }), {});
+  assert.deepEqual(previewWall(cleanWall({ picks: four }), cat, 'https://sunnyandranney.com').photos.map((ph) => ph.name), ['Knox Nesting Table, Chestnut', 'Knox Nesting Table, Natural', 'Rosalie Dining Side Chair', 'Hamlin Swivel Chair']);
 });
 
 test('a short name is suggested only when shortening leaves a real name', () => {
