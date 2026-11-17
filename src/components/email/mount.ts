@@ -22,4 +22,23 @@ export function mountEmail(): void {
   // preview shows them from here, as they are
   if (props.local) usePhotoOrigin(location.origin, { direct: true });
   hydrate(h(EmailApp, props), root);
+  keepBarHeight();
+}
+
+/**
+ * On a phone, Save leaves the page's top bar for the bottom of the screen at the first change, and the
+ * bar used to close up behind it: everything below moved up 56px (85px under 375px, where Save takes
+ * two lines), under the finger that made the change. iPhone Safari even put the page back only at the
+ * next touch, and swallowed that tap. So the bar notes its own height while nothing is unsaved, and
+ * keeps that height after Save moves (--em-bar-h, email.css).
+ */
+function keepBarHeight(): void {
+  const em = document.querySelector<HTMLElement>('.em');
+  const bar = em?.querySelector<HTMLElement>('.em-bar');
+  if (!em || !bar || typeof ResizeObserver !== 'function') return;
+  const note = () => {
+    if (!em.classList.contains('is-dirty')) em.style.setProperty('--em-bar-h', `${bar.offsetHeight}px`);
+  };
+  new ResizeObserver(note).observe(bar);
+  note();
 }
