@@ -191,6 +191,8 @@ export interface Photo {
   w: number;
   h: number;
   alt: string;
+  /** The part every crop keeps in view, "0.42x0.31" (across x down, 0 to 1), or '' to leave it to the resizing (photo-store.mjs). */
+  focus: string;
   uploadedBy: string;
   uploadedAt: string;
 }
