@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Miniflare } from 'miniflare';
 import { Email, lines, plain, render, usePhotoOrigin } from './email.mjs';
-import { broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, statusOf, subscriberCount, templateFor, usualTime } from './kit.mjs';
+import { NO_MARKETING_TAG, STORE_SEGMENT, STORE_TAG, audienceOf, broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, statusOf, storeSegmentId, subscriberCount, templateFor, usualTime } from './kit.mjs';
 import { KID_PHOTOS, cfIdOf, kidFor, missionOf, photosDate, photosOf, revealedKids, roomsPhrase } from './kids.mjs';
 import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
@@ -198,7 +198,7 @@ function fakeKit(routes) {
   };
   return { kit: kitClient({ key: 'k', base: 'https://kit.test/v4', get }), calls };
 }
-const msg = { subject: 'S', preheader: 'P', html: '<html></html>', description: 'D', templateId: 7 };
+const msg = { subject: 'S', preheader: 'P', html: '<html></html>', description: 'D', templateId: 7, from: 'staci@store.test' };
 /** Kit's list of sent emails is read for the year before now. */
 const NOW = Date.parse('2026-11-16T17:00:00Z');
 const SENT_AFTER = '2025-11-15';
@@ -209,7 +209,7 @@ test('a test goes through Kit to just the testers, a minute later, never publish
     'POST /tags': (b) => ({ tag: { id: b.name.endsWith('a@x.com') ? 11 : 12 } }),
     'POST /tags/11/subscribers': { subscriber: { id: 1 } },
     'POST /broadcasts': { broadcast: { id: 90 } },
-    'GET /broadcasts/90': { broadcast: { id: 90, public: false, send_at: '2026-11-16T15:01:00Z', status: 'scheduled' } },
+    'GET /broadcasts/90': { broadcast: { id: 90, public: false, send_at: '2026-11-16T15:01:00Z', status: 'scheduled', subscriber_filter: [{ any: [{ type: 'tag', ids: [12, 11] }], all: null, none: null }] } },
   });
   assert.equal(await readyTester(kit, { email: 'a@x.com', name: 'A' }), 11);
   assert.deepEqual(calls.map((c) => c.key), ['POST /subscribers', 'POST /tags', 'POST /tags/11/subscribers']);
@@ -221,6 +221,14 @@ test('a test goes through Kit to just the testers, a minute later, never publish
   assert.equal(made.public, false);
   assert.equal(made.send_at, '2026-11-16T15:01:00.000Z');
   assert.deepEqual(made.subscriber_filter, [{ any: [{ type: 'tag', ids: [11, 12] }] }]);
+  assert.equal(made.email_address, 'staci@store.test', 'from the store’s sender, not the Kit account’s default (the charity)');
+});
+
+test('nothing goes to Kit without the store’s sender: Kit would send it as the charity', async () => {
+  const { kit, calls } = fakeKit({ 'POST /broadcasts': { broadcast: { id: 9 } } });
+  await assert.rejects(schedule(kit, { ...msg, from: '', sendAt: '2026-11-17T15:00:00.000Z', audience: { type: 'segment', ids: [1] } }), /KIT_SENDER/);
+  await assert.rejects(sendTest(kit, { ...msg, from: undefined, tagIds: [1] }), /KIT_SENDER/);
+  assert.equal(calls.length, 0);
 });
 
 test('someone who unsubscribed from the store’s emails isn’t signed back up for a test', async () => {
@@ -228,27 +236,110 @@ test('someone who unsubscribed from the store’s emails isn’t signed back up 
   await assert.rejects(readyTester(kit, { email: 'm@x.com', name: 'Mike' }), /Mike \(m@x\.com\) is unsubscribed from the store’s emails/);
 });
 
-test('the real send is scheduled for every subscriber, checked with Kit, and taken off the web if Kit published it', async () => {
+/** Kit's tags and segments as its lists read, the store's on a second page. */
+const LISTS = {
+  'GET /tags?per_page=1000': { tags: [{ id: 1, name: 'Donors' }, { id: 25389847, name: 'Shopify: no marketing' }], pagination: { has_next_page: true, end_cursor: 'c1' } },
+  'GET /tags?per_page=1000&after=c1': { tags: [{ id: 25380314, name: 'Sunny & Ranney' }], pagination: { has_next_page: false } },
+  'GET /segments?per_page=1000': { segments: [{ id: 2, name: 'Everyone on the newsletter' }, { id: 3, name: 'Sunny & Ranney' }], pagination: { has_next_page: true, end_cursor: 's1' } },
+  'GET /segments?per_page=1000&after=s1': { segments: [{ id: 608542, name: 'Sunny & Ranney weekly email' }], pagination: { has_next_page: false } },
+};
+
+test('the real send goes to the store’s segment, checked with Kit, and taken off the web if Kit published it', async () => {
   const { kit, calls } = fakeKit({
+    ...LISTS,
     'POST /broadcasts': { broadcast: { id: 5 } },
-    'GET /broadcasts/5': (_, all) => ({ broadcast: { id: 5, public: !all.some((c) => c.key === 'PUT /broadcasts/5'), send_at: '2026-11-17T15:00:00Z', status: 'scheduled' } }),
+    'GET /broadcasts/5': (_, all) => ({ broadcast: { id: 5, public: !all.some((c) => c.key === 'PUT /broadcasts/5'), send_at: '2026-11-17T15:00:00Z', status: 'scheduled', subscriber_filter: [{ all: [{ type: 'segment', ids: [608542] }] }] } }),
     'PUT /broadcasts/5': { broadcast: { id: 5 } },
   });
-  const sent = await schedule(kit, { ...msg, sendAt: '2026-11-17T15:00:00.000Z' });
+  assert.deepEqual([STORE_TAG, NO_MARKETING_TAG, STORE_SEGMENT], ['Sunny & Ranney', 'Shopify: no marketing', 'Sunny & Ranney weekly email']);
+  const ids = [await storeSegmentId(kit)];
+  assert.deepEqual(ids, [608542], 'found by its exact name, across pages');
+  const sent = await schedule(kit, { ...msg, sendAt: '2026-11-17T15:00:00.000Z', audience: { type: 'segment', ids } });
   assert.deepEqual(sent, { id: 5, status: 'scheduled', sendAt: '2026-11-17T15:00:00Z' });
   const made = calls.find((c) => c.key === 'POST /broadcasts').body;
-  assert.equal(made.subscriber_filter, undefined); // every subscriber
+  assert.deepEqual(made.subscriber_filter, [{ any: [{ type: 'segment', ids: [608542] }] }], 'the store’s segment, never the whole account');
+  assert.equal(made.email_address, 'staci@store.test');
   assert.equal(made.public, false);
   assert.deepEqual(calls.find((c) => c.key === 'PUT /broadcasts/5').body, { public: false });
+});
+
+test('nothing goes to the whole account: no one picked, no store segment, or a filter Kit didn’t keep, and nothing is sent', async () => {
+  // No one picked: refused before Kit is asked
+  const none = fakeKit({ 'POST /broadcasts': { broadcast: { id: 9 } } });
+  for (const audience of [undefined, null, { type: 'segment', ids: [] }, { type: 'segment', ids: [0] }, { type: 'tag', ids: ['x'] }, { type: 'all_subscribers', ids: [1] }, { type: 'segment' }]) {
+    await assert.rejects(schedule(none.kit, { ...msg, sendAt: '2026-11-17T15:00:00.000Z', audience }), /charity’s list too\. Nothing was sent/, JSON.stringify(audience));
+  }
+  assert.equal(none.calls.length, 0);
+  // Kit has no store segment (renamed or deleted), only the tag of the same name: there's no one to send it to
+  const gone = fakeKit({ 'GET /segments?per_page=1000': { segments: [{ id: 3, name: 'Sunny & Ranney' }, { id: 4, name: 'sunny & ranney weekly email' }], pagination: { has_next_page: false } } });
+  await assert.rejects(storeSegmentId(gone.kit), /no “Sunny & Ranney weekly email” segment/);
+  // Kit reads it back going to everyone, to the tag without the exclusion, or to more than was asked: deleted before it can go
+  for (const back of [
+    [{ all: [{ type: 'all_subscribers' }] }],
+    undefined,
+    [{ any: [{ type: 'tag', ids: [608542] }] }],
+    [{ any: [{ type: 'segment', ids: [608542, 2] }] }],
+    [{ all: [{ type: 'segment', ids: [608542] }], none: [{ type: 'tag', ids: [2] }] }],
+  ]) {
+    const k = fakeKit({
+      'POST /broadcasts': { broadcast: { id: 7 } },
+      'GET /broadcasts/7': { broadcast: { id: 7, public: false, send_at: '2026-11-17T15:00:00Z', status: 'scheduled', subscriber_filter: back } },
+      'DELETE /broadcasts/7': null,
+    });
+    await assert.rejects(schedule(k.kit, { ...msg, sendAt: '2026-11-17T15:00:00.000Z', audience: { type: 'segment', ids: [608542] } }), /deleted before it could go\. Nothing was sent/);
+    assert.ok(k.calls.some((c) => c.key === 'DELETE /broadcasts/7'), JSON.stringify(back));
+  }
+});
+
+test('who a Kit filter reaches: one kind, any of its ids; everyone, mixes, exclusions and must-be-in-all are not', () => {
+  assert.deepEqual(audienceOf([{ any: [{ type: 'tag', ids: [12, 11] }], all: null, none: null }]), { type: 'tag', ids: [11, 12] });
+  assert.deepEqual(audienceOf([{ all: [{ type: 'segment', ids: [608542] }] }]), { type: 'segment', ids: [608542] }, 'one condition: any of its ids');
+  assert.deepEqual(audienceOf([{ any: [{ type: 'tag', ids: [5] }, { type: 'tag', ids: [6, 5] }] }]), { type: 'tag', ids: [5, 6] });
+  for (const f of [
+    undefined, null, [], [{}],
+    [{ all: [{ type: 'all_subscribers' }] }],
+    [{ all: [{ type: 'tag', ids: [5] }, { type: 'tag', ids: [6] }] }],
+    [{ any: [{ type: 'segment', ids: [5] }, { type: 'tag', ids: [6] }] }],
+    [{ none: [{ type: 'segment', ids: [5] }] }],
+    [{ any: [{ type: 'segment', ids: [5] }], none: [{ type: 'tag', ids: [6] }] }],
+    [{ any: [{ type: 'tag', ids: [5] }] }, { any: [{ type: 'tag', ids: [6] }] }],
+    [{ any: [{ type: 'segment', ids: [] }] }],
+    [{ any: [{ type: 'form', ids: [5] }] }],
+  ]) assert.equal(audienceOf(f), null, JSON.stringify(f));
+});
+
+test('the count is the store segment’s, worked out the way the segment is made, or none rather than a wrong one', async () => {
+  const filterKey = 'POST /subscribers/filter';
+  const counts = ({ onTag = 3115, viaFilter = 3115, both = 274 } = {}) => ({
+    ...LISTS,
+    'GET /tags/25380314/subscribers?status=active&include_total_count=true&per_page=1': { subscribers: [], pagination: { total_count: onTag } },
+    [filterKey]: (b) => ({ subscribers: [], pagination: { total_count: b.all.filter((c) => c.type === 'tags').length === 2 ? both : viaFilter } }),
+  });
+  const k = fakeKit(counts());
+  assert.equal(await subscriberCount(k.kit), 2841, 'Nov 17, 2026: Kit’s own segment count');
+  const asked = k.calls.filter((c) => c.key === filterKey).map((c) => c.body);
+  assert.deepEqual(asked.find((b) => b.all.length === 3), { all: [
+    { type: 'tags', any: [{ type: 'ids', matching: [25380314] }] },
+    { type: 'tags', any: [{ type: 'ids', matching: [25389847] }] },
+    { type: 'subscriber_state', states: ['active'] },
+  ] });
+  // Kit's filter counting the tag differently from the tag's own list, or an impossible overlap: no number
+  assert.ok(Number.isNaN(await subscriberCount(fakeKit(counts({ viaFilter: 50 })).kit)));
+  assert.ok(Number.isNaN(await subscriberCount(fakeKit(counts({ both: 4000 })).kit)));
+  assert.ok(Number.isNaN(await subscriberCount(fakeKit(counts({ both: null })).kit)));
+  // A tag the segment is made of is gone: no number
+  const noTag = counts();
+  noTag['GET /tags?per_page=1000'] = { tags: [{ id: 1, name: 'Donors' }], pagination: { has_next_page: true, end_cursor: 'c1' } };
+  assert.ok(Number.isNaN(await subscriberCount(fakeKit(noTag).kit)));
 });
 
 test('a send Kit keeps as a draft is deleted, so nothing is left half-done', async () => {
   const { kit, calls } = fakeKit({
     'POST /broadcasts': { broadcast: { id: 6 } },
-    'GET /broadcasts/6': { broadcast: { id: 6, public: false, send_at: null, status: 'draft' } },
+    'GET /broadcasts/6': { broadcast: { id: 6, public: false, send_at: null, status: 'draft', subscriber_filter: [{ any: [{ type: 'tag', ids: [3] }] }] } },
     'DELETE /broadcasts/6': null,
   });
-  await assert.rejects(schedule(kit, { ...msg, sendAt: '2026-11-17T15:00:00.000Z' }), /kept it as a draft/);
+  await assert.rejects(schedule(kit, { ...msg, sendAt: '2026-11-17T15:00:00.000Z', audience: { type: 'tag', ids: [3] } }), /kept it as a draft/);
   assert.ok(calls.some((c) => c.key === 'DELETE /broadcasts/6'));
 });
 
@@ -268,7 +359,6 @@ test('a scheduled send can be cancelled until it goes; the template, count and u
   await assert.rejects(statusOf(down, 5), /Kit said no \(500\)/);
   const info = fakeKit({
     'GET /email_templates?per_page=100': { email_templates: [{ id: 1, category: 'Classic' }, { id: 5, category: 'Starting point' }] },
-    'GET /subscribers?status=active&include_total_count=true&per_page=1&slim=true': { subscribers: [], pagination: { total_count: 4812 } },
     [`GET /broadcasts?status=completed&sent_after=${SENT_AFTER}&per_page=1000&slim=true`]: {
       broadcasts: [
         // The store's weekly emails this admin scheduled, labeled as send.ts labels them
@@ -286,7 +376,6 @@ test('a scheduled send can be cancelled until it goes; the template, count and u
   });
   assert.equal(await templateFor(info.kit, null), 5);
   assert.equal(await templateFor(info.kit, '9'), 9);
-  assert.equal(await subscriberCount(info.kit), 4812);
   assert.equal(await usualTime(info.kit, NOW), '10:00'); // 15:00 UTC in November is 10 AM Eastern; the test and the charity's emails are left out
   // Before this admin has scheduled one, there's no usual time to offer (not the charity's)
   const none = fakeKit({ [`GET /broadcasts?status=completed&sent_after=${SENT_AFTER}&per_page=1000&slim=true`]: { broadcasts: [{ subject: 'Reveal day', send_at: '2026-11-16T20:31:00Z' }] } });
@@ -357,7 +446,7 @@ test('the charity’s kids: the most recent reveal first, by its recorded date, 
   assert.deepEqual(k.photo, { src: 'cf:kids/newer/1791465775704-a.jpg', alt: 'Newer in the new room' });
   assert.equal(k.caption, 'Newer’s new dream bedroom and accessible bathroom.');
   assert.equal(k.page, 'https://sunshineonaranneyday.com/kids/newer/');
-  assert.deepEqual(missionOf(k), { photo: k.photo, caption: 'Newer’s new dream bedroom and accessible bathroom.', story: 'newer got a new room.', cta: 'See their story', url: k.page });
+  assert.deepEqual(missionOf(k), { photo: k.photo, name: 'Newer', caption: 'Newer’s new dream bedroom and accessible bathroom.', story: 'newer got a new room.', cta: 'See their story', url: k.page });
   assert.equal(kidFor('', [k]), k);
   assert.equal(kidFor('older', revealedKids(rows, reveals, '2026-11-16')).slug, 'older');
   assert.equal(cfIdOf('https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ/kids/adrian/photo-18/public'), 'kids/adrian/photo-18');

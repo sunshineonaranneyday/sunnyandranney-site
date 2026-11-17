@@ -30,7 +30,9 @@ const files = dirs.flatMap(d => readdirSync(d).filter(f => f.endsWith('.html')).
 const FIRST_SCREEN = 600;
 // The charity's palette, as sunshineonaranneyday.com renders it, allowed only inside its section (.soard):
 // Sunshine Yellow, SOARD Dark, Dark Deep, Warm Gray, its muted text, and white.
-const CHARITY = ['rgb(255, 218, 36)', 'rgb(55, 58, 54)', 'rgb(30, 31, 37)', 'rgb(245, 244, 240)', 'rgb(90, 91, 97)', 'rgb(255, 255, 255)'];
+// Plus the cream its story sections sit on and the soft white of its italic lines, as its own emails draw them.
+const CHARITY = ['rgb(255, 218, 36)', 'rgb(55, 58, 54)', 'rgb(30, 31, 37)', 'rgb(245, 244, 240)', 'rgb(90, 91, 97)', 'rgb(255, 255, 255)',
+  'rgb(254, 252, 245)', 'rgb(228, 228, 229)'];
 const BRAND = ['rgb(255, 212, 0)', 'rgb(75, 149, 180)', 'rgb(43, 122, 150)', 'rgb(44, 44, 44)', 'rgb(107, 107, 104)', 'rgb(255, 255, 255)'];
 const runs = [
   { e: 'webkit', n: 'iphone-se', w: 320, mode: 'sent' }, { e: 'webkit', n: 'iphone', w: 390, mode: 'sent' }, { e: 'chromium', n: 'android', w: 390, mode: 'sent' },
@@ -57,6 +59,32 @@ const MODES = {
 const SWEEP = [...new Set([...Array.from({ length: 39 }, (_, k) => 320 + 10 * k), 374, 375, 620, 621])].sort((a, b) => a - b);
 /** The sweep's stand-in for every photo: a blank pixel (a const up here, since the sweep runs in the loop below). */
 const BLANK = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
+/**
+ * Offline (EMAIL_CHECK_OFFLINE=1, as the pull-request check runs it): no image host is asked for
+ * anything. Each photo is a blank of its own shape (the width and height the email gives it), so every
+ * render lays out exactly as with the real photo, and the checks of the live photos themselves (their
+ * format, weight and dark artwork) are left to the full check on a computer. Otherwise a deleted
+ * product photo, or Shopify itself going away at the Medusa switch, would fail every pull request,
+ * whatever it changed. The email's Google Fonts still load, as they do in a reader's mail app.
+ */
+const OFFLINE = process.env.EMAIL_CHECK_OFFLINE === '1';
+/** Each photo's address with its width and height in the email, for its offline stand-in. */
+function shapes(html) {
+  const out = new Map();
+  for (const [tag] of html.matchAll(/<img\b[^>]*>/g)) {
+    const src = tag.match(/\bsrc="([^"]+)"/)?.[1]?.replace(/&amp;/g, '&');
+    const w = Number(tag.match(/\bwidth="(\d+)"/)?.[1]), h = Number(tag.match(/\bheight="(\d+)"/)?.[1]);
+    if (src && w && h) out.set(src, [w, h]);
+  }
+  return out;
+}
+const standIn = ([w, h]) => `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#d8d8d8"/></svg>`;
+/**
+ * Where a render must have no web font (Gmail's and the bare ones), whether one loaded anyway: a route
+ * that sent requests straight to the network skipped the font block, and the "fallback font" sweeps
+ * quietly checked DM Sans (Nov 16, 2026).
+ */
+const webFontsIn = (page) => page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family));
 
 /**
  * Images that would lose their dark parts in dark mode: more than 1% transparent and more than 0.5%
@@ -132,19 +160,31 @@ for (const f of files) {
   const src = readFileSync(f, 'utf8');
   const stripped = [...new Set(src.match(GMAIL_STRIPS) || [])];
   if (stripped.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  Gmail strips: ${stripped.join(' | ')}`); }
-  const darkMode = await darkOnTransparent(src);
-  if (darkMode.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  dark mode: ${darkMode.join(' | ')}`); }
-  const images = await heavyOrUnshowable(src);
-  if (images.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  images: ${images.join(' | ')}`); }
+  if (!OFFLINE) {
+    const darkMode = await darkOnTransparent(src);
+    if (darkMode.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  dark mode: ${darkMode.join(' | ')}`); }
+    const images = await heavyOrUnshowable(src);
+    if (images.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  images: ${images.join(' | ')}`); }
+  }
+  const shape = shapes(src);
   for (const r of runs) {
     const ctx = await engines[r.e].newContext({ viewport: { width: r.w, height: 844 }, deviceScaleFactor: r.w < 600 ? 2 : 1 });
     if (r.mode !== 'sent') await ctx.route(/fonts\.(googleapis|gstatic)\.com/, x => x.abort());
+    // Registered last, so it runs first; fallback() hands everything else on to the font block above
+    if (OFFLINE) {
+      await ctx.route(/^https?:\/\//, (x) => {
+        if (x.request().resourceType() !== 'image') return x.fallback();
+        const size = shape.get(x.request().url());
+        return size ? x.fulfill({ status: 200, contentType: 'image/svg+xml', body: standIn(size) }) : x.fulfill({ status: 200, contentType: 'image/gif', body: BLANK });
+      });
+    }
     const page = await ctx.newPage();
     const failed = [];
     page.on('response', x => { if (x.status() >= 400) failed.push(x.status() + ' ' + x.url().slice(0, 70)); });
     if (r.mode !== 'sent') await page.setContent(MODES[r.mode](src), { waitUntil: 'networkidle' });
     else await page.goto('file://' + f, { waitUntil: 'networkidle' });
     await page.evaluate(() => document.fonts.ready);
+    const fontsLoaded = r.mode === 'sent' ? [] : await webFontsIn(page);
     // Decode every image first, so the full-page screenshot shows what a reader would see.
     await page.evaluate(() => Promise.all([...document.images].map(i => i.decode().catch(() => {}))));
     const m = await page.evaluate(([brand, charity, bare]) => {
@@ -207,8 +247,17 @@ for (const f of files) {
       const unlabeled = tiles.filter(a => !a.querySelector('.tile-name')?.textContent.trim() || !a.querySelector('.tile-price')?.textContent.trim()).length;
       const longNames = tiles.map(a => a.querySelector('.tile-name')).filter(n => n && n.getBoundingClientRect().height > 2 * parseFloat(getComputedStyle(n).lineHeight) + 1)
         .map(n => `"${n.textContent.trim().slice(0, 20)}"`);
+      // Everything Staci writes or picks sits in a band tagged with its part (data-part), so the admin's
+      // preview can send her to the section a too-wide word is in. The preview used to guess from the
+      // page's structure and filed the product tiles and every event after the first as the email's own layout.
+      const tagged = (sel, part) => [...document.querySelectorAll(sel)].filter(el => el.closest('[data-part]')?.getAttribute('data-part') !== part).map(() => `${sel} not in ${part}`);
+      const untagged = [...new Set([
+        ...tagged('.tile-name', 'wall'), ...tagged('a[href*="utm_content=wall-"]', 'wall'),
+        ...tagged('a[href*="utm_content=offer-button"]', 'offer'), ...tagged('a[href*="utm_content=story-"]', 'story'),
+        ...tagged('[bgcolor="#2B7A96"]', 'events'), ...tagged('td.soard', 'mission'),
+      ])];
       return {
-        unlabeled, longNames,
+        unlabeled, longNames, untagged,
         spill, codes,
         misaligned: drift,
         h: document.documentElement.scrollHeight, overflow: document.documentElement.scrollWidth > innerWidth, off,
@@ -225,6 +274,8 @@ for (const f of files) {
     const problems = [m.overflow && 'overflow', Object.keys(m.off).length && 'off-brand ' + JSON.stringify(m.off),
       m.small.length && 'small ' + m.small, m.dupes.length && 'duplicate links ' + m.dupes.length, m.noAlt && 'no alt',
       m.broken && 'broken images', !m.headingsOk && 'heading order', failed.length && 'failed ' + failed,
+      fontsLoaded.length && `web fonts loaded where none may (${[...new Set(fontsLoaded)].join(', ')})`,
+      m.untagged.length && 'not tagged with its part: ' + m.untagged.join(', '),
       m.misaligned.length && 'off the grid ' + m.misaligned.join(' '),
       m.codes.length && 'HTML codes showing as text ' + m.codes.join(' '),
       m.spill.length && 'text spilling out of its box ' + m.spill.join(' '),
@@ -265,11 +316,15 @@ async function sweep(f, src) {
     for (const mode of Object.keys(MODES)) {
       const ctx = await browser.newContext({ viewport: { width: SWEEP[0], height: 844 } });
       if (mode !== 'sent') await ctx.route(/fonts\.(googleapis|gstatic)\.com/, x => x.abort());
-      await ctx.route(/^https?:\/\//, x => (x.request().resourceType() === 'image' ? x.fulfill({ status: 200, contentType: 'image/gif', body: BLANK }) : x.continue()));
+      // fallback(), not continue(): continue() sends the request straight to the network, past the font
+      // block, and the no-web-font sweeps loaded DM Sans
+      await ctx.route(/^https?:\/\//, x => (x.request().resourceType() === 'image' ? x.fulfill({ status: 200, contentType: 'image/gif', body: BLANK }) : x.fallback()));
       const page = await ctx.newPage();
       await page.setContent(MODES[mode](src), { waitUntil: 'load' });
       await page.evaluate(() => document.fonts.ready);
       const bad = new Map();
+      const loaded = mode === 'sent' ? [] : await webFontsIn(page);
+      if (loaded.length) bad.set(`web fonts loaded where none may (${[...new Set(loaded)].join(', ')})`, [SWEEP[0]]);
       for (const w of SWEEP) {
         await page.setViewportSize({ width: w, height: 844 });
         const found = await page.evaluate(() => {

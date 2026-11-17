@@ -22,6 +22,7 @@ export const POST: APIRoute = async (context) => {
   if (admin instanceof Response) return admin;
   const env = context.locals.runtime.env;
   if (!env.KIT_API_KEY) return json({ error: 'The site isn’t connected to Kit: KIT_API_KEY isn’t set.' }, 503);
+  if (!env.KIT_SENDER) return json({ error: 'The site has no sending address for the store’s emails: KIT_SENDER isn’t set. Without it Kit would send them as the charity.' }, 503);
 
   const body = await readJson(context.request);
   const send = body?.send;
@@ -63,6 +64,7 @@ export const POST: APIRoute = async (context) => {
       templateId,
       tagIds,
       description: `Test of the ${sendLabel(send as string)} email, from the store admin`,
+      from: env.KIT_SENDER,
       now: now.getTime(),
     });
     const at = now.toISOString();

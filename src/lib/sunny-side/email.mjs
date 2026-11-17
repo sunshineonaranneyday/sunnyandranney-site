@@ -20,9 +20,10 @@
  *   Color:  only colors the live sunnyandranney.com shows. One color, one job:
  *           gold = buy, teal = events, charcoal for words. The one exception is the charity section,
  *           which wears Sunshine on a Ranney Day's own identity (Peter, 2026-11-11), taken from
- *           sunshineonaranneyday.com and its brand guide at /branding/: the site's hero (Warm Gray,
- *           a Libre Baskerville headline with a highlighted italic word, a rounded photo, a yellow
- *           pill) over its impact strip (Dark Deep with Sunshine Yellow numbers).
+ *           sunshineonaranneyday.com and its brand guide at /branding/, laid out like the charity's
+ *           own emails (Peter, 2026-11-16): a Dark Deep top with its logo and a Libre Baskerville
+ *           headline whose key words are yellow italic, the family's photo, a cream story, and its
+ *           impact strip (Dark Deep with Sunshine Yellow numbers).
  *   Type:   DM Sans (the site's font). Outlook falls back to Arial, Gmail to Helvetica.
  *   Space:  8 / 16 / 24 / 32 / 40 px; 40 becomes 32 on phones. Radius: 8 buttons, 12 cards. Photos square.
  *   Grid:   words and cards sit on one 536px column (32px sides; 20px on phones). Photos run the full
@@ -92,24 +93,22 @@ const GREG = `${CF}/team/greg-ranney/w=88,h=88,fit=cover,gravity=auto,quality=70
 // for section backgrounds, Dark Deep for its impact strip, and its muted text.
 export const SOARD_YELLOW = '#FFDA24', SOARD_DARK = '#373A36', SOARD_DEEP = '#1E1F25';
 export const SOARD_WARM = '#F5F4F0', SOARD_MUTED = '#5A5B61';
+// Two more as the charity's own emails draw them (its reveal invite, measured in Gmail on Nov 16, 2026):
+// the cream its story sections sit on, and the soft white of the italic line over its headline.
+export const SOARD_CREAM = '#FEFCF5', SOARD_SOFT = '#E4E4E5';
 const SERIF = "'Libre Baskerville', Georgia, 'Times New Roman', serif";
 // Numbers fall back to Times New Roman, not Georgia: Georgia's figures are old-style, so in Gmail
 // (no web fonts) "$0" read as "$o" and "295" dropped below the line.
 const NUMERALS = "'Libre Baskerville', 'Times New Roman', Times, serif";
 const OUTFIT = "'Outfit', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-// The guide's alternate logo (no tagline: "for smaller uses"), for light backgrounds, laid on the
-// band's Warm Gray with 20px of its own margin (the 600x600 file's logo at 102-498 by 98-458, cut at
-// 82-518 by 78-478: 436x400, shown at 132). The file is that crop of brand-logo-light-bg-display on
-// #F5F4F0, uploaded as its own image. Its lettering is dark on a transparent background, and Gmail
-// and Outlook darken backgrounds in dark mode but never images, so a transparent logo lost "on a
-// Ranney Day" there; on its own tile it stays readable, and in light mode the tile is invisible.
-// It's served as the "public" variant because Cloudflare turns resized opaque PNGs into JPEGs,
-// which smudge the warm gray around the lettering.
-const SOARD_LOGO = `${CF}/email/soard-logo-warm-tile/public`;
-const LOGO_W = 88; // the charity's logo, small: it signs the section, the headline leads it
+// The logo the charity's own emails open with on their Dark Deep (its reveal invite, Nov 16, 2026):
+// the guide's display logo for dark backgrounds with "Dreams Built Here", the 600x600 file's logo
+// (102-499 by 98-470) cut with 10px of its own margin to 417x392, shown at 96x90 on a computer, as
+// the charity shows it, and 80 on a phone (its brand guide's smallest digital size is 75). Its
+// artwork is yellow and white, so it stays readable when a mail app darkens the page.
+const SOARD_LOGO_DARK = `${CF}/brand-logo-dark-bg-tagline-display/trim=88;91;120;92,w=192,format=png`;
+const SOARD_LOGO_DARK_W = 96, SOARD_LOGO_DARK_H = 90;
 const SOARD_HOME = 'https://sunshineonaranneyday.com/';
-// The site's highlighter behind its key italic word: Sunshine Yellow at 30% over the lower half.
-const HIGHLIGHT = 'linear-gradient(rgba(255,218,36,0) 52%, rgba(255,218,36,0.3) 52%)';
 
 /** The phone width the first-screen rule is measured at, and how far down the sale button may sit. */
 export const FIRST_SCREEN = 600;
@@ -290,6 +289,13 @@ const SHAPE = { 1: [600, 400], 2: [298, 298] };
 export const COLLAGE_ROWS = { 1: [1], 2: [2], 3: [1, 2], 4: [1, 3], 5: [1, 2, 2] };
 const COLLAGE_SHAPE = { 1: [600, 300], 2: [298, 298], 3: [197, 197] };
 
+/**
+ * The parts of the email Staci writes or picks, each band tagged with its own (Email.band's `part`), so
+ * the admin's preview knows which section a too-wide word is in. Untagged bands (the masthead, the top
+ * photo, the visit row, the footer) are the email's own layout.
+ */
+export const PARTS = ['offer', 'wall', 'story', 'events', 'mission'];
+
 /** Every section, top to bottom. A preview can ask for just the first few. */
 export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'story', 'events', 'mission', 'visit', 'footer'];
 
@@ -338,8 +344,8 @@ export class Email {
   }
 
   /** An edge-to-edge photo band. */
-  fullPhoto(p, w, h, href, slot) {
-    return this.band(this.img(Email.photo(p.src, w * 2, h * 2), w, h, p.alt, href, slot), { top: 0, side: 0, bottom: 0 });
+  fullPhoto(p, w, h, href, slot, part = '') {
+    return this.band(this.img(Email.photo(p.src, w * 2, h * 2), w, h, p.alt, href, slot), { top: 0, side: 0, bottom: 0, part });
   }
 
   link(text, href, slot, color = CHARCOAL, size = 15) {
@@ -384,9 +390,11 @@ export class Email {
    * phones first: 40 top/bottom -> 32 (pt, pb), 32 sides -> 20 (px); anything else stays as is. The
    * style block gives the computer its 40s and 32s back.
    */
-  band(inner, { bg = WHITE, top = S5, side = S4, bottom = S5, cls = '' } = {}) {
+  band(inner, { bg = WHITE, top = S5, side = S4, bottom = S5, cls = '', part = '' } = {}) {
     const c = [side === S4 ? 'px' : '', top === S5 ? 'pt' : '', bottom === S5 ? 'pb' : '', cls].filter(Boolean).join(' ');
-    const attr = c ? ` class="${c}"` : '';
+    // The part of the email a band holds (PARTS), so the admin's preview can say which section a word
+    // that's too wide is in, and send Staci there, instead of guessing from the page's structure
+    const attr = (c ? ` class="${c}"` : '') + (part ? ` data-part="${part}"` : '');
     const phone = { top: top === S5 ? S4 : top, side: side === S4 ? PHONE_SIDE : side, bottom: bottom === S5 ? S4 : bottom };
     return (
       `<tr><td${attr} bgcolor="${bg}" style="background-color:${bg};color:${CHARCOAL};` +
@@ -488,7 +496,7 @@ export class Email {
     out += this.button(`${s.cta} &#8594;`, SITE + s.url, 'offer-button', CHARCOAL, WHITE);
     // fine print after the button, so it never pushes the button down
     if (s.details) out += Email.gap(S2) + Email.text(s.details, { size: 15, lh: 22, cls: 'fine' });
-    return this.band(out, { bg: GOLD, top: S4 });
+    return this.band(out, { bg: GOLD, top: S4, part: 'offer' });
   }
 
   /**
@@ -536,7 +544,7 @@ export class Email {
       rows += '<tr><td>' + Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"') + '</td></tr>';
       i += n;
     });
-    return this.band(head, { top: S5, bottom: S2 }) + this.band(Email.T(rows), { top: 0, side: 0, bottom: 0 });
+    return this.band(head, { top: S5, bottom: S2, part: 'wall' }) + this.band(Email.T(rows), { top: 0, side: 0, bottom: 0, part: 'wall' });
   }
 
   story() {
@@ -547,7 +555,8 @@ export class Email {
       this.band(Email.label(s.label) + Email.h2(s.headline) + Email.text(s.body, { mb: S1 }) + this.link(`${s.cta[0]} &#8594;`, href, 'story-link'), {
         top: S5,
         bottom: S2,
-      }) + (s.photos?.length ? this.collage(s.photos, href) : s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo') : '')
+        part: 'story',
+      }) + (s.photos?.length ? this.collage(s.photos, href) : s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo', 'story') : '')
     );
   }
 
@@ -574,7 +583,7 @@ export class Email {
       rows += '<tr><td>' + Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"') + '</td></tr>';
       i += n;
     });
-    return this.band(Email.T(rows), { top: 0, side: 0, bottom: 0 });
+    return this.band(Email.T(rows), { top: 0, side: 0, bottom: 0, part: 'story' });
   }
 
   /** The dates still ahead on send day, in order. Month, day and weekday all come from "date". */
@@ -748,52 +757,71 @@ export class Email {
       // Every date, once there's more than the one the card already offers
       const series = e.calendar && (rest.length || !e.one);
       const foot = Email.gap(S2) + (series ? this.calendar(e, [first, ...rest]) : '');
-      out += this.breather() + this.band(head + spot + agenda + foot, { bg: TEAL, bottom: S4 });
+      out += this.breather() + this.band(head + spot + agenda + foot, { bg: TEAL, bottom: S4, part: 'events' });
     }
     return out;
   }
 
   /**
-   * The charity's section, built the way sunshineonaranneyday.com builds its home page: a light hero
-   * (its logo, why it's here, a Libre Baskerville headline with the key words in highlighted italic,
-   * the latest reveal in a rounded photo with its caption, the story in two sentences, and the yellow
-   * pill), then its impact strip, Sunshine Yellow numbers on Dark Deep, read live from its site each
-   * week by the build. The `soard` class lets verify.mjs hold the section to the charity's palette and
-   * the rest of the email to the store's.
+   * The charity's section, laid out the way the charity's own emails are (Peter, 2026-11-16: "make it
+   * top tier ... to match that from my sunshine emails"; its reveal invite, measured in Gmail that day):
+   *   - a Dark Deep top, centered: its logo, "Where 100% of our profits go" in Sunshine Yellow, an
+   *     italic line in soft white ("Every purchase builds"), the headline in white with its key words
+   *     in yellow italic ("a *dream room*."), and the finished room, rounded, with its caption;
+   *   - a cream story, led by the yellow dash and the family's name ("Remi & Nico's story"), the
+   *     charity's own summary in Libre Baskerville, and a link to their page;
+   *   - then its impact strip (impact()), so the section runs dark, light, dark, as its emails do.
+   * Phones first: every size inline is a phone's; the computer's come from the style block. The
+   * `soard` class lets verify.mjs hold the section to the charity's palette and the rest of the email
+   * to the store's.
    */
   mission() {
     const m = this.b.mission;
-    // Compact, about one phone screen (it was nearly two): a small logo, the charity's line, the
-    // finished room, the family's story in the charity's own words with its caption run in, and a text
-    // link, so the store's sale stays the email's one big button.
+    // 80px on a phone, 96 on a computer (.soard-mark); the width attribute is Outlook's
     const logo =
-      `<a href="${escape(this.url(SOARD_HOME, 'charity-logo'))}" target="_blank" style="display:block;width:${LOGO_W}px;color:${SOARD_DARK};">` +
-      `<img class="soard-logo" src="${SOARD_LOGO}" width="${LOGO_W}" height="${Math.round((LOGO_W * 121) / 132)}" alt="Sunshine on a Ranney Day" ` +
-      `style="display:block;width:${LOGO_W}px;height:auto;border:0;border-radius:6px;"></a>`;
-    // 26/32 on a phone, 30/36 on a computer (.soard-h)
+      `<a href="${escape(this.url(SOARD_HOME, 'charity-logo'))}" target="_blank" class="soard-mark" style="display:inline-block;width:80px;color:${WHITE};">` +
+      `<img class="soard-logo soard-mark" src="${SOARD_LOGO_DARK}" width="${SOARD_LOGO_DARK_W}" height="${SOARD_LOGO_DARK_H}" alt="Sunshine on a Ranney Day" ` +
+      `style="display:block;width:80px;height:auto;border:0;margin:0 auto;font-family:${OUTFIT};font-size:14px;font-weight:700;color:${WHITE};"></a>`;
+    // 20/26 on a phone, 24/31 on a computer (.soard-lead)
+    const lead = Email.text('Every purchase builds', { size: 20, lh: 26, color: SOARD_SOFT, font: SERIF, cls: 'soard-lead soard-serif', align: 'center', mb: 2, css: 'font-style:italic;' });
+    // 32/36 on a phone, 38/42 on a computer (.soard-h)
     const headline =
-      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:26px;line-height:32px;font-weight:700;` +
-      `letter-spacing:-0.02em;color:${SOARD_DARK};mso-line-height-rule:exactly;">Every purchase builds a&nbsp;` +
-      `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_DARK};background-image:${HIGHLIGHT};">` +
-      `dream&nbsp;room</em>.</h2>`;
-    const words = (m.caption ? `<strong style="font-weight:700;">${m.caption}</strong> ` : '') + noWidow(m.story);
-    const link =
-      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:24px;">` +
-      // A text link, padded to the 44px a thumb needs; the story's gap below is short by that padding
-      `<a href="${escape(this.url(m.url, 'mission-link'))}" target="_blank" style="display:inline-block;padding:10px 0;font-family:${OUTFIT};font-weight:700;color:${SOARD_DARK};text-decoration:underline;text-underline-offset:3px;">` +
-      `${m.cta}&nbsp;&#8594;</a></p>`;
-    const body =
+      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:32px;line-height:36px;font-weight:700;` +
+      `letter-spacing:-0.01em;color:${WHITE};text-align:center;mso-line-height-rule:exactly;">a&nbsp;` +
+      `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_YELLOW};">dream&nbsp;room</em>.</h2>`;
+    // Spaced to keep the section near the compact one it replaced (831px on a 390px phone)
+    const top =
       logo +
       Email.gap(S2) +
-      Email.label('Where 100% of our profits go', { color: SOARD_MUTED, font: OUTFIT, track: '0.1em' }) +
+      Email.label('Where 100% of our profits go', { color: SOARD_YELLOW, font: OUTFIT, track: '0.18em', align: 'center', mb: 12 }) +
+      lead +
       headline +
-      Email.gap(S3) +
+      Email.gap(20) +
       // On the column: 536px on a computer, and up to 560 where the style block is gone (20px sides at any width)
-      this.img(Email.photo(m.photo.src, 1120, 560), COLUMN, COLUMN / 2, m.photo.alt, m.url, 'mission-photo', 16, '', WIDTH - 2 * PHONE_SIDE) +
-      Email.gap(S2) +
-      Email.text(words, { size: 16, lh: 25, color: SOARD_DARK, mb: S2 - 10, font: OUTFIT }) +
-      link;
-    return this.breather() + this.band(body, { bg: SOARD_WARM, top: S4, bottom: S4, cls: 'soard' }) + (m.impact ? this.impact(m.impact) : '');
+      this.img(Email.photo(m.photo.src, 1120, 560), COLUMN, COLUMN / 2, m.photo.alt, m.url, 'mission-photo', 20, '', WIDTH - 2 * PHONE_SIDE) +
+      (m.caption ? Email.gap(10) + Email.text(m.caption, { size: 14, lh: 20, color: SOARD_SOFT, font: OUTFIT, align: 'center' }) : '');
+    // The label names the family, as the charity's emails say "Dylan's story"
+    const label =
+      Email.T(
+        `<tr><td width="28" valign="middle" style="padding-right:12px;">` +
+          `<div style="width:28px;height:8px;line-height:8px;font-size:8px;background-color:${SOARD_YELLOW};border-radius:2px;">&nbsp;</div></td>` +
+          `<td valign="middle">${Email.label(m.name ? `${m.name}&#8217;s story` : 'Their story', { color: SOARD_DARK, mb: 0, font: OUTFIT, track: '0.16em' })}</td></tr>`,
+      ) + Email.gap(12);
+    const link =
+      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:24px;">` +
+      // A text link, padded to the 44px a thumb needs; the band's bottom is short by that padding
+      `<a href="${escape(this.url(m.url, 'mission-link'))}" target="_blank" style="display:inline-block;padding:10px 0;font-family:${OUTFIT};font-weight:700;color:${SOARD_DARK};text-decoration:underline;text-underline-offset:3px;">` +
+      `${m.cta}&nbsp;&#8594;</a></p>`;
+    // 16/26 on a phone, 17/29 on a computer (.soard-body)
+    const story = label + Email.text(noWidow(m.story), { size: 16, lh: 26, color: SOARD_DARK, font: SERIF, cls: 'soard-body soard-serif', mb: 4 }) + link;
+    // No white strip before it (Peter, 2026-11-16: "remove the white gap"): a 32px band of white
+    // between the teal events and the charity's Dark Deep read as a seam, as if a section were
+    // missing. The charity's own emails stack their bands edge to edge.
+    return (
+      this.band(`<div style="text-align:center;">${top}</div>`, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4, cls: 'soard', part: 'mission' }) +
+      this.band(story, { bg: SOARD_CREAM, top: S3 + 4, bottom: S2, cls: 'soard', part: 'mission' }) +
+      (m.impact ? this.impact(m.impact) : '')
+    );
   }
 
   /**
@@ -816,7 +844,7 @@ export class Email {
         Email.label(what, { color: WHITE, mb: S2, font: OUTFIT, track: '0.08em', align: 'center' }),
     );
     // Each number keeps 16px under it, for when they wrap; the band is that much shorter at the bottom
-    return this.band(Email.statColumns(cells), { bg: SOARD_DEEP, top: S4, bottom: S4 - S2, cls: 'soard' });
+    return this.band(Email.statColumns(cells), { bg: SOARD_DEEP, top: S4, bottom: S4 - S2, cls: 'soard', part: 'mission' });
   }
 
   /**
@@ -960,7 +988,10 @@ export class Email {
       tierRules(0),
       '    .cap4 { font-size:15px !important; line-height:20px !important; }',
       '    .spot { font-size:24px !important; line-height:29px !important; }',
-      '    .soard-h { font-size:30px !important; line-height:36px !important; }',
+      '    .soard-h { font-size:38px !important; line-height:42px !important; }',
+      '    .soard-lead { font-size:24px !important; line-height:31px !important; }',
+      '    .soard-body { font-size:17px !important; line-height:29px !important; }',
+      '    .soard-mark { width:96px !important; }',
       `    .tile-cap { padding-left:${S4}px !important; padding-right:12px !important; }`,
       '    .soard-stat { font-size:40px !important; line-height:44px !important; }',
     ].join('\n');
@@ -975,7 +1006,7 @@ export class Email {
 <meta name="color-scheme" content="light only">
 <meta name="supported-color-schemes" content="light only">
 <title>${escape(subject)}</title>
-<!--[if !mso]><!--><link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700&family=Libre+Baskerville:ital,wght@0,700;1,400&family=Outfit:wght@400;700&display=swap" rel="stylesheet"><!--<![endif]-->
+<!--[if !mso]><!--><link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400;1,700&family=Outfit:wght@400;700&display=swap" rel="stylesheet"><!--<![endif]-->
 <!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
 <!--[if mso]><style>body, table, td, p, a, h1, h2, span { font-family: Arial, Helvetica, sans-serif !important; } .soard-serif, .soard-serif em { font-family: Georgia, serif !important; } .soard-stat { font-family: 'Times New Roman', serif !important; }
 ${computer}

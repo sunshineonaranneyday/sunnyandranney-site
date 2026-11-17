@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
-import { broadcastUrl, cancel, kitClient, schedule, statusOf, templateFor } from '@/lib/sunny-side/kit.mjs';
+import { broadcastUrl, cancel, kitClient, schedule, statusOf, storeSegmentId, templateFor } from '@/lib/sunny-side/kit.mjs';
 import { isSendDate, isSendDay, sendLabel } from '@/lib/sunny-side/special.mjs';
 import { getWeek, otherWeek, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { weekEmail } from '@/lib/sunny-side/week-email';
@@ -21,7 +21,7 @@ async function sendOf(db: D1Database, body: Record<string, unknown> | null): Pro
 }
 
 /**
- * Schedules the week's email, as saved, to every subscriber, through Kit, on a day of its week
+ * Schedules the week's email, as saved, to the store's subscribers (STORE_SEGMENT), through Kit, on a day of its week
  * (sendDays; Tuesday is the usual one) at a time, Eastern. Managers and email-only logins. Built as of that day,
  * kept off the web, and checked with Kit once scheduled.
  */
@@ -30,6 +30,7 @@ export const PUT: APIRoute = async (context) => {
   if (admin instanceof Response) return admin;
   const env = context.locals.runtime.env;
   if (!env.KIT_API_KEY) return json({ error: 'The site isn’t connected to Kit: KIT_API_KEY isn’t set.' }, 503);
+  if (!env.KIT_SENDER) return json({ error: 'The site has no sending address for the store’s emails: KIT_SENDER isn’t set. Without it Kit would send them as the charity.' }, 503);
   const body = await readJson(context.request);
   const db = dbOf(context);
   const send = await sendOf(db, body);
@@ -62,6 +63,8 @@ export const PUT: APIRoute = async (context) => {
       description: `The Sunny Side for ${sendLabel(send)}${day === send ? '' : `, going ${sendLabel(day)}`}, from the store admin`,
       templateId,
       sendAt,
+      from: env.KIT_SENDER,
+      audience: { type: 'segment', ids: [await storeSegmentId(kit)] },
     });
     const at = new Date().toISOString();
     try {

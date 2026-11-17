@@ -35,6 +35,12 @@ declare namespace Cloudflare {
     MEDUSA_ADMIN_KEY?: string;
     /** Photos uploaded for the weekly email (src/lib/sunny-side/photo-store.mjs). */
     PHOTOS?: R2Bucket;
+    /**
+     * The address the store's emails go from in Kit (Staci's, Peter 2026-11-16), added and confirmed as a
+     * sending address in the Kit account. Kit's account is the charity's too, so without it Kit would
+     * send them as the charity; the admin won't send without it. Not in the code: the repo is public.
+     */
+    KIT_SENDER?: string;
     /** Which Kit email template the weekly email goes on; the first "Starting point" when unset. */
     KIT_TEMPLATE_ID?: string;
     /** A stand-in Kit for local tests. Never set in production. */
