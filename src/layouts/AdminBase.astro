@@ -317,7 +317,7 @@ const icon = (name: string) =>
     text-align: left;
   }
   .search-button span, .search-button .search-kbd { display: none; }
-  .search-button:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); }
+  @media (hover: hover) { .search-button:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); } }
   kbd, .search-kbd {
     display: inline-block;
     min-width: 1.5em;
@@ -479,7 +479,7 @@ const icon = (name: string) =>
     transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
   }
   .side-link svg { color: var(--ink-3); flex: none; width: 16px; height: 16px; }
-  .side-link:hover { background: var(--panel); color: var(--ink); }
+  @media (hover: hover) { .side-link:hover { background: var(--panel); color: var(--ink); } }
   /* Inside the scrolling list an outside ring would be clipped, so it sits inside the row. */
   .side-link:focus-visible { outline-offset: -2px; }
 
@@ -549,7 +549,7 @@ const icon = (name: string) =>
     color: var(--ink-3);
   }
   .who-out svg { width: 16px; height: 16px; }
-  .who-out:hover { background: var(--panel); color: var(--ink); }
+  @media (hover: hover) { .who-out:hover { background: var(--panel); color: var(--ink); } }
   .who-email { font-size: 0.8125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .who-role { font-size: 0.75rem; color: var(--ink-3); }
 
@@ -576,7 +576,7 @@ const icon = (name: string) =>
       color: var(--ink-2);
       cursor: pointer;
     }
-    .menu-button:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); }
+    @media (hover: hover) { .menu-button:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); } }
     .menu-icon-close, .menu-button[aria-expanded='true'] .menu-icon-open { display: none; }
     .menu-button[aria-expanded='true'] .menu-icon-close { display: block; }
     /* Work waiting on a page in the menu: a dot on the button's corner, clay when it's due soon or wrong. */
@@ -737,17 +737,17 @@ const icon = (name: string) =>
     transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.1s var(--ease);
     white-space: nowrap;
   }
-  .btn:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); }
+  @media (hover: hover) { .btn:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); } }
   .btn:active:not(:disabled) { transform: translateY(1px); }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
   .btn-primary { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
-  .btn-primary:hover { background: color-mix(in srgb, var(--gold) 88%, #000); border-color: color-mix(in srgb, var(--gold) 88%, #000); color: var(--on-gold); }
+  @media (hover: hover) { .btn-primary:hover { background: color-mix(in srgb, var(--gold) 88%, #000); border-color: color-mix(in srgb, var(--gold) 88%, #000); color: var(--on-gold); } }
   .btn-dark { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-  .btn-dark:hover { background: color-mix(in srgb, var(--ink) 85%, var(--bg)); color: var(--bg); }
+  @media (hover: hover) { .btn-dark:hover { background: color-mix(in srgb, var(--ink) 85%, var(--bg)); color: var(--bg); } }
   .btn-danger { color: var(--red); }
-  .btn-danger:hover { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 40%, var(--line)); color: var(--red); }
+  @media (hover: hover) { .btn-danger:hover { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 40%, var(--line)); color: var(--red); } }
   .btn-ghost { background: transparent; border-color: transparent; box-shadow: none; }
-  .btn-ghost:hover { background: var(--sunk); border-color: transparent; }
+  @media (hover: hover) { .btn-ghost:hover { background: var(--sunk); border-color: transparent; } }
   .btn-icon { width: 44px; padding: 0; }
   .btn-small { min-height: 36px; padding: 0.375rem 0.75rem; font-size: 0.75rem; }
   .btn svg { flex: none; }
@@ -758,7 +758,7 @@ const icon = (name: string) =>
   .btn-group .btn:last-child { border-radius: 0 8px 8px 0; }
   .btn-group .btn + .btn { margin-left: -1px; }
   .btn-group .btn-label { cursor: default; font-weight: 600; min-width: 7.5rem; }
-  .btn-group .btn-label:hover { border-color: var(--line); }
+  @media (hover: hover) { .btn-group .btn-label:hover { border-color: var(--line); } }
 
   /* ── Surfaces ──────────────────────────────────────────── */
   .card {
@@ -976,7 +976,7 @@ const icon = (name: string) =>
     transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
   }
   .period svg { color: var(--ink-3); }
-  .period:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); background: var(--sunk); }
+  @media (hover: hover) { .period:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); background: var(--sunk); } }
   .period:first-child { border-color: color-mix(in srgb, var(--gold) 60%, var(--line)); }
 
   /* ── Tables ────────────────────────────────────────────── */
