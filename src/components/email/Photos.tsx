@@ -154,11 +154,11 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local, revea
 
   const say = (text: string) => setSaid(text);
 
-  // The collage stays where it is on the screen when a change reflows the page above it. On a phone, the
-  // first change sends the page's Save area from its top bar to the bottom of the screen, and everything
-  // below moved up 56–85px. Chrome's scroll anchoring hid that; Safari on an iPhone put the page back only
-  // at the next touch, after a drag, and so swallowed that tap (Undo took two taps). So the browser's
-  // anchoring sits out the one frame of the change, and the page scrolls back by exactly what it moved.
+  // The collage stays where it is on the screen when a change reflows the page above it. After a drag,
+  // iPhone Safari put a page that had moved back only at the next touch, and so swallowed that tap
+  // (Undo took two taps). The page's own Save bar no longer moves anything (mount.ts); this keeps any
+  // other reflow above from doing the same: the browser's anchoring sits out the one frame of the
+  // change, and the page scrolls back by exactly what it moved.
   const steady = useRef<number | null>(null);
   const holdPlace = () => {
     const top = panel.current?.getBoundingClientRect().top;

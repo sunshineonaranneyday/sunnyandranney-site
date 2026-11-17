@@ -105,6 +105,8 @@ Two of the stress tests use bento layouts (`edge-longest`: big beside four; `edg
 
 The admin page itself is checked with `node scripts/check-admin-boxes.mjs <page>` against a local dev server, at eight widths from 320 to 1440 px, with every folded part open: every piece of text and every control has to stay on the box it's drawn on, no fieldset's legend may sit across its box's edge, and no text may touch the inside edge of a filled panel. A check that only asks whether the page scrolls sideways missed the story's collage label sitting half off its panel, so run this one after any change to how the page looks, once with a section empty and once full. It also fails anything past the side of the screen, and `--click "<selector>"` opens a dialog first: the product picker ran off a phone, unmeasured, until it was checked open (`--click "#em-products .em-section-tools .btn-dark"`).
 
+On a phone, Save moves from the page's top bar to the bottom of the screen at the first change, and the bar keeps the height it had with Save in it (`mount.ts` measures it while nothing is unsaved, `--em-bar-h`), so nothing on the page moves: it used to close up and push everything below up 56–85px, under the finger that made the change, and after a drag iPhone Safari put the page back only at the next touch, swallowing that tap. `node scripts/check-email-first-change.mjs <page>` types one letter into the preview line and presses Discard at nine widths in Chromium and WebKit, and fails if the page below the bar moved at all; `src/lib/admin/first-change.test.mjs` fails any change that moves Save without holding the bar's height.
+
 ## The standard
 
 `verify.mjs` renders each email nine ways:
