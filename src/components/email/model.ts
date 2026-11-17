@@ -109,7 +109,7 @@ export interface AppProps {
   kids: Kid[];
   /** When the store's emails usually go ("HH:MM" Eastern), from Kit, or null. */
   usualTime: string | null;
-  /** Kit's active subscribers, or null if Kit didn't say. */
+  /** The store's active subscribers in Kit (STORE_SEGMENT), or null if Kit didn't say. */
   subscribers: number | null;
   /** The charity's numbers, read from its site when the page loaded, or null if it didn't answer. */
   impact: { rooms: string; children: string } | null;

@@ -299,17 +299,21 @@ test('impact numbers come from the charity page, and anything unexpected stops t
 test('the charity section shows its live numbers, and leaves the strip out without them', () => {
   const brief = {
     send_date: SEND,
-    mission: { photo: { src: 'cf:x.jpg', alt: 'A family' }, caption: 'Ages 14 and 12.', story: 'Story.', cta: 'See their reveal', url: 'https://sunshineonaranneyday.com/kids/x/', impact: { rooms: '295+', children: '208+' } },
+    mission: { photo: { src: 'cf:x.jpg', alt: 'A family' }, name: 'Remi &amp; Nico', caption: 'Ages 14 and 12.', story: 'Story.', cta: 'See their reveal', url: 'https://sunshineonaranneyday.com/kids/x/', impact: { rooms: '295+', children: '208+' } },
   };
   const html = new Email(brief).mission();
-  // About one phone screen: a small logo on its own Warm Gray tile (readable when dark mode darkens
-  // the band), the finished room at 2:1, the caption run into the story, and a text link, so the
-  // store's sale keeps the email's one big button
-  assert.match(html, /soard-logo-warm-tile\/public" width="88" height="81"/);
+  // Laid out like the charity's own emails: a Dark Deep top (its dark-background logo, the yellow
+  // label, an italic line over the headline, the key words in yellow italic, the finished room with
+  // its caption), then a cream story led by the yellow dash and the family's name, then the numbers
+  assert.match(html, /brand-logo-dark-bg-tagline-display\/trim=88;91;120;92,w=192,format=png" width="96" height="90"/);
+  assert.match(html, /bgcolor="#1E1F25"[\s\S]*Where 100% of our profits go[\s\S]*Every purchase builds<\/p>[\s\S]*a&nbsp;<em [^>]*color:#FFDA24;">dream&nbsp;room<\/em>\.<\/h2>/);
   // On the column: 536 wide on a computer (and Outlook's size), up to 560 where the style block is gone
   assert.match(html, /w=1120,h=560,[^"]*" width="536" height="268" alt="A family" style="display:block;width:100%;max-width:560px;/);
-  assert.match(html, /<strong style="font-weight:700;">Ages 14 and 12\.<\/strong> Story\.<\/p>/);
+  assert.match(html, />Ages 14 and 12\.<\/p>/);
+  assert.match(html, /bgcolor="#FEFCF5"[\s\S]*>Remi &amp; Nico&#8217;s story<\/p>[\s\S]*>Story\.<\/p>/);
   assert.match(html, /utm_content=mission-link"[^>]*padding:10px 0;[^>]*>See their reveal&nbsp;&#8594;<\/a>/);
+  // Without a name, the label still reads
+  assert.match(new Email({ ...brief, mission: { ...brief.mission, name: undefined } }).mission(), />Their story<\/p>/);
   assert.doesNotMatch(html, /mission-button|bgcolor="#FFDA24"/, 'no yellow button in the charity section');
   assert.match(html, />295\+</);
   assert.match(html, />208\+</);

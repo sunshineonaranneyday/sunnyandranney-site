@@ -56,7 +56,7 @@ const dayParts = (d: string) => {
   return { wd, md };
 };
 const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const count = (n: number | null) => (n === null || Number.isNaN(n) ? 'every subscriber' : `${n.toLocaleString('en-US')} subscriber${n === 1 ? '' : 's'}`);
+const count = (n: number | null) => (n === null || Number.isNaN(n) ? 'the store’s subscribers' : `${n.toLocaleString('en-US')} subscriber${n === 1 ? '' : 's'}`);
 
 interface Props {
   send: string;
@@ -85,8 +85,8 @@ interface Props {
 
 /**
  * Sends the week's email from here, through Kit: a test to whoever's ticked (Kit sends it a minute
- * later, exactly as subscribers get it, as of the day picked), then the email itself to every
- * subscriber on the day and at the time picked. Once it's scheduled the email is locked until the
+ * later, exactly as subscribers get it, as of the day picked), then the email itself to the store's
+ * subscribers on the day and at the time picked. Once it's scheduled the email is locked until the
  * send is cancelled.
  */
 /** An address that breaks, when it must, only after its "@" or before a ".": "holly@" over "soardcharity.com", never "soardcharit" over "y.com". */

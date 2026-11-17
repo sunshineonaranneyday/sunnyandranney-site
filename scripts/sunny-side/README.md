@@ -10,7 +10,7 @@ node scripts/sunny-side/build.mjs --tests   # the stress tests alone: no admin d
 node scripts/sunny-side/verify.mjs          # 9 renders and 6 sweeps per email; exits 1 on any failure
 ```
 
-Every pull request builds the stress tests and runs `verify.mjs` on them, inside the required "Tests" check (`.github/workflows/checks.yml`), so a change to the email that breaks it on any screen can't merge.
+Every pull request builds the stress tests and runs `verify.mjs` on them, inside the required "Tests" check (`.github/workflows/checks.yml`), so a change to the email that breaks it on any screen can't merge. There it runs offline (`EMAIL_CHECK_OFFLINE=1`): each photo is a blank of its own shape, so the layout is the same and no image host can fail a pull request (a deleted product photo, or Shopify itself at the Medusa switch, would have failed every one). The checks of the live photos themselves (format, weight, dark artwork) run in the full check on a computer, `node scripts/sunny-side/verify.mjs` with no setting.
 
 ## Each week
 
@@ -87,7 +87,7 @@ Photo `src` is either a full image URL or `cf:<id>` for Cloudflare Images, which
 8. **Send.** Kit sends both the tests and the email, from here; nobody needs to open Kit.
    - A list says what's left before it can go, each item linking to its section.
    - **Send a test** goes to whoever's ticked: the person signed in ("You") and the store's list (Mike, Staci and Holly to start; `email_test_people`, never in this public repo). Kit's API has no test send, so a test is a small Kit broadcast of its own, a minute ahead, to just those people: each is a Kit subscriber with a tag of their own ("Weekly email test: <email>"), and someone who unsubscribed is never signed back up. It's exactly what subscribers get, with "[Test]" before the subject. At most 10 people, 20 tests a day; each test is logged (`email_test_sends`).
-   - **Send to subscribers** schedules it to every subscriber at a time on its Tuesday, Eastern, starting at the time the store's emails usually go (from Kit's history). A confirmation shows when, how many subscribers, the subject and the preview line. Once it's scheduled the email is locked until it's cancelled ("Cancel the send" deletes it in Kit, until it starts sending).
+   - **Send to subscribers** schedules it to the store's subscribers: the Kit segment "Sunny & Ranney weekly email" (`STORE_SEGMENT`), everyone with the tag "Sunny & Ranney" (`STORE_TAG`, the tag the site's signup form adds) except those tagged "Shopify: no marketing" (2,841 people on Nov 17, 2026), at a time on its Tuesday, Eastern, starting at the time the store's emails usually go (from Kit's history). A confirmation shows when, how many subscribers, the subject and the preview line. Once it's scheduled the email is locked until it's cancelled ("Cancel the send" deletes it in Kit, until it starts sending). The Kit account is the charity's too, and a broadcast with no filter goes to the whole account, so every broadcast the admin makes, tests too, goes to its tags or the store segment and no one else: it's read back from Kit at once, and deleted if Kit didn't keep it to just them. Kit's API has no count for a segment, so the page counts it the way the segment is made (the tag less the no-marketing tag), and shows no number if Kit's filter doesn't count the tag the same as the tag's own list. Every send also goes from the store's sender, `KIT_SENDER`, a sending address confirmed in Kit; without it the admin won't send, since Kit would send as the charity.
    - Nothing is ever published to the web. Kit's docs disagree on whether sending needs "public", so every send is made with it off and read back at once: if Kit published it, it's taken off; if Kit kept it as a draft, it's deleted and the page says so. A send that can't be noted here is taken back out of Kit.
    - It goes on a Kit "Starting point" template, where the content is the whole email (`KIT_TEMPLATE_ID`, or the account's first). `kit.mjs` has the calls; `week-email.ts` builds the email for both, from what's saved, so a test is what goes out.
 
@@ -103,7 +103,7 @@ The admin page itself is checked with `node scripts/check-admin-boxes.mjs <page>
 - Gmail web, the Gmail app, and the Gmail app on the smallest iPhone (320 px), loaded the way Gmail serves the email: no web font, and the CSS Gmail strips taken out;
 - bare, at 320 px and on desktop: no web fonts and no style block at all, the way the Gmail app shows an email to a Yahoo, Outlook or iCloud account (it keeps only inline styles).
 
-Then it sweeps each email: as sent, as Gmail serves it, and bare, in both engines, at every width from 320 to 700 px in 10s and on both sides of each media query (374/375, 620/621), 43 widths. A sweep fails on the email running wider than the screen, or on text spilling out of its box, at any of them. Before Nov 16, 2026 nothing checked the bare case, and the email laid out at desktop sizes on a 320 px phone ran 30 to 84 px off the screen there; and a word in the email's own fixed text ("Room makeovers", 2 px too wide in a third of a 320 px phone) was found by the admin's preview instead of here.
+Then it sweeps each email: as sent, as Gmail serves it, and bare, in both engines, at every width from 320 to 700 px in 10s and on both sides of each media query (374/375, 620/621), 42 widths. A sweep fails on the email running wider than the screen, or on text spilling out of its box, at any of them, and on any web font loading in a sweep that must have none (Gmail's and the bare ones): until Nov 16, 2026 a route sent requests past the font block, and those sweeps quietly checked DM Sans. Every render also fails if anything Staci writes or picks sits in a band without its part (`data-part`: the sale, the products, the story, the events, the charity), which is how the admin's preview knows which section a too-wide word is in. Before Nov 16, 2026 nothing checked the bare case, and the email laid out at desktop sizes on a 320 px phone ran 30 to 84 px off the screen there; and a word in the email's own fixed text ("Room makeovers", 2 px too wide in a third of a 320 px phone) was found by the admin's preview instead of here.
 
 A render fails on any of these:
 - on a phone, a sale button more than 600 px down (about what Apple Mail shows before scrolling);
@@ -131,14 +131,11 @@ A source check also fails the build on CSS Gmail strips: negative margins, posit
   - charcoal #2C2C2C is for text;
   - stone #6B6B68 is for rules;
   - plus white.
-- **The charity section.** "Every purchase builds a dream room" is built the way sunshineonaranneyday.com builds its own home page, from its live styles and its brand guide at /branding/:
-  - a Warm Gray #F5F4F0 hero with the guide's small-use logo (no tagline), laid on its own Warm Gray tile (`email/soard-logo-warm-tile` in Cloudflare Images) so its dark lettering stays readable in dark mode;
-  - a "Where 100% of our profits go" label;
-  - a Libre Baskerville headline whose key words are italic over the site's yellow highlighter (Sunshine Yellow at 30% over the lower half);
-  - the reveal photo, rounded like the site's, with a caption;
-  - a two-sentence story in Outfit;
-  - the site's yellow pill button;
-  - then its impact strip: Sunshine Yellow #FFDA24 numbers on Dark Deep #1E1F25.
+- **The charity section.** Laid out like the charity's own emails (Peter, 2026-11-16: "make it top tier ... to match that from my sunshine emails"; its reveal invite, measured in Gmail that day), in its colors from sunshineonaranneyday.com and its brand guide at /branding/:
+  - a Dark Deep #1E1F25 top, centered: the guide's display logo for dark backgrounds (`brand-logo-dark-bg-display`, cut close; yellow and white artwork, so dark mode can't hide it), "Where 100% of our profits go" in Sunshine Yellow, "Every purchase builds" in soft white italic, then "a *dream room*." with the key words in yellow italic, in Libre Baskerville;
+  - the family's finished room, rounded (20 px), with its caption;
+  - a cream #FEFCF5 story, led by the yellow dash and the family's name ("Remi & Nico's story"), the charity's own summary in Libre Baskerville, and a link to their page;
+  - then its impact strip: Sunshine Yellow #FFDA24 numbers on Dark Deep, so the section runs dark, light, dark, as the charity's emails do.
 
   `verify.mjs` holds the section (class `soard`) to the charity's colors and everything else to the store's.
 - **Font.** DM Sans; the charity section uses Libre Baskerville and Outfit. Outlook falls back to Arial and Gmail to Helvetica. The charity headline falls back to Georgia, but its numbers to Times New Roman, because Georgia's old-style figures made "$0" read as "$o".

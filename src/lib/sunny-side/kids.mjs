@@ -138,5 +138,5 @@ export const kidPhotoFor = (src, kid) => (src && kid.photos?.find((p) => p.src =
 
 /** The charity section as the email draws it, from the kid and the photo picked, in the charity's words. */
 export function missionOf(kid, photo = '') {
-  return { photo: kidPhotoFor(photo, kid), caption: typeset(kid.caption), story: typeset(kid.story), cta: 'See their story', url: kid.page };
+  return { photo: kidPhotoFor(photo, kid), name: typeset(kid.name), caption: typeset(kid.caption), story: typeset(kid.story), cta: 'See their story', url: kid.page };
 }

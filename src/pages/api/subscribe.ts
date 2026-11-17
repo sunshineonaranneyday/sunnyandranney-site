@@ -1,13 +1,15 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { checkRateLimit } from '@/lib/db';
+import { STORE_TAG } from '@/lib/sunny-side/kit.mjs';
 
 export const prerender = false;
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 const KIT_API = 'https://api.kit.com/v4';
-// The store's audience in Kit: store broadcasts go to this tag.
-const KIT_TAG = 'Sunny & Ranney';
+// The store's signup tag in Kit: the admin's weekly email goes to everyone with it, less those
+// tagged "Shopify: no marketing" (STORE_SEGMENT in kit.mjs).
+const KIT_TAG = STORE_TAG;
 
 /** One Kit v4 call. KIT_API_KEY is a secret set in the Cloudflare dashboard. */
 function kit(path: string, body: unknown) {

@@ -1,6 +1,6 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { FIRST_SCREEN, GOLD, render } from '@/lib/sunny-side/email.mjs';
+import { FIRST_SCREEN, PARTS, render } from '@/lib/sunny-side/email.mjs';
 import { FONT, FONT_LINK } from './font';
 
 /** Text too wide for a phone: the word that doesn't fit, by how much, and the part of the email it's in. */
@@ -79,13 +79,13 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
   await doc.fonts?.ready;
   const button = doc.querySelector('a[href*="utm_content=offer-button"]');
   if (!button) return null;
-  // Each line of text wider than its column, with its widest word (what to shorten) and the part it's in
-  // The sale's whole gold band, not just the dark cell its button sits in
-  const offer = button.closest(`td[bgcolor="${GOLD}"]`)?.closest('tr');
+  // Each line of text wider than its column, with its widest word (what to shorten) and the part it's in:
+  // the band it sits in says (data-part, from email.mjs). Guessing from the page's structure missed the
+  // product tiles (a band below the products' heading) and every event after the first, so Staci was
+  // never told about a word there she could fix, and the owner was told it was the email's own layout.
   const partOfEl = (el: Element): Spill['part'] => {
-    if (offer?.contains(el)) return 'offer';
-    for (const p of ['wall', 'story', 'events', 'mission'] as const) if (partOf(doc, p)?.contains(el)) return p;
-    return 'layout';
+    const part = el.closest('[data-part]')?.getAttribute('data-part') ?? '';
+    return (PARTS as string[]).includes(part) ? (part as Spill['part']) : 'layout';
   };
   const ruler = doc.createElement('canvas').getContext('2d');
   /** An element's widest word and its width: what to shorten. */
@@ -127,15 +127,14 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
 /** The part of the email Staci is working on, which the preview keeps in view. */
 export type Focus = 'offer' | 'wall' | 'photos' | 'story' | 'events' | 'mission';
 
-/** Where a part starts in the email: found by what's in it, since the email's bands carry no names. */
+/**
+ * Where a part starts in the email: the first band tagged with it (data-part). The photos are the
+ * story's. The sale is the top of the email, its photo and masthead included, so it scrolls to the top.
+ */
 function partOf(doc: Document, focus: Focus): Element | null {
-  const byLink = (slot: string) => doc.querySelector(`a[href*="utm_content=${slot}"]`)?.closest('td[bgcolor]')?.closest('tr') ?? null;
-  if (focus === 'wall') return doc.querySelector('a[href*="utm_content=wall-shop-all"]')?.closest('table')?.closest('tr') ?? null;
-  if (focus === 'story') return byLink('story-link');
-  if (focus === 'photos') return byLink('story-link') ?? null;
-  if (focus === 'events') return doc.querySelector('[bgcolor="#2B7A96"]');
-  if (focus === 'mission') return doc.querySelector('.soard');
-  return null;
+  if (focus === 'offer') return null;
+  const part = focus === 'photos' ? 'story' : focus;
+  return doc.querySelector(`[data-part="${part}"]`)?.closest('tr') ?? null;
 }
 
 interface Props {

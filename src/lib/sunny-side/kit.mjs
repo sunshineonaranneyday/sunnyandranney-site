@@ -5,12 +5,18 @@
  * API has no "send test" (its broadcasts endpoints only list, create, read, update, delete and
  * report), so a test is a small broadcast of its own, to just the people asked for: each is a Kit
  * subscriber with a tag of their own ("Weekly email test: <email>"), and the test goes to those
- * tags. The real email is a broadcast to every subscriber, at the time Staci picks.
+ * tags. The real email is a broadcast to the store's subscribers (STORE_SEGMENT), at the time
+ * Staci picks.
+ *
+ * Every broadcast goes to the people it's for and no one else. The Kit account is the charity's
+ * too, and a broadcast with no filter goes to all of it: about 10,000 people on Nov 17, 2026,
+ * against the store's 2,841.
  *
  * Neither is ever published to the web. Kit's docs disagree on whether sending needs "public"
  * (create: a send_at alone schedules; update: it takes public too), so every broadcast is made
  * with public off and read back at once: if Kit published it, it's taken off the web; if Kit
- * didn't schedule it, it's deleted and the admin says so. Nothing is left half-sent or public.
+ * didn't keep it to the people asked for, or didn't schedule it, it's deleted and the admin says
+ * so. Nothing is left half-sent, public or going to the wrong people.
  *
  * Kit API v4 with the site's KIT_API_KEY; KIT_API_BASE points it at a stand-in for local tests.
  * The email goes on a Kit "Starting point" template, where the content is the whole email:
@@ -74,15 +80,92 @@ export async function readyTester(kit, { email, name }) {
 }
 
 /**
- * Schedules a broadcast, kept off the web, and checks with Kit that it's scheduled. `filter` is
- * Kit's subscriber_filter, or null for every subscriber.
+ * The store's signup tag in Kit: the site's signup form adds it (api/subscribe.ts), and the store's
+ * hand-sent emails went to everyone with it (Nov 10, 2026: 3,135 people, the tag's whole count).
+ */
+export const STORE_TAG = 'Sunny & Ranney';
+/** A tag on 424 active subscribers on Nov 17, 2026, 274 of them on the store tag. They're left out (Peter 2026-11-17). */
+export const NO_MARKETING_TAG = 'Shopify: no marketing';
+/**
+ * Who the weekly email goes to: a segment in Kit, made Nov 17, 2026 as everyone with STORE_TAG
+ * and not NO_MARKETING_TAG (2,841 people that day). Kit's API takes one filter group per
+ * broadcast, so it can't leave a tag out by itself; the segment does. Kept up to date by Kit.
+ */
+export const STORE_SEGMENT = 'Sunny & Ranney weekly email';
+
+/** The id of the Kit tag or segment with exactly this name, or null. */
+async function idNamed(kit, kind, name) {
+  let after = '';
+  for (let page = 0; page < 20; page++) {
+    const data = await kit.call(`/${kind}?per_page=1000${after ? `&after=${encodeURIComponent(after)}` : ''}`);
+    const found = (data?.[kind] ?? []).find((t) => t.name === name);
+    if (found) return Number(found.id);
+    const { pagination } = data ?? {};
+    if (!pagination?.has_next_page || !pagination.end_cursor) break;
+    after = pagination.end_cursor;
+  }
+  return null;
+}
+
+/** The store segment's id in Kit. Throws when Kit has no such segment, so nothing goes to anyone else. */
+export async function storeSegmentId(kit) {
+  const id = await idNamed(kit, 'segments', STORE_SEGMENT);
+  if (!id) throw new Error(`Kit has no “${STORE_SEGMENT}” segment, the store’s subscribers, so there’s no one to send it to. Nothing was sent.`);
+  return id;
+}
+
+/** @typedef {{ type: 'tag' | 'segment', ids: number[] }} Audience */
+
+/**
+ * Who a Kit subscriber_filter sends to: one kind (tags or segments) and its ids, sorted, or null
+ * when it reaches anyone else: everyone (Kit reads an unfiltered broadcast back as
+ * { all: [{ type: 'all_subscribers' }] }), a mix, an exclusion, or several someone must be in all of.
+ * @returns {Audience | null}
+ */
+export function audienceOf(filter) {
+  if (!Array.isArray(filter) || filter.length !== 1 || !filter[0] || typeof filter[0] !== 'object') return null;
+  const group = filter[0];
+  const used = Object.keys(group).filter((k) => group[k] != null && !(Array.isArray(group[k]) && group[k].length === 0));
+  if (used.length !== 1) return null;
+  const [key] = used;
+  const conds = group[key];
+  if (!Array.isArray(conds) || conds.length === 0) return null;
+  const type = conds[0]?.type;
+  if (type !== 'tag' && type !== 'segment') return null;
+  if (!conds.every((c) => c?.type === type && Array.isArray(c.ids) && c.ids.length > 0)) return null;
+  // Within one condition a subscriber needs any of its ids; "all" across several needs every one
+  if (key !== 'any' && !(key === 'all' && conds.length === 1)) return null;
+  const ids = [...new Set(conds.flatMap((c) => c.ids.map(Number)))].sort((a, b) => a - b);
+  return ids.every((n) => Number.isInteger(n) && n > 0) ? { type, ids } : null;
+}
+
+const sameAudience = (a, b) => !!a && !!b && a.type === b.type && a.ids.length === b.ids.length && a.ids.every((n, i) => n === b.ids[i]);
+
+/**
+ * Schedules a broadcast to an audience (testers' tags, or the store's segment), kept off the web,
+ * and checks with Kit that it's scheduled, and to just them.
+ * @param {Kit} kit
+ * @param {{ subject: string, preheader: string, html: string, description: string, templateId: number, sendAt: string, from: string | undefined, audience: Audience }} msg
  * @returns {Promise<{ id: number, status: string, sendAt: string }>}
  */
-export async function schedule(kit, { subject, preheader, html, description, templateId, sendAt, filter = null }) {
-  const body = { subject, preview_text: preheader, content: html, description, email_template_id: templateId, public: false, send_at: sendAt, ...(filter ? { subscriber_filter: filter } : {}) };
+export async function schedule(kit, { subject, preheader, html, description, templateId, sendAt, from, audience }) {
+  // From the store's own sender (KIT_SENDER: Staci, Peter 2026-11-16). Kit's account is the charity's
+  // too, and a broadcast that names no sender goes from the account's default: a test came from
+  // linzi@soardcharity.com as "Sunshine on a Ranney Day". The address is a confirmed sending
+  // address in Kit, from name "Sunny & Ranney".
+  if (!from) throw new Error('The store’s sending address isn’t set (KIT_SENDER), so Kit would send it as the charity. Nothing was sent.');
+  // To the people it's for only: with no filter Kit sends to the whole account, the charity's list too (Peter 2026-11-17)
+  const filter = [{ any: [{ type: audience?.type, ids: audience?.ids }] }];
+  const wanted = audienceOf(filter);
+  if (!wanted) throw new Error('No one to send it to was picked, and Kit would send it to the whole account, the charity’s list too. Nothing was sent.');
+  const body = { subject, preview_text: preheader, content: html, description, email_template_id: templateId, email_address: from, public: false, send_at: sendAt, subscriber_filter: filter };
   const { broadcast } = await kit.call('/broadcasts', { method: 'POST', body });
   const id = broadcast.id;
   let now = (await kit.call(`/broadcasts/${id}`)).broadcast;
+  if (!sameAudience(audienceOf(now.subscriber_filter), wanted)) {
+    await kit.call(`/broadcasts/${id}`, { method: 'DELETE' }).catch(() => {});
+    throw new Error('Kit didn’t keep it to just the people it was for, so it was deleted before it could go. Nothing was sent.');
+  }
   if (now.public) {
     await kit.call(`/broadcasts/${id}`, { method: 'PUT', body: { public: false } });
     now = (await kit.call(`/broadcasts/${id}`)).broadcast;
@@ -96,15 +179,16 @@ export async function schedule(kit, { subject, preheader, html, description, tem
 }
 
 /** Sends a test now-ish, to these testers' tags. @returns {Promise<{ id: number, status: string, sendAt: string }>} */
-export function sendTest(kit, { subject, preheader, html, templateId, tagIds, description, now = Date.now() }) {
+export function sendTest(kit, { subject, preheader, html, templateId, tagIds, description, from, now = Date.now() }) {
   return schedule(kit, {
+    from,
     subject: `[Test] ${subject}`,
     preheader,
     html,
     description,
     templateId,
     sendAt: new Date(now + TEST_LEAD_MS).toISOString(),
-    filter: [{ any: [{ type: 'tag', ids: tagIds }] }],
+    audience: { type: 'tag', ids: tagIds },
   });
 }
 
@@ -128,10 +212,26 @@ export async function cancel(kit, id) {
   await kit.call(`/broadcasts/${id}`, { method: 'DELETE' });
 }
 
-/** How many people the email would go to: the account's active subscribers. */
-export async function subscriberCount(kit) {
-  const data = await kit.call('/subscribers?status=active&include_total_count=true&per_page=1&slim=true');
+/** Kit's count of active subscribers with every one of these tags, from its subscriber filter. */
+async function activeWithTags(kit, tagIds) {
+  const all = [...tagIds.map((id) => ({ type: 'tags', any: [{ type: 'ids', matching: [id] }] })), { type: 'subscriber_state', states: ['active'] }];
+  const data = await kit.call('/subscribers/filter', { method: 'POST', body: { all } });
   return Number(data?.pagination?.total_count ?? NaN);
+}
+
+/**
+ * How many people the email would go to: the store segment's active subscribers. Kit's API has no
+ * count for a segment, so it's counted the way the segment is made (STORE_SEGMENT): the store tag's
+ * active subscribers, less those also on NO_MARKETING_TAG. Kit's filter must count the store tag
+ * the same as the tag's own list does, or no number is shown (NaN) rather than a wrong one.
+ */
+export async function subscriberCount(kit) {
+  const [store, noMarketing] = await Promise.all([idNamed(kit, 'tags', STORE_TAG), idNamed(kit, 'tags', NO_MARKETING_TAG)]);
+  if (!store || !noMarketing) return NaN;
+  const onTag = await kit.call(`/tags/${store}/subscribers?status=active&include_total_count=true&per_page=1`).then((d) => Number(d?.pagination?.total_count ?? NaN));
+  const [viaFilter, both] = await Promise.all([activeWithTags(kit, [store]), activeWithTags(kit, [store, noMarketing])]);
+  if (!Number.isInteger(onTag) || viaFilter !== onTag || !Number.isInteger(both) || both < 0 || both > onTag) return NaN;
+  return onTag - both;
 }
 
 /** A test, not a real send: the admin's tests go out with "[Test]" before the subject (sendTest). */
