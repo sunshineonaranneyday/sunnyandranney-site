@@ -917,10 +917,14 @@ export class Email {
         Email.text('Designer finds. Better prices. A&nbsp;really&nbsp;good&nbsp;cause.', { size: 15, lh: 22, weight: 700, align: 'center', mb: 4 }) +
         Email.text('100% of our profits fund dream rooms for kids with special&nbsp;needs.', { size: 14, lh: 20, align: 'center', mb: 4 }) +
         Email.text(links, { size: 14, lh: 22, align: 'center', mb: 4 }) +
-        // Kit fills {{ address }}; wrapping it in a link stops Gmail turning it into a blue autolink
+        // The store's mailing address, written in, as the site publishes it (SEO.astro): not Kit's
+        // {{ address }}, which showed as those words in any email Kit didn't send (a test, the
+        // preview) and would be the shared Kit account's (the charity's) when it did. A link keeps
+        // Gmail from turning it into a blue map link. Only the unsubscribe link is Kit's to fill.
         Email.text(
-          `<a href="${escape(this.url('https://sunshineonaranneyday.com/', 'footer-address'))}" target="_blank" ` +
-            `style="display:inline-block;padding:12px 0;color:${CHARCOAL};text-decoration:none;">{{ address }}</a><br>` +
+          `<a href="${escape(this.url(`${SITE}/visit/`, 'footer-address'))}" target="_blank" ` +
+            `style="display:inline-block;padding:12px 0;color:${CHARCOAL};text-decoration:none;">` +
+            `Sunny &amp; Ranney &middot; 109A Oak Street, Roswell, GA&nbsp;30075</a><br>` +
             `<a href="{{ unsubscribe_url }}" style="display:inline-block;padding:12px 4px;color:${CHARCOAL};` +
             `text-decoration:underline;">Unsubscribe</a>`,
           { size: 13, lh: 20, align: 'center' },
