@@ -44,16 +44,47 @@ export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catal
 }
 
 /**
+ * The admin page's sections, top to bottom, in the order Staci decides things (Peter, 2026-11-17):
+ * the subject line, the sale, the reveal (the story spot: the showroom story or a charity reveal,
+ * which says whether the collage is needed), then the photos, the products, the events, the
+ * charity, and Send. Not the email's own order (SECTIONS in email.mjs). The page, its error list
+ * and "Before it can go" all follow this list; page-order.test.mjs holds them to it.
+ */
+export const PAGE_SECTIONS = ['em-lines', 'em-sale', 'em-story', 'em-photos', 'em-products', 'em-events', 'em-charity', 'em-send'];
+
+/** The fields each section of the page holds, by the first part of an error's key (check, checkWall, checkParts). */
+const FIELDS = {
+  'em-lines': ['subject', 'preheader'],
+  'em-sale': ['kind', 'tiers', 'percent', 'ends'],
+  'em-story': ['story'],
+  'em-photos': ['photos', 'story.photos'],
+  'em-products': ['picks', 'label', 'headline'],
+  'em-charity': ['kid'],
+};
+
+/** The page section that fixes the field an error's key names, or null if no section holds it. */
+export function sectionOf(key) {
+  const [head, sub] = key.split('.');
+  const found = Object.entries(FIELDS).find(([, fields]) => fields.includes(`${head}.${sub}`)) ?? Object.entries(FIELDS).find(([, fields]) => fields.includes(head));
+  return found ? found[0] : null;
+}
+
+/** Where a section sits on the page; an unknown one goes last. */
+export const pagePlace = (section) => {
+  const k = PAGE_SECTIONS.indexOf(section ?? '');
+  return k < 0 ? PAGE_SECTIONS.length : k;
+};
+
+/**
  * What still stands between the saved week and sending it, in words with the page section that
  * fixes each, or [] when it's ready: a sale, 4 to 9 products that pass their checks, and the parts
- * the finished email needs.
+ * the finished email needs. Listed in the page's order (PAGE_SECTIONS).
  * @returns {{ text: string, section: string }[]}
  * @param {{ special: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], reveals?: any[] | null, catalog: Map<string, any> | null, send: string, check: Function, checkWall: Function, checkParts: Function, sale: any }} week
  */
 export function kitProblems({ special, wall, parts, photos, kids, reveals = null, catalog, send, check, checkWall, checkParts, sale }) {
   const out = [];
   const add = (text, section) => out.push({ text, section });
-  // In the page's order, which is the email's: subject line, photos, sale, products, story, charity
   const e = checkParts(parts, { sale, photos, kids, reveals, ready: true });
   if (e.subject || e.preheader) add(e.subject && !parts.subject ? 'Write the subject line.' : 'Fix the subject line.', 'em-lines');
   if (e.photos || e['story.photos']) add(e.photos || 'Fix the story’s photos.', 'em-photos');
@@ -68,5 +99,6 @@ export function kitProblems({ special, wall, parts, photos, kids, reveals = null
   const reveal = parts.story?.reveal && reveals?.find((r) => r.slug === parts.story.reveal);
   if (reveal && reveal.day < send) add(`${reveal.name}’s reveal was ${reveal.short}, before this email goes out. Pick another, or the showroom story.`, 'em-story');
   if (e.kid) add(e.kid, 'em-charity');
-  return out;
+  // A stable sort: within a section, the order above
+  return out.sort((a, b) => pagePlace(a.section) - pagePlace(b.section));
 }
