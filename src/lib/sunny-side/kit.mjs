@@ -223,14 +223,17 @@ async function activeWithTags(kit, tagIds) {
  * How many people the email would go to: the store segment's active subscribers. Kit's API has no
  * count for a segment, so it's counted the way the segment is made (STORE_SEGMENT): the store tag's
  * active subscribers, less those also on NO_MARKETING_TAG. Kit's filter must count the store tag
- * the same as the tag's own list does, or no number is shown (NaN) rather than a wrong one.
+ * the same as the tag's own list does, or it throws, saying what Kit counted, rather than give a
+ * wrong number.
  */
 export async function subscriberCount(kit) {
   const [store, noMarketing] = await Promise.all([idNamed(kit, 'tags', STORE_TAG), idNamed(kit, 'tags', NO_MARKETING_TAG)]);
-  if (!store || !noMarketing) return NaN;
+  if (!store || !noMarketing) throw new Error(`Kit has no “${store ? NO_MARKETING_TAG : STORE_TAG}” tag, so the store segment can’t be counted.`);
   const onTag = await kit.call(`/tags/${store}/subscribers?status=active&include_total_count=true&per_page=1`).then((d) => Number(d?.pagination?.total_count ?? NaN));
   const [viaFilter, both] = await Promise.all([activeWithTags(kit, [store]), activeWithTags(kit, [store, noMarketing])]);
-  if (!Number.isInteger(onTag) || viaFilter !== onTag || !Number.isInteger(both) || both < 0 || both > onTag) return NaN;
+  if (!Number.isInteger(onTag) || viaFilter !== onTag || !Number.isInteger(both) || both < 0 || both > onTag) {
+    throw new Error(`The store segment can’t be counted: the tag’s list has ${onTag} active, Kit’s filter ${viaFilter}, on both tags ${both}.`);
+  }
   return onTag - both;
 }
 
