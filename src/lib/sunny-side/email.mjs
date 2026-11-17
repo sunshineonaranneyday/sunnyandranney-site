@@ -28,6 +28,14 @@
  *   Grid:   words and cards sit on one 536px column (32px sides; 20px on phones). Photos run the full
  *           600px. The photo wall's 4px gutters live inside its cells, split so the outer tiles touch
  *           both edges, because Gmail strips the negative margins that would otherwise do it.
+ *   Phones first: every size written inline is a phone's (type, padding, gaps), and a computer's
+ *           comes from the style block (min-width:621px) and from Outlook's own block. Some mail apps
+ *           throw the style block away (the Gmail app with a Yahoo, Outlook or iCloud account), so
+ *           whatever must fit a 320px phone can't depend on it: without it the email reads as it
+ *           does on a phone, at any width. Rows that sit side by side on a computer (the visit
+ *           row, the charity's numbers) wrap by their own widths, with no media query (FAB_FOUR,
+ *           statColumns). verify.mjs renders every email with the style block and without it, at
+ *           every width from 320 to 700px.
  *   First screen: on a phone, the sale button lands within the first 600px (verify.mjs fails it otherwise).
  *   Contrast (WCAG AA): charcoal on white 14.0, on gold 9.9; white on teal 4.9; SOARD Dark on Warm
  *                       Gray 10.6, Muted on it 6.2; Sunshine Yellow on Dark Deep 12 -> all any size.
@@ -42,6 +50,15 @@ export const GOLD = '#FFD400', TEAL = '#2B7A96';
 export const CHARCOAL = '#2C2C2C', STONE = '#6B6B68', WHITE = '#FFFFFF';
 const SANS = "'DM Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const S1 = 8, S2 = 16, S3 = 24, S4 = 32, S5 = 40; // spacing scale
+const PHONE_SIDE = 20; // the column's sides on a phone (32 on a computer)
+/** The email's full width and its column on a computer: 600px less 32px each side. */
+const WIDTH = 600, COLUMN = WIDTH - 2 * S4;
+/** Wider than this, the style block's computer sizes apply (min-width); this wide or narrower, a phone's. */
+const DESKTOP = 621;
+/** Each of the charity's numbers: two fit across the smallest phone's 280px column, three across a computer's 536. */
+const STAT_PHONE = 140, STAT_DESKTOP = 178;
+/** The visit row's button column, beside the address on a computer. */
+const VISIT_BUTTON = 210;
 const R_BTN = 8, R_CARD = 12;
 const LABEL_LH = 16; // line height of the small uppercase labels
 const GUTTER = 4; // between photo wall tiles
@@ -307,14 +324,15 @@ export class Email {
     return `${src}${src.includes('?') ? '&' : '?'}width=${w}&height=${h}&crop=center&quality=64&format=jpg`;
   }
 
-  img(src, w, h, alt, href, slot, radius = 0, cls = '') {
+  /** A photo `w` by `h` (Outlook's size), as wide as its cell up to `max`: its own width, or the column's for a photo on the column. */
+  img(src, w, h, alt, href, slot, radius = 0, cls = '', max = w) {
     const c = cls ? ` class="${cls}"` : '';
     // A store photo shown straight from the site (the admin, run locally) isn't cropped by the
     // resizing, so the browser crops it to the same shape, keeping the preview's measurements true
     const crop = photoDirect && src.includes('/media/email/') ? `aspect-ratio:${w}/${h};object-fit:cover;` : '';
     const tag =
       `<img${c} src="${escape(src)}" width="${w}" height="${h}" alt="${escape(alt)}" style="display:block;width:100%;` +
-      `max-width:${w}px;height:auto;${crop}border:0;border-radius:${radius}px;">`;
+      `max-width:${max}px;height:auto;${crop}border:0;border-radius:${radius}px;">`;
     if (!href) return tag;
     return `<a href="${escape(this.url(href, slot))}" target="_blank" style="display:block;color:${CHARCOAL};">${tag}</a>`;
   }
@@ -362,15 +380,17 @@ export class Email {
   }
 
   /**
-   * One full-width row of the email. Phone padding follows from desktop padding:
-   * 40 top/bottom -> 32 (pt, pb), 32 sides -> 20 (px); anything else stays as is.
+   * One full-width row of the email, padded as asked on a computer. Inline it's padded as on a phone,
+   * phones first: 40 top/bottom -> 32 (pt, pb), 32 sides -> 20 (px); anything else stays as is. The
+   * style block gives the computer its 40s and 32s back.
    */
   band(inner, { bg = WHITE, top = S5, side = S4, bottom = S5, cls = '' } = {}) {
     const c = [side === S4 ? 'px' : '', top === S5 ? 'pt' : '', bottom === S5 ? 'pb' : '', cls].filter(Boolean).join(' ');
     const attr = c ? ` class="${c}"` : '';
+    const phone = { top: top === S5 ? S4 : top, side: side === S4 ? PHONE_SIDE : side, bottom: bottom === S5 ? S4 : bottom };
     return (
       `<tr><td${attr} bgcolor="${bg}" style="background-color:${bg};color:${CHARCOAL};` +
-      `padding:${top}px ${side}px ${bottom}px;">${inner}</td></tr>`
+      `padding:${phone.top}px ${phone.side}px ${phone.bottom}px;">${inner}</td></tr>`
     );
   }
 
@@ -379,17 +399,18 @@ export class Email {
     return `<div${c} style="height:${h}px;line-height:${h}px;font-size:${h}px;">&nbsp;</div>`;
   }
 
-  /** White space between a photo and a block it doesn't belong to (40px, 32 on phones). */
+  /** White space between a photo and a block it doesn't belong to (40px, 32 on phones: 32 inline, phones first). */
   breather() {
-    return this.band(Email.gap(S5, 'g40'), { top: 0, side: 0, bottom: 0 });
+    return this.band(Email.gap(S4, 'g40'), { top: 0, side: 0, bottom: 0 });
   }
 
-  static text(t, { size = 17, lh = 26, weight = 400, color = CHARCOAL, mb = 0, align = 'left', tag = 'p', cls = '', track = '', font = SANS } = {}) {
+  /** A paragraph. `size` and `lh` are a phone's (phones first); a class in the style block gives a computer bigger ones. */
+  static text(t, { size = 17, lh = 26, weight = 400, color = CHARCOAL, mb = 0, align = 'left', tag = 'p', cls = '', track = '', font = SANS, css = '' } = {}) {
     const c = cls ? ` class="${cls}"` : '';
     const ls = track ? `letter-spacing:${track};` : '';
     return (
       `<${tag}${c} style="margin:0 0 ${mb}px;font-family:${font};font-size:${size}px;line-height:${lh}px;` +
-      `font-weight:${weight};${ls}color:${color};text-align:${align};mso-line-height-rule:exactly;">${t}</${tag}>`
+      `font-weight:${weight};${ls}color:${color};text-align:${align};${css}mso-line-height-rule:exactly;">${t}</${tag}>`
     );
   }
 
@@ -400,19 +421,21 @@ export class Email {
     );
   }
 
+  /** A section headline: 26/30 on a phone, 30/34 on a computer (.h2). */
   static h2(t, { color = CHARCOAL, mb = 12 } = {}) {
-    return Email.text(noWidow(t), { size: 30, lh: 34, weight: 700, color, mb, tag: 'h2', cls: 'h2', track: '-0.015em' });
+    return Email.text(noWidow(t), { size: 26, lh: 30, weight: 700, color, mb, tag: 'h2', cls: 'h2', track: '-0.015em' });
   }
 
   // ── sections, top to bottom ──
   /** Slim, like a magazine masthead: the logo left, the newsletter's name and issue date right. */
   masthead() {
     const d = day(this.b.send_date);
+    // 120px on a phone, 150 on a computer (.logo); the width attribute is Outlook's
     const logo =
       `<a href="${escape(this.url(SITE + '/', 'masthead'))}" target="_blank" class="logo" ` +
-      `style="display:block;width:150px;color:${CHARCOAL};">` +
+      `style="display:block;width:120px;color:${CHARCOAL};">` +
       `<img class="logo" src="${LOGO}" width="150" height="60" alt="Sunny &amp; Ranney" ` +
-      `style="display:block;width:150px;height:auto;border:0;"></a>`;
+      `style="display:block;width:120px;height:auto;border:0;"></a>`;
     const name =
       Email.label('The Sunny Side', { mb: 2, align: 'right' }) +
       Email.text(`${monthShort(d)} ${d.getUTCDate()}, ${d.getUTCFullYear()}`, { size: 13, lh: 18, align: 'right' });
@@ -429,17 +452,20 @@ export class Email {
   tiers(tiers) {
     const n = tiers.length;
     if (!(n >= 2 && n <= 4)) throw new Error(`sale.tiers: the offer shows 2 to 4 tiers, not ${n}`);
-    const size = TIER_SIZE[n][0];
+    // Phones first: inline, the size that fits the smallest phone; the style block grows it from 375px and again on a computer
+    const size = TIER_SIZE[n][2];
     const short = n === 4 || tiers.some(([spend]) => typeof spend === 'number' && spend >= 10000);
     let tds = '';
     tiers.forEach(([spend, percent], k) => {
       const rule = k ? `border-left:2px solid ${CHARCOAL};padding-left:14px;` : '';
       const clear = k < n - 1 ? `padding-right:${S1}px;` : '';
       const cap = [n >= 3 ? 'cap' : '', n === 4 ? 'cap4' : ''].filter(Boolean).join(' ');
+      // Under 375px "off" sits over the amount in every column (min-content), so the columns stay even
+      const caption = n === 4 ? { size: 13, lh: 18 } : { size: 15, lh: 20 };
       tds +=
         `<td width="${pct(100 / n)}%" valign="top" style="${rule}${clear}">` +
         Email.text(`${percent}%`, { size, lh: size, weight: 700, cls: `tier${n}`, track: '-0.04em', mb: 4 }) +
-        Email.text(`off ${amount(spend, short)}`, { size: 15, lh: 20, weight: 700, cls: cap }) +
+        Email.text(`off ${amount(spend, short)}`, { ...caption, weight: 700, cls: cap, css: n >= 3 ? 'width:min-content;' : '' }) +
         '</td>';
     });
     return Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"');
@@ -449,12 +475,14 @@ export class Email {
     const s = this.b.sale;
     let out = Email.label(s.name);
     if (s.kind === 'percent') {
+      // 76/74 on a phone, 92/88 on a computer (.mega); "what" 32/36, 40/44 (.mega2)
       out +=
-        `<h1 class="mega" style="margin:0;font-family:${SANS};font-size:92px;line-height:88px;font-weight:700;` +
+        `<h1 class="mega" style="margin:0;font-family:${SANS};font-size:76px;line-height:74px;font-weight:700;` +
         `letter-spacing:-0.045em;color:${CHARCOAL};mso-line-height-rule:exactly;">${s.percent}%&nbsp;off</h1>` +
-        Email.text(s.what, { size: 40, lh: 44, weight: 700, mb: S3, cls: 'mega2', track: '-0.025em' });
+        Email.text(s.what, { size: 32, lh: 36, weight: 700, mb: S3, cls: 'mega2', track: '-0.025em' });
     } else {
-      out += Email.text(noWidow(s.headline), { size: 32, lh: 36, weight: 700, mb: s.kind === 'tiers' ? S3 : S2, tag: 'h1', cls: 'h2', track: '-0.015em' });
+      // 26/30 on a phone, 32/36 on a computer (.h1)
+      out += Email.text(noWidow(s.headline), { size: 26, lh: 30, weight: 700, mb: s.kind === 'tiers' ? S3 : S2, tag: 'h1', cls: 'h1', track: '-0.015em' });
       if (s.kind === 'tiers') out += this.tiers(s.tiers) + Email.gap(S3);
     }
     out += this.button(`${s.cta} &#8594;`, SITE + s.url, 'offer-button', CHARCOAL, WHITE);
@@ -474,7 +502,8 @@ export class Email {
       `<a href="${escape(this.url(ph.url, slot))}" target="_blank" style="display:block;color:${CHARCOAL};text-decoration:none;">` +
       `<img src="${escape(Email.photo(ph.src, cw * 2, ch * 2))}" width="${cw}" height="${ch}" alt="" ` +
       `style="display:block;width:100%;max-width:${cw}px;height:auto;border:0;">` +
-      `<span class="tile-cap" style="display:block;padding:10px 12px ${S3}px ${S4}px;">` +
+      // Inset by the column's side: 20px on a phone, 32 on a computer (.tile-cap)
+      `<span class="tile-cap" style="display:block;padding:10px ${S1}px ${S3}px ${PHONE_SIDE}px;">` +
       `<span class="tile-name" style="display:block;font-family:${SANS};font-size:15px;line-height:20px;font-weight:700;color:${CHARCOAL};">${ph.name}</span>` +
       `<span class="tile-price" style="display:block;font-family:${SANS};font-size:15px;line-height:20px;font-weight:400;color:${CHARCOAL};">${money(ph.price)}</span>` +
       `</span></a>`
@@ -675,7 +704,8 @@ export class Email {
           Email.T(
             `<tr><td valign="middle">` +
               Email.label(when, { mb: 6 }) +
-              Email.text(noWidow(first.what), { size: 24, lh: 29, weight: 700, cls: 'spot' }) +
+              // 21/26 on a phone, 24/29 on a computer (.spot)
+              Email.text(noWidow(first.what), { size: 21, lh: 26, weight: 700, cls: 'spot' }) +
               (first.note ? Email.text(first.note, { size: 15, lh: 21 }) : '') +
               Email.text(`${first.time || e.time} at the showroom`, { size: 15, lh: 21, weight: 700 }) +
               (e.one ? this.addOne(e, first) : '') +
@@ -740,8 +770,9 @@ export class Email {
       `<a href="${escape(this.url(SOARD_HOME, 'charity-logo'))}" target="_blank" style="display:block;width:${LOGO_W}px;color:${SOARD_DARK};">` +
       `<img class="soard-logo" src="${SOARD_LOGO}" width="${LOGO_W}" height="${Math.round((LOGO_W * 121) / 132)}" alt="Sunshine on a Ranney Day" ` +
       `style="display:block;width:${LOGO_W}px;height:auto;border:0;border-radius:6px;"></a>`;
+    // 26/32 on a phone, 30/36 on a computer (.soard-h)
     const headline =
-      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:30px;line-height:36px;font-weight:700;` +
+      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:26px;line-height:32px;font-weight:700;` +
       `letter-spacing:-0.02em;color:${SOARD_DARK};mso-line-height-rule:exactly;">Every purchase builds a&nbsp;` +
       `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_DARK};background-image:${HIGHLIGHT};">` +
       `dream&nbsp;room</em>.</h2>`;
@@ -757,30 +788,93 @@ export class Email {
       Email.label('Where 100% of our profits go', { color: SOARD_MUTED, font: OUTFIT, track: '0.1em' }) +
       headline +
       Email.gap(S3) +
-      this.img(Email.photo(m.photo.src, 1072, 536), 536, 268, m.photo.alt, m.url, 'mission-photo', 16) +
+      // On the column: 536px on a computer, and up to 560 where the style block is gone (20px sides at any width)
+      this.img(Email.photo(m.photo.src, 1120, 560), COLUMN, COLUMN / 2, m.photo.alt, m.url, 'mission-photo', 16, '', WIDTH - 2 * PHONE_SIDE) +
       Email.gap(S2) +
       Email.text(words, { size: 16, lh: 25, color: SOARD_DARK, mb: S2 - 10, font: OUTFIT }) +
       link;
     return this.breather() + this.band(body, { bg: SOARD_WARM, top: S4, bottom: S4, cls: 'soard' }) + (m.impact ? this.impact(m.impact) : '');
   }
 
-  /** The charity's impact strip: its own numbers, as its site shows them, Sunshine Yellow on Dark Deep. */
+  /**
+   * The charity's impact strip: its own numbers, as its site shows them, Sunshine Yellow on Dark Deep,
+   * centered. Three across on a computer; on a phone two across and the third centered under them,
+   * as sunshineonaranneyday.com lays them out at 390px (checked Nov 16, 2026). Each number is a block
+   * of its own that wraps by its width (statColumns), so no number or label is ever squeezed into a
+   * third of a phone: three equal cells left "Room makeovers" 2px short at 320px (Nov 16, 2026).
+   */
   impact(n) {
     const stats = [
       [n.rooms, 'Room makeovers'],
       [n.children, 'Children served'],
       ['$0', 'Cost to families'],
     ];
-    const tds = stats
-      .map(
-        ([num, what], k) =>
-          `<td width="${pct(100 / 3)}%" valign="top" style="${k < 2 ? `padding-right:${S1}px;` : ''}">` +
-          Email.text(num, { size: 40, lh: 44, weight: 700, color: SOARD_YELLOW, font: NUMERALS, cls: 'soard-stat soard-serif', track: '-0.02em', mb: 4 }) +
-          Email.label(what, { color: WHITE, mb: 0, font: OUTFIT, track: '0.08em' }) +
-          '</td>',
-      )
-      .join('');
-    return this.band(Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"'), { bg: SOARD_DEEP, top: S4, bottom: S4, cls: 'soard' });
+    const cells = stats.map(
+      ([num, what]) =>
+        // 28/32 under 375px, 32/36 on a phone, 40/44 on a computer (.soard-stat)
+        Email.text(num, { size: 28, lh: 32, weight: 700, color: SOARD_YELLOW, font: NUMERALS, cls: 'soard-stat soard-serif', track: '-0.02em', mb: 4, align: 'center' }) +
+        Email.label(what, { color: WHITE, mb: S2, font: OUTFIT, track: '0.08em', align: 'center' }),
+    );
+    // Each number keeps 16px under it, for when they wrap; the band is that much shorter at the bottom
+    return this.band(Email.statColumns(cells), { bg: SOARD_DEEP, top: S4, bottom: S4 - S2, cls: 'soard' });
+  }
+
+  /**
+   * Blocks that sit side by side while they fit and wrap to the next line, centered, when they don't:
+   * inline blocks, each at most STAT_PHONE wide (STAT_DESKTOP on a computer, .stat), so two fit across
+   * the smallest phone (280px of column) and three across a computer's 536. No media query decides it,
+   * so it holds in a mail app that throws the style block away. Outlook, which ignores max-width, gets
+   * a table of its own (the "ghost table").
+   */
+  static statColumns(cells) {
+    const ghost = (s) => `<!--[if mso]>${s}<![endif]-->`;
+    const w = Math.floor(COLUMN / cells.length);
+    return (
+      `<div style="font-size:0;line-height:0;text-align:center;">` +
+      ghost(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`) +
+      cells
+        .map(
+          (c) =>
+            ghost(`<td width="${w}" valign="top" align="center">`) +
+            `<div class="stat" style="display:inline-block;vertical-align:top;width:100%;max-width:${STAT_PHONE}px;font-size:16px;line-height:24px;">${c}</div>` +
+            ghost('</td>'),
+        )
+        .join('') +
+      ghost('</tr></table>') +
+      '</div>'
+    );
+  }
+
+  /**
+   * Columns side by side on a computer and stacked, each the full width, on a phone, with no media
+   * query: Rémi Parmentier's "Fab Four" (min-width, max-width, width, calc). With less than `at` px of
+   * room, each column's width works out huge and max-width:100% holds it to the whole width; with `at`
+   * or more it works out below zero and min-width holds it to its own. The calc is written expanded,
+   * (at - 100%) * at as at²px - (at × 100)%, without the parentheses some mail apps reject; one that
+   * drops it keeps width:100%, so the columns stack, which still fits. Outlook gets a ghost table.
+   * min-width is a share of the row, not pixels: min-width beats max-width, so a 326px minimum held
+   * the address column at 326 on a 280px phone and pushed the email off the screen.
+   * @param {{ html: string, width: number, align?: string }[]} cols widths summing to `at`
+   */
+  static fabFour(cols, at = COLUMN) {
+    const ghost = (s) => `<!--[if mso]>${s}<![endif]-->`;
+    // Rounded down, so the shares never add up to more than the row
+    const share = (w) => Math.floor((w / at) * 10000) / 100;
+    return (
+      `<div style="font-size:0;line-height:0;">` +
+      ghost(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`) +
+      cols
+        .map(
+          ({ html, width, align = 'left' }) =>
+            ghost(`<td width="${width}" valign="middle" align="${align}">`) +
+            `<div style="display:inline-block;vertical-align:middle;min-width:${share(width)}%;max-width:100%;width:100%;` +
+            `width:calc(${at * at}px - ${at * 100}%);font-size:16px;line-height:24px;text-align:${align};">${html}</div>` +
+            ghost('</td>'),
+        )
+        .join('') +
+      ghost('</tr></table>') +
+      '</div>'
+    );
   }
 
   visit() {
@@ -794,12 +888,14 @@ export class Email {
           `text-decoration:underline;text-underline-offset:3px;">678.888.5140</a>`,
         { size: 16, lh: 24 },
       );
+    // The address beside the button on a computer; on a phone the button goes under it, full width,
+    // whether or not the mail app keeps the style block (fabFour)
+    const button = `<!--[if !mso]><!-->${Email.gap(S3, 'visit-gap')}<!--<![endif]-->` + this.button('Get directions &#8594;', MAP, 'directions', GOLD, CHARCOAL, 'right');
     return this.band(
-      Email.T(
-        `<tr><td class="stack" valign="middle">${left}</td>` +
-          `<td class="stack stack-gap" width="210" align="right" valign="middle">` +
-          `${this.button('Get directions &#8594;', MAP, 'directions', GOLD, CHARCOAL, 'right')}</td></tr>`,
-      ),
+      Email.fabFour([
+        { html: left, width: COLUMN - VISIT_BUTTON },
+        { html: button, width: VISIT_BUTTON, align: 'right' },
+      ]),
     );
   }
 
@@ -840,12 +936,30 @@ export class Email {
     const { subject, preheader } = lines(b);
     const body = sections.map((name) => this[name]()).join('');
     const spacer = '&#847;&zwnj;&nbsp;'.repeat(60);
-    const tiers = Object.entries(TIER_SIZE)
-      .map(([n, [, phone]]) => `    .tier${n} { font-size:${phone}px !important; line-height:${phone}px !important; }`)
-      .join('\n');
-    const smallTiers = Object.entries(TIER_SIZE)
-      .map(([n, [, , small]]) => `    .tier${n} { font-size:${small}px !important; line-height:${small}px !important; }`)
-      .join('\n');
+    const tierRules = (k) =>
+      Object.entries(TIER_SIZE)
+        .map(([n, sizes]) => `    .tier${n} { font-size:${sizes[k]}px !important; line-height:${sizes[k]}px !important; }`)
+        .join('\n');
+    // Phones first: everything inline is a phone's, so the style block only makes things bigger, from
+    // 375px (the tiers, the charity's numbers) and on a computer. Outlook for Windows reads no media
+    // query, so it gets the computer's rules in a block of its own.
+    const computer = [
+      `    .px { padding-left:${S4}px !important; padding-right:${S4}px !important; }`,
+      `    .pt { padding-top:${S5}px !important; }`,
+      `    .pb { padding-bottom:${S5}px !important; }`,
+      `    .g40 { height:${S5}px !important; line-height:${S5}px !important; font-size:${S5}px !important; }`,
+      '    .logo { width:150px !important; }',
+      '    .h1 { font-size:32px !important; line-height:36px !important; }',
+      '    .h2 { font-size:30px !important; line-height:34px !important; }',
+      '    .mega { font-size:92px !important; line-height:88px !important; }',
+      '    .mega2 { font-size:40px !important; line-height:44px !important; }',
+      tierRules(0),
+      '    .cap4 { font-size:15px !important; line-height:20px !important; }',
+      '    .spot { font-size:24px !important; line-height:29px !important; }',
+      '    .soard-h { font-size:30px !important; line-height:36px !important; }',
+      `    .tile-cap { padding-left:${S4}px !important; padding-right:12px !important; }`,
+      '    .soard-stat { font-size:40px !important; line-height:44px !important; }',
+    ].join('\n');
     return `<!DOCTYPE html>
 <html lang="en" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
@@ -859,37 +973,28 @@ export class Email {
 <title>${escape(subject)}</title>
 <!--[if !mso]><!--><link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700&family=Libre+Baskerville:ital,wght@0,700;1,400&family=Outfit:wght@400;700&display=swap" rel="stylesheet"><!--<![endif]-->
 <!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
-<!--[if mso]><style>body, table, td, p, a, h1, h2, span { font-family: Arial, Helvetica, sans-serif !important; } .soard-serif, .soard-serif em { font-family: Georgia, serif !important; } .soard-stat { font-family: 'Times New Roman', serif !important; }</style><![endif]-->
+<!--[if mso]><style>body, table, td, p, a, h1, h2, span { font-family: Arial, Helvetica, sans-serif !important; } .soard-serif, .soard-serif em { font-family: Georgia, serif !important; } .soard-stat { font-family: 'Times New Roman', serif !important; }
+${computer}
+</style><![endif]-->
 <style>
   :root { color-scheme: light only; supported-color-schemes: light only; }
   body { margin:0; padding:0; width:100% !important; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
   table { border-collapse:collapse; mso-table-lspace:0; mso-table-rspace:0; }
   img { -ms-interpolation-mode:bicubic; }
   a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !important; }
-  @media (max-width:620px) {
-    .px { padding-left:20px !important; padding-right:20px !important; }
-    .pt { padding-top:${S4}px !important; }
-    .pb { padding-bottom:${S4}px !important; }
-    .g40 { height:${S4}px !important; line-height:${S4}px !important; font-size:${S4}px !important; }
-    .logo { width:120px !important; }
-    .h2 { font-size:26px !important; line-height:30px !important; }
-    .mega { font-size:76px !important; line-height:74px !important; }
-    .mega2 { font-size:32px !important; line-height:36px !important; }
-${tiers}
-    .cap4 { font-size:13px !important; line-height:18px !important; }
-    .spot { font-size:21px !important; line-height:26px !important; }
-    .soard-h { font-size:26px !important; line-height:32px !important; }
-    .tile-cap { padding-left:20px !important; padding-right:8px !important; }
+  @media (min-width:375px) {
+${tierRules(1)}
+    .cap { width:auto !important; }
     .soard-stat { font-size:32px !important; line-height:36px !important; }
-    .stack { display:block !important; width:100% !important; text-align:left !important; }
-    .stack-gap { padding-top:${S3}px !important; }
+  }
+  @media (min-width:${DESKTOP}px) {
+${computer}
+    .stat { max-width:${STAT_DESKTOP}px !important; }
+    .visit-gap { display:none !important; }
+  }
+  @media (max-width:${DESKTOP - 1}px) {
     .btn { width:100% !important; float:none !important; }
     .btn a { display:block !important; text-align:center !important; }
-  }
-  @media (max-width:374px) {
-${smallTiers}
-    .cap { width:min-content !important; }   /* "off" over the amount in every column, not just the narrow ones */
-    .soard-stat { font-size:28px !important; line-height:32px !important; }
   }
 </style>
 </head>

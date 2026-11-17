@@ -469,3 +469,8 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-preview-foot { margin-top:.75rem }
 .em-measure { position:absolute;left:-10000px;top:0;width:0;height:0;overflow:hidden;visibility:hidden }
 .em-measure iframe { border:0 }
+/* Only the owner sees this: a word in the email's own layout too wide for a phone, which nothing on the page can fix */
+.em-owner.card { margin-bottom:.75rem;border-left:3px solid var(--red) }
+.em-owner h2 { font-size:.9375rem;margin:0 0 .375rem }
+.em-owner ul { margin:0 0 .5rem;padding-left:1.125rem;font-size:.875rem }
+.em-owner .em-hint { margin:0 0 .625rem }

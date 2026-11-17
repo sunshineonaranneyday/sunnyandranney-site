@@ -5,9 +5,12 @@
 The email itself is `src/lib/sunny-side/email.mjs`. It's the same code the admin uses for the live preview on the weekly email page, so that preview is the email.
 
 ```
-node scripts/sunny-side/build.mjs      # every brief -> out/, every stress test -> out/tests/
-node scripts/sunny-side/verify.mjs     # 6 renders per email; exits 1 on any failure
+node scripts/sunny-side/build.mjs           # every brief -> out/, every stress test -> out/tests/
+node scripts/sunny-side/build.mjs --tests   # the stress tests alone: no admin database, no store pages
+node scripts/sunny-side/verify.mjs          # 9 renders and 6 sweeps per email; exits 1 on any failure
 ```
+
+Every pull request builds the stress tests and runs `verify.mjs` on them, inside the required "Tests" check (`.github/workflows/checks.yml`), so a change to the email that breaks it on any screen can't merge.
 
 ## Each week
 
@@ -88,16 +91,19 @@ Photo `src` is either a full image URL or `cf:<id>` for Cloudflare Images, which
    - Nothing is ever published to the web. Kit's docs disagree on whether sending needs "public", so every send is made with it off and read back at once: if Kit published it, it's taken off; if Kit kept it as a draft, it's deleted and the page says so. A send that can't be noted here is taken back out of Kit.
    - It goes on a Kit "Starting point" template, where the content is the whole email (`KIT_TEMPLATE_ID`, or the account's first). `kit.mjs` has the calls; `week-email.ts` builds the email for both, from what's saved, so a test is what goes out.
 
-The rules are shared by her browser, the server and the build: `src/lib/sunny-side/special.mjs` (the sale), `wall.mjs` (the products), `events.mjs` (events and their calendar file), `catalog.mjs` (the picker's catalog). The page measures what `verify.mjs` would at 320 and 390 px (the sale button on the first screen, nothing spilling, every product name within two lines) and won't save an email that fails. The weeks live in D1 table `email_weeks` (`week-store.mjs`), the events in `store_events` (`event-store.mjs`). Both create themselves; the first use of `email_weeks` moves any special saved in the page's older `email_specials` table over and drops that table.
+The rules are shared by her browser, the server and the build: `src/lib/sunny-side/special.mjs` (the sale), `wall.mjs` (the products), `events.mjs` (events and their calendar file), `catalog.mjs` (the picker's catalog). The page measures what `verify.mjs` would at 320 and 390 px, and at 320 px bare (no style block, no web fonts): the sale button on the first screen, nothing spilling, every product name within two lines. It won't save an email that fails, and it names what's too wide and where to fix it. It only ever shows what can be fixed on the page. A word in the email's own layout (its fixed words, the charity's numbers) is code, so the page never shows it to whoever is setting up the email: it reports it (`/api/admin/email/layout/`, D1 table `email_layout_reports`, `layout-store.mjs`, which creates itself), and only the owner sees it, above the preview, until they clear it. The weeks live in D1 table `email_weeks` (`week-store.mjs`), the events in `store_events` (`event-store.mjs`). Both create themselves; the first use of `email_weeks` moves any special saved in the page's older `email_specials` table over and drops that table.
 
 The admin page itself is checked with `node scripts/check-admin-boxes.mjs <page>` against a local dev server, at eight widths from 320 to 1440 px, with every folded part open: every piece of text and every control has to stay on the box it's drawn on, no fieldset's legend may sit across its box's edge, and no text may touch the inside edge of a filled panel. A check that only asks whether the page scrolls sideways missed the story's collage label sitting half off its panel, so run this one after any change to how the page looks, once with a section empty and once full. It also fails anything past the side of the screen, and `--click "<selector>"` opens a dialog first: the product picker ran off a phone, unmeasured, until it was checked open (`--click "#em-products .em-section-tools .btn-dark"`).
 
 ## The standard
 
-`verify.mjs` renders each email six ways:
+`verify.mjs` renders each email nine ways:
 - Apple Mail's engine (WebKit) at 320 and 390 px;
 - Chrome's engine at 390 px and on desktop;
-- Gmail web and the Gmail app, loaded the way Gmail serves the email: no web font, and the CSS Gmail strips taken out.
+- Gmail web, the Gmail app, and the Gmail app on the smallest iPhone (320 px), loaded the way Gmail serves the email: no web font, and the CSS Gmail strips taken out;
+- bare, at 320 px and on desktop: no web fonts and no style block at all, the way the Gmail app shows an email to a Yahoo, Outlook or iCloud account (it keeps only inline styles).
+
+Then it sweeps each email: as sent, as Gmail serves it, and bare, in both engines, at every width from 320 to 700 px in 10s and on both sides of each media query (374/375, 620/621), 43 widths. A sweep fails on the email running wider than the screen, or on text spilling out of its box, at any of them. Before Nov 16, 2026 nothing checked the bare case, and the email laid out at desktop sizes on a 320 px phone ran 30 to 84 px off the screen there; and a word in the email's own fixed text ("Room makeovers", 2 px too wide in a third of a 320 px phone) was found by the admin's preview instead of here.
 
 A render fails on any of these:
 - on a phone, a sale button more than 600 px down (about what Apple Mail shows before scrolling);
@@ -136,6 +142,7 @@ A source check also fails the build on CSS Gmail strips: negative margins, posit
 
   `verify.mjs` holds the section (class `soard`) to the charity's colors and everything else to the store's.
 - **Font.** DM Sans; the charity section uses Libre Baskerville and Outfit. Outlook falls back to Arial and Gmail to Helvetica. The charity headline falls back to Georgia, but its numbers to Times New Roman, because Georgia's old-style figures made "$0" read as "$o".
+- **Phones first.** Every size written inline is a phone's: type, the 20 px sides, the 32 px gaps. The style block only makes things bigger, from 375 px and on a computer (min-width:621px), and Outlook for Windows, which reads no media query, gets the computer's sizes in a block of its own. So an inbox that throws the style block away still shows an email that fits a phone, and on a computer a smaller one. Rows that sit side by side on a computer wrap by their own widths, with no media query: the visit row stacks on a phone (Rémi Parmentier's "Fab Four": min-width, max-width, width and calc, with the min-width as a share of the row, since a pixel min-width beats max-width and held a 280 px phone's column open), and the charity's numbers sit three across on a computer and two plus one, centered, on a phone, as sunshineonaranneyday.com lays them out at 390 px. `phone-first.test.mjs` holds these rules.
 - **Layout.** Words and cards sit on one 536 px column; photos run the full 600 px. A photo sits directly on top of the block it belongs to, and white space separates it from any block it doesn't. The photo wall's gaps sit inside its tiles, because Gmail strips the negative margins that would otherwise do it. The wall is never more than two products across, so a name and price stay readable on a 320 px phone; an odd count leads with one wide product.
 - **First screen.** A slim masthead, a 2:1 top photo, and fine print under the button keep the sale button on a phone's first screen.
 

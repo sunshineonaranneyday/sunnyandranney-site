@@ -41,6 +41,8 @@ const EMAIL_ROUTES = [
   '/admin/email/sent/',
   '/admin/email/sent/x/',
   '/api/admin/email/event/',
+  // The preview's report of a problem in the email's own layout, which only the owner is shown (and may clear)
+  '/api/admin/email/layout/',
   '/api/admin/email/photos/',
   '/api/admin/email/send/',
   '/api/admin/email/test-people/',

@@ -20,12 +20,17 @@ export interface Fit {
   longNames: string[];
 }
 
-/** The email for this brief and these sections, with the font swapped for the admin's copy. */
-function emailHtml(brief: Record<string, unknown>, sections: string[]): string {
+/**
+ * The email for this brief and these sections, with the font swapped for the admin's copy. Bare, it's
+ * the email as the Gmail app shows it to a Yahoo, Outlook or iCloud account: no web fonts (Helvetica
+ * or Arial in their place, which run wider) and no style block, only the inline styles, the worst
+ * case verify.mjs holds the email to.
+ */
+function emailHtml(brief: Record<string, unknown>, sections: string[], { bare = false } = {}): string {
   const html = render(brief, sections);
-  const swapped = html.replace(FONT_LINK, FONT);
+  const swapped = html.replace(FONT_LINK, bare ? '' : FONT);
   if (swapped === html) throw new Error('The email’s font link changed; update the preview’s font swap.');
-  return swapped;
+  return bare ? swapped.replace(/<style[\s\S]*?<\/style>/g, '') : swapped;
 }
 
 const rowsOf = (doc: Document) => {
@@ -68,6 +73,9 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
   const doc = frame.contentDocument;
   const win = frame.contentWindow;
   if (!doc || !win) return null;
+  // No scrollbar: where the computer always shows them, the frame's took 15px and the "320px" check
+  // laid the email out at 305 (Peter's Chrome, Nov 16, 2026). A phone has none.
+  doc.documentElement.style.overflow = 'hidden';
   await doc.fonts?.ready;
   const button = doc.querySelector('a[href*="utm_content=offer-button"]');
   if (!button) return null;
@@ -136,12 +144,20 @@ interface Props {
   sections: string[];
   problem: string | null;
   checks: { ok: boolean | null; text: string }[];
-  onFit: (fit: { small: Fit | null; phone: Fit | null }) => void;
+  onFit: (fit: Fits) => void;
+}
+
+/** What each measuring frame found: the smallest phone, a phone, and the smallest phone bare (emailHtml). */
+export interface Fits {
+  small: Fit | null;
+  phone: Fit | null;
+  bare: Fit | null;
 }
 
 /**
  * The email as customers will see it, at phone or computer width, drawn by the same code that
- * builds the email. Two frames out of sight, at 320 and 390px, measure what verify.mjs would.
+ * builds the email. Three frames out of sight measure what verify.mjs would: 320 and 390px as sent,
+ * and 320px bare (no style block, no web fonts).
  */
 export function Preview({ focus, brief, sections, problem, checks, onFit }: Props) {
   const [view, setView] = useState<'phone' | 'computer'>('phone');
@@ -150,6 +166,7 @@ export function Preview({ focus, brief, sections, problem, checks, onFit }: Prop
   const frame = useRef<HTMLIFrameElement>(null);
   const small = useRef<HTMLIFrameElement>(null);
   const phone = useRef<HTMLIFrameElement>(null);
+  const bare = useRef<HTMLIFrameElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const width = view === 'phone' ? 390 : 640;
 
@@ -161,14 +178,17 @@ export function Preview({ focus, brief, sections, problem, checks, onFit }: Prop
     if (!brief) return;
     const t = window.setTimeout(async () => {
       let html: string;
+      let bareHtml: string;
       try {
         html = emailHtml(brief, sections);
+        bareHtml = emailHtml(brief, sections, { bare: true });
       } catch {
         return; // the page says what's wrong; the preview keeps the last good email
       }
       for (const f of [frame.current, small.current, phone.current]) if (f) show(f, html);
-      const [a, b] = await Promise.all([small.current ? measure(small.current) : null, phone.current ? measure(phone.current) : null]);
-      onFit({ small: a, phone: b });
+      if (bare.current) show(bare.current, bareHtml);
+      const [a, b, c] = await Promise.all([small.current, phone.current, bare.current].map((f) => (f ? measure(f) : null)));
+      onFit({ small: a, phone: b, bare: c });
       const doc = frame.current?.contentDocument;
       if (doc) {
         await doc.fonts?.ready;
@@ -236,6 +256,7 @@ export function Preview({ focus, brief, sections, problem, checks, onFit }: Prop
       <div class="em-measure" aria-hidden="true">
         <iframe ref={small} tabIndex={-1} title="" style={{ width: '320px', height: '900px' }} />
         <iframe ref={phone} tabIndex={-1} title="" style={{ width: '390px', height: '900px' }} />
+        <iframe ref={bare} tabIndex={-1} title="" style={{ width: '320px', height: '900px' }} />
       </div>
     </section>
   );

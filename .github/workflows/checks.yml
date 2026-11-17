@@ -4,6 +4,13 @@
 # The build isn't repeated here: it reads live Shopify data with the store's
 # keys, so Cloudflare Pages builds it on deploy, and a failed build there keeps
 # the last good version live.
+#
+# The weekly email is held to its standard here too, inside "Tests" so nothing
+# merges that breaks it: its stress tests (scripts/sunny-side/tests/, which need
+# nothing but this repo) are built and rendered by verify.mjs in Chromium and
+# WebKit, as sent, as Gmail shows them and with no style block at all, at every
+# width from 320 to 700px. A word in the email's own layout too wide for a phone
+# is stopped here, so it never reaches the admin.
 
 name: Checks
 
@@ -22,8 +29,10 @@ concurrency:
 jobs:
   tests:
     name: Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 24.04, not ubuntu-latest: that became Ubuntu 26.04, and the Playwright the email check uses
+    # (package.json) has no browsers for it ("Playwright does not support chromium on ubuntu26.04").
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -33,3 +42,9 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm test
+      - name: Browsers for the weekly email's check
+        run: npx playwright install --with-deps chromium webkit
+      - name: The weekly email fits every screen
+        run: |
+          node scripts/sunny-side/build.mjs --tests
+          node scripts/sunny-side/verify.mjs

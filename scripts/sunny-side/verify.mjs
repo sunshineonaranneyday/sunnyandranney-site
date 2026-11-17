@@ -1,5 +1,10 @@
 // Holds every built email to the standard: two engines (Chromium for Gmail/Outlook.com/Android,
-// WebKit for Apple Mail), three widths, plus a Gmail-style render with the web font blocked.
+// WebKit for Apple Mail), three widths, plus a Gmail-style render with the web font blocked, and a
+// bare render: no web fonts and no style block at all, as the Gmail app shows an email to a Yahoo,
+// Outlook or iCloud account (it keeps only inline styles), so the email can't lean on its media
+// queries to fit a phone. Then the sweep: every email, as sent, as Gmail shows it and bare, in both
+// engines, at every width from 320 to 700px, fails on anything wider than the screen or spilling out
+// of its box. Run on every pull request (.github/workflows/checks.yml).
 // Fails loudly on: horizontal overflow, any off-brand color (the store's palette everywhere but the
 // mission band, which is held to the charity's), links under 44px, missing alt,
 // broken images, heading order, duplicate tracked links, HTML codes showing as text, text spilling
@@ -28,15 +33,30 @@ const FIRST_SCREEN = 600;
 const CHARITY = ['rgb(255, 218, 36)', 'rgb(55, 58, 54)', 'rgb(30, 31, 37)', 'rgb(245, 244, 240)', 'rgb(90, 91, 97)', 'rgb(255, 255, 255)'];
 const BRAND = ['rgb(255, 212, 0)', 'rgb(75, 149, 180)', 'rgb(43, 122, 150)', 'rgb(44, 44, 44)', 'rgb(107, 107, 104)', 'rgb(255, 255, 255)'];
 const runs = [
-  { e: 'webkit', n: 'iphone-se', w: 320 }, { e: 'webkit', n: 'iphone', w: 390 }, { e: 'chromium', n: 'android', w: 390 },
-  { e: 'chromium', n: 'desktop', w: 700 },
+  { e: 'webkit', n: 'iphone-se', w: 320, mode: 'sent' }, { e: 'webkit', n: 'iphone', w: 390, mode: 'sent' }, { e: 'chromium', n: 'android', w: 390, mode: 'sent' },
+  { e: 'chromium', n: 'desktop', w: 700, mode: 'sent' },
   // Gmail as it serves the email: no web font, and the CSS it strips is gone.
-  { e: 'chromium', n: 'gmail-web', w: 700, gmail: true }, { e: 'chromium', n: 'gmail-app', w: 390, gmail: true },
+  { e: 'chromium', n: 'gmail-web', w: 700, mode: 'gmail' }, { e: 'chromium', n: 'gmail-app', w: 390, mode: 'gmail' },
+  // The Gmail app on the smallest iPhone: no web fonts, so every word is set in the fallback font
+  { e: 'webkit', n: 'gmail-se', w: 320, mode: 'gmail' },
+  // No style block: the Gmail app with a Yahoo, Outlook or iCloud account, on the smallest iPhone, and
+  // a computer that drops it (the phone's sizes, inline, are all it gets)
+  { e: 'webkit', n: 'bare-se', w: 320, mode: 'bare' }, { e: 'chromium', n: 'bare-desktop', w: 700, mode: 'bare' },
 ];
 mkdirSync(join(root, 'shots'), { recursive: true });
 const engines = { chromium: await chromium.launch(), webkit: await webkit.launch() };
 // Declarations Gmail removes from inline styles: negative margins, positioning, flex and grid.
 const GMAIL_STRIPS = /(?:margin[a-z-]*\s*:[^;"]*-\d[^;"]*|position\s*:[^;"]*|display\s*:\s*(?:inline-)?(?:flex|grid)[^;"]*);?/gi;
+/** The email as each kind of inbox gets it: as sent; as Gmail serves it; bare, with no style block either. */
+const MODES = {
+  sent: (src) => src,
+  gmail: (src) => src.replace(GMAIL_STRIPS, ''),
+  bare: (src) => src.replace(GMAIL_STRIPS, '').replace(/<style[\s\S]*?<\/style>/g, ''),
+};
+/** Every width the sweep lays each email out at: 320 to 700 in 10s, and both sides of each media query. */
+const SWEEP = [...new Set([...Array.from({ length: 39 }, (_, k) => 320 + 10 * k), 374, 375, 620, 621])].sort((a, b) => a - b);
+/** The sweep's stand-in for every photo: a blank pixel (a const up here, since the sweep runs in the loop below). */
+const BLANK = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
 
 /**
  * Images that would lose their dark parts in dark mode: more than 1% transparent and more than 0.5%
@@ -84,13 +104,19 @@ async function heavyOrUnshowable(html) {
   for (const u of urls) {
     if (!weighed.has(u)) {
       weighed.set(u, (async () => {
-        try {
-          const res = await fetch(u, { headers: { Accept: 'image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.5' }, signal: AbortSignal.timeout(30000) });
-          const kb = Math.round((await res.arrayBuffer()).byteLength / 1024);
-          return { status: res.status, type: (res.headers.get('content-type') || '').split(';')[0], kb };
-        } catch (err) {
-          return { status: 0, type: '', kb: 0, err: err.message };
+        let last;
+        // A second try, so a blip on an image host doesn't fail a pull request
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(u, { headers: { Accept: 'image/png,image/jpeg,image/gif;q=0.9,*/*;q=0.5' }, signal: AbortSignal.timeout(30000) });
+            const kb = Math.round((await res.arrayBuffer()).byteLength / 1024);
+            last = { status: res.status, type: (res.headers.get('content-type') || '').split(';')[0], kb };
+            if (res.status < 500) return last;
+          } catch (err) {
+            last = { status: 0, type: '', kb: 0, err: err.message };
+          }
         }
+        return last;
       })());
     }
     const w = await weighed.get(u);
@@ -112,16 +138,16 @@ for (const f of files) {
   if (images.length) { failures++; console.log(`FAIL  ${f.split('/').pop()}  images: ${images.join(' | ')}`); }
   for (const r of runs) {
     const ctx = await engines[r.e].newContext({ viewport: { width: r.w, height: 844 }, deviceScaleFactor: r.w < 600 ? 2 : 1 });
-    if (r.gmail) await ctx.route(/fonts\.(googleapis|gstatic)\.com/, x => x.abort());
+    if (r.mode !== 'sent') await ctx.route(/fonts\.(googleapis|gstatic)\.com/, x => x.abort());
     const page = await ctx.newPage();
     const failed = [];
     page.on('response', x => { if (x.status() >= 400) failed.push(x.status() + ' ' + x.url().slice(0, 70)); });
-    if (r.gmail) await page.setContent(src.replace(GMAIL_STRIPS, ''), { waitUntil: 'networkidle' });
+    if (r.mode !== 'sent') await page.setContent(MODES[r.mode](src), { waitUntil: 'networkidle' });
     else await page.goto('file://' + f, { waitUntil: 'networkidle' });
     await page.evaluate(() => document.fonts.ready);
     // Decode every image first, so the full-page screenshot shows what a reader would see.
     await page.evaluate(() => Promise.all([...document.images].map(i => i.decode().catch(() => {}))));
-    const m = await page.evaluate(([brand, charity]) => {
+    const m = await page.evaluate(([brand, charity, bare]) => {
       const B = new Set(brand), C = new Set(charity), off = {};
       for (const el of document.querySelectorAll('body *')) {
         const cs = getComputedStyle(el), rc = el.getBoundingClientRect();
@@ -139,9 +165,10 @@ for (const f of files) {
       const heads = [...document.querySelectorAll('h1,h2,h3')].map(h => h.tagName);
       const offer = links.find(a => /utm_content=offer-button/.test(a.getAttribute('href')));
 
-      // The column: 600px email, 32px sides (20px on phones, matching the 620px media query).
+      // The column: 600px email, 32px sides (20px on phones, and everywhere with no style block: the
+      // email is written phones first, and only the style block's min-width:621px gives a computer 32).
       const box = document.querySelector('table[style*="max-width:600px"]').getBoundingClientRect();
-      const inset = innerWidth <= 620 ? 20 : 32, L = box.left + inset, R = box.right - inset, near = (a, b) => Math.abs(a - b) <= 1;
+      const inset = innerWidth <= 620 || bare ? 20 : 32, L = box.left + inset, R = box.right - inset, near = (a, b) => Math.abs(a - b) <= 1;
       // A card is a rounded, filled cell (the event spotlight). Buttons are rounded and filled too, but aren't cards.
       const isCard = el => el.tagName === 'TD' && !el.closest('table.btn') && parseFloat(getComputedStyle(el).borderTopLeftRadius) >= 12
         && getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)';
@@ -192,7 +219,7 @@ for (const f of files) {
         // The sale's fine print goes under its button, never beside it (a floated button let it ride up)
         beside: Boolean(offer && document.querySelector('.fine') && document.querySelector('.fine').getBoundingClientRect().top < offer.getBoundingClientRect().bottom - 1),
       };
-    }, [BRAND, CHARITY]);
+    }, [BRAND, CHARITY, r.mode === 'bare']);
     const name = f.split('/').pop().replace('.html', '');
     await page.screenshot({ path: join(root, 'shots', `${name}.${r.n}.png`), fullPage: true });
     const problems = [m.overflow && 'overflow', Object.keys(m.off).length && 'off-brand ' + JSON.stringify(m.off),
@@ -210,6 +237,61 @@ for (const f of files) {
     console.log(`${problems.length ? 'FAIL' : 'pass'}  ${name.padEnd(34)} ${r.n.padEnd(14)} ${(m.h / 700).toFixed(2)} screens  sale button ${m.offerY ?? '-'}px  ${problems.join('; ')}`);
     await ctx.close();
   }
+  failures += await sweep(f, src);
+}
+
+/** "320–360, 374" from [320, 330, 340, 350, 360, 374]: the widths in SWEEP order, runs joined. */
+function widths(ws) {
+  const runs = [];
+  for (const w of ws) {
+    const last = runs.at(-1);
+    if (last && SWEEP.indexOf(w) === SWEEP.indexOf(last[1]) + 1) last[1] = w;
+    else runs.push([w, w]);
+  }
+  return runs.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(', ') + 'px';
+}
+
+/**
+ * The sweep: one email laid out at every width in SWEEP, as sent, as Gmail shows it and bare, in both
+ * engines. Fails on the email being wider than the screen, or text spilling out of its box (the same
+ * two rules as the renders, and as the admin's preview). Photos are a blank stand-in: their width
+ * comes from the email, so the layout across is the same and the sweep is quick.
+ * @returns {Promise<number>} how many of its renders failed
+ */
+async function sweep(f, src) {
+  const name = f.split('/').pop().replace('.html', '');
+  let failing = 0;
+  for (const [e, browser] of Object.entries(engines)) {
+    for (const mode of Object.keys(MODES)) {
+      const ctx = await browser.newContext({ viewport: { width: SWEEP[0], height: 844 } });
+      if (mode !== 'sent') await ctx.route(/fonts\.(googleapis|gstatic)\.com/, x => x.abort());
+      await ctx.route(/^https?:\/\//, x => (x.request().resourceType() === 'image' ? x.fulfill({ status: 200, contentType: 'image/gif', body: BLANK }) : x.continue()));
+      const page = await ctx.newPage();
+      await page.setContent(MODES[mode](src), { waitUntil: 'load' });
+      await page.evaluate(() => document.fonts.ready);
+      const bad = new Map();
+      for (const w of SWEEP) {
+        await page.setViewportSize({ width: w, height: 844 });
+        const found = await page.evaluate(() => {
+          const out = [];
+          const wider = document.documentElement.scrollWidth - innerWidth;
+          if (wider > 0) out.push(`the email is ${wider}px wider than the screen`);
+          for (const t of document.querySelectorAll('p,h1,h2,.tile-name,.tile-price')) {
+            if (t.getBoundingClientRect().width && t.scrollWidth > t.clientWidth + 1) out.push(`"${t.textContent.trim().replace(/\s+/g, ' ').slice(0, 24)}" spills out of its box`);
+          }
+          return out;
+        });
+        for (const x of found) (bad.get(x) ?? bad.set(x, []).get(x)).push(w);
+      }
+      await ctx.close();
+      const where = `${name.padEnd(34)} ${`sweep ${mode} ${e}`.padEnd(22)}`;
+      if (bad.size) {
+        failing++;
+        console.log(`FAIL  ${where} ${[...bad].map(([x, ws]) => `${x} at ${widths(ws)}`).join('; ')}`);
+      } else console.log(`pass  ${where} ${SWEEP.length} widths, ${SWEEP[0]}–${SWEEP.at(-1)}px`);
+    }
+  }
+  return failing;
 }
 for (const b of Object.values(engines)) await b.close();
 console.log(failures ? `\n${failures} failing renders` : '\nall renders pass');
