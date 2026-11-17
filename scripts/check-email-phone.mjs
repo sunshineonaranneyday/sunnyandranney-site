@@ -12,7 +12,8 @@
  *  - preview:  "See the preview" has to open the preview over the page, put focus in it, and close with
  *              Back or Escape, the page exactly where it was and focus back on the button; the preview's
  *              checks have to keep reporting while it's closed (its measuring frames still lay out);
- *  - length:   the page longer than 11 screens (it was 14.7, with the preview 11 screens down).
+ *  - length:   the page longer than 11 screens (it was 14.7, with the preview 11 screens down);
+ *  - turned:   an iPad turned upright (1366 to 768 wide) has to show "See the preview", now the preview is a sheet.
  *
  * Nothing is typed or saved. Exits 1 with each problem.
  *
@@ -106,6 +107,23 @@ for (const [w, h] of [
   await page.keyboard.press('Escape');
   await page.waitForTimeout(400);
   if ((await page.evaluate(() => getComputedStyle(document.querySelector('.em-side')).visibility)) !== 'hidden') problems.push(`${w}px preview  Escape didn't close it`);
+  await ctx.close();
+}
+// An iPad turned upright: the preview goes from beside the form to a sheet, and "See the preview" has to show
+{
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 1024 }, hasTouch: true });
+  const page = await ctx.newPage();
+  await page.goto(url, { waitUntil: 'load' });
+  await page.waitForSelector('.em-section');
+  await page.waitForTimeout(2500);
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.waitForTimeout(800);
+  const shows = await page.evaluate(() => {
+    const j = document.querySelector('.em-jump');
+    const s = getComputedStyle(j);
+    return s.display !== 'none' && s.visibility === 'visible' && s.opacity !== '0';
+  });
+  if (!shows) problems.push('768px preview  turned upright, "See the preview" stayed hidden');
   await ctx.close();
 }
 await browser.close();
