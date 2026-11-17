@@ -53,6 +53,8 @@ interface Props {
   setParts: (change: (p: Parts) => Parts) => void;
   error?: string;
   local: boolean;
+  /** The charity reveal in the story spot this week, which leaves the collage out of the email */
+  reveal?: { name: string } | null;
 }
 
 /** True when what's being dragged holds files (not text or a link from the page). */
@@ -85,7 +87,7 @@ interface Held {
  * or ticking them, and go out with their ×. Each photo has a part every crop keeps in view and a
  * few words for people who can't see it.
  */
-export function Photos({ photos, setPhotos, parts, setParts, error, local }: Props) {
+export function Photos({ photos, setPhotos, parts, setParts, error, local, reveal = null }: Props) {
   const [uploading, setUploading] = useState<{ done: number; of: number } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [alts, setAlts] = useState<Record<string, string>>({});
@@ -392,6 +394,8 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
   const cells = shownLayout ? place(shownLayout.tree) : [];
   const H = shownLayout ? heightAt(shownLayout.tree) : 1;
   const room = COLLAGE_MAX - story.length;
+  // A charity reveal has the story spot: the email leaves the collage out, so it's kept as it is, faded
+  const off = Boolean(parts.story.reveal);
   const fromLibrary = view?.source === 'library';
   const focusPhoto = focusing ? byId.get(focusing) : undefined;
   const usesOf = (id: string) => [...(parts.hero === id ? ['the top photo'] : []), ...(story.includes(id) ? [`spot ${story.indexOf(id) + 1} in the collage`] : [])];
@@ -429,11 +433,21 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
       )}
       <FieldError id="em-photos-error" message={error} />
 
-      <fieldset class={`em-collage is-${stage}${fromLibrary ? ' is-taking' : ''}`} ref={panel}>
-        <legend>The story’s collage{shownLayout ? ` · ${shownLayout.name}` : ''}</legend>
+      <fieldset class={`em-collage is-${stage}${fromLibrary ? ' is-taking' : ''}${off ? ' is-off' : ''}`} ref={panel}>
+        <legend>The story’s collage{off ? ' · Not in this email' : shownLayout ? ` · ${shownLayout.name}` : ''}</legend>
+        {off && (
+          <p class="em-off-note">
+            <span>
+              This week the story spot is {reveal ? `${reveal.name}’s reveal` : 'the charity’s reveal'}, so the collage isn’t in the email. Its photos and layout stay saved for the showroom story.
+            </span>
+            <a class="btn btn-small" href="#em-story">
+              Change the story spot
+            </a>
+          </p>
+        )}
         {/* The collage's one status line: what to do, what a held photo will do, or the last change and its Undo.
             At the top of the collage, where the page's floating buttons on a phone can't cover it. */}
-        {(n > 0 || stage !== 'rest' || undo) && (
+        {!off && (n > 0 || stage !== 'rest' || undo) && (
           <p class={`em-collage-hint${stage === 'rest' && undo ? ' is-undo' : ''}`}>
             {stage === 'swap' ? (
               <>
@@ -506,7 +520,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
           Space or Enter picks this photo up. The arrow keys then move it, and Space or Enter puts it down; Escape puts it back. Delete takes it out of the collage.
         </p>
         {n > 0 && (
-          <ol class="em-collage-list" ref={collage} style={{ aspectRatio: `600 / ${H.toFixed(3)}` }} aria-label={`The collage, in the email’s order: ${shownLayout?.name ?? ''}`}>
+          <ol class="em-collage-list" ref={collage} inert={off || undefined} style={{ aspectRatio: `600 / ${H.toFixed(3)}` }} aria-label={`The collage, in the email’s order: ${shownLayout?.name ?? ''}`}>
             {shown.map((id, k) => {
               const c = cells[k] ?? { x: 0, y: 0, w: 600, h: H };
               const small = stripW > 0 && (Math.min(c.w, c.h) * stripW) / 600 < SMALL;
@@ -542,7 +556,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
                   <span class="em-collage-n" aria-hidden="true">
                     {k + 1}
                   </span>
-                  {!view && (
+                  {!view && !off && (
                     <>
                       <button type="button" class="em-collage-x" data-nodrag aria-label={`Take ${nameOf(id, k)} out of the collage`} title="Take it out of the collage" onClick={() => remove(id)}>
                         <X />
@@ -557,7 +571,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
             })}
           </ol>
         )}
-        {(room > 0 || (fromLibrary && !view?.swapping && story.length < COLLAGE_MAX)) && (
+        {!off && (room > 0 || (fromLibrary && !view?.swapping && story.length < COLLAGE_MAX)) && (
           <div class={`em-collage-add${n ? '' : ' is-empty'}`} ref={addZone}>
             {fromLibrary ? (
               <span>{n > story.length ? 'Let go to add it here.' : 'Drop it here to add it at the end.'}</span>
@@ -570,7 +584,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
             )}
           </div>
         )}
-        {layout && story.length > 0 && !view && (
+        {layout && story.length > 0 && !view && !off && (
           <LayoutChoices ids={story} byId={byId} current={layout} setChosen={chooseLayout} fit={(ids) => change(ids, 'Moved the photos to the spots that keep the most of them.', layout)} local={local} />
         )}
         <p class="visually-hidden" aria-live="assertive" aria-atomic="true">
@@ -590,7 +604,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
         </li>
         {shownLibrary.map((p) => (
           <li class={`em-photo${parts.hero === p.id ? ' is-hero' : ''}${story.includes(p.id) ? ' is-story' : ''}${view?.id === p.id ? ' is-lifted' : ''}${swapping === p.id ? ' is-waiting' : ''}`} key={p.id}>
-            <span class="em-photo-img" onPointerDown={(e) => drag.startPress(e, p.id, 'library')} onTouchMove={drag.touchGuard}>
+            <span class="em-photo-img" onPointerDown={off ? undefined : (e) => drag.startPress(e, p.id, 'library')} onTouchMove={drag.touchGuard}>
               <img src={photoThumb(p, 480, 480, local)} alt="" loading="lazy" draggable={false} style={{ objectPosition: objectPosition(p.focus) }} />
               {story.includes(p.id) && <span class="em-collage-n">{story.indexOf(p.id) + 1}</span>}
               <button type="button" class="em-photo-focus" data-nodrag aria-label="Choose what part of this photo shows" title="Choose what part shows" onClick={() => setFocusing(p.id)}>
