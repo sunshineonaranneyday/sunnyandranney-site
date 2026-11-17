@@ -302,15 +302,37 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 }
 .em-collage { border: 0; margin: 0 0 1rem; padding: 0.875rem; min-width: 0; max-width: 27.75rem; background: var(--sunk); border-radius: var(--r-md); }
 /* The strip is the email's collage in small: one wide photo, then rows of two or three (COLLAGE_ROWS) */
-.em-collage-list { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.375rem; }
-.em-collage-item { position: relative; display: grid; gap: 0.125rem; min-width: 0; }
-.em-collage-item img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--sunk); }
-.em-collage-item.is-row-1 { grid-column: span 6; }
-.em-collage-item.is-row-1 img { aspect-ratio: 2; }
-.em-collage-item.is-row-2 { grid-column: span 3; }
-.em-collage-item.is-row-3 { grid-column: span 2; }
 .em-collage-n { position: absolute; top: 6px; left: 6px; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 12px; background: var(--ink); color: var(--panel); font-size: 0.8125rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
-.em-collage-moves { display: flex; justify-content: center; }
+/* The collage as the email draws it: each photo in its spot, at the email's own proportions, 4px
+   gutters scaled with it. Photos come uncropped and are cropped here, so one copy serves every layout. */
+.em-layouts { display: grid; gap: 0.75rem; }
+.em-bento { position: relative; list-style: none; margin: 0; padding: 0; width: 100%; background: var(--panel); border-radius: 6px; overflow: hidden; }
+.em-bento-cell { position: absolute; margin: 0; }
+.em-bento-cell img { display: block; width: 100%; height: 100%; object-fit: cover; background: var(--sunk); }
+.em-bento-photo { position: relative; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
+.em-bento-photo:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.em-bento-photo[aria-pressed='true']::after { content: ''; position: absolute; inset: 0; box-shadow: inset 0 0 0 3px var(--teal); pointer-events: none; }
+.em-bento-photo[aria-pressed='true'] .em-collage-n { background: var(--teal); }
+.em-bento-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.5rem; min-height: 44px; }
+.em-bento-bar .em-hint { margin: 0; }
+.em-bento-which { font-weight: 700; font-size: 0.875rem; margin-right: 0.25rem; }
+.em-fit { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.75rem; font-size: 0.875rem; color: var(--ink-2); margin: 0; }
+/* The layouts for this many photos, each drawn with her photos */
+.em-layout-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); gap: 0.5rem; }
+.em-layout {
+  position: relative; display: grid; justify-items: center; align-content: start; gap: 0.25rem; min-height: 44px; margin: 0;
+  padding: 0.5rem 0.375rem 0.5rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel);
+  text-align: center; text-transform: none; letter-spacing: 0; font-size: 0.8125rem; font-weight: 600; color: var(--ink-2); cursor: pointer;
+  transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease);
+}
+@media (hover: hover) { .em-layout:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); } }
+.em-layout:has(input:focus-visible) { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-layout.is-on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); color: var(--ink); }
+.em-layout-frame { display: grid; place-items: center; width: 88px; height: 72px; }
+.em-layout-mini { position: relative; display: block; }
+.em-layout-mini img { position: absolute; display: block; object-fit: cover; border-radius: 1px; background: var(--sunk); }
+.em-layout-name { line-height: 1.25; }
+.em-layout-best { padding: 0.0625rem 0.5rem; border-radius: 999px; background: var(--teal-soft); color: var(--teal); font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.04em; }
 .em-library { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
 .em-photo { display: grid; gap: 0.375rem; align-content: start; padding: 0.5rem; border: 1px solid var(--line); border-radius: var(--r-md); }
 .em-photo.is-hero { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
@@ -338,11 +360,11 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-section .badge { transition: background-color var(--em-mid) var(--em-ease), color var(--em-mid) var(--em-ease); }
 .em-section { transition: opacity var(--em-slow) var(--em-ease); }
 .em-section.is-locked { opacity: 0.55; }
-.em-photo, .em-collage-item, .em-person, .em-scheduled, .em-done, .em-todo li { animation: em-in var(--em-mid) var(--em-ease) both; }
+.em-photo, .em-bento-cell, .em-person, .em-scheduled, .em-done, .em-todo li { animation: em-in var(--em-mid) var(--em-ease) both; }
 .em-photo .em-photo-img img { transition: transform var(--em-slow) var(--em-ease); }
 @media (hover: hover) { .em-photo:hover .em-photo-img img { transform: scale(1.02); } }
 .em-photo { transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease); }
-.em-collage-item { will-change: transform; }
+.em-bento-cell { will-change: transform; }
 @media (prefers-reduced-motion: reduce) {
   .em *, .em *::before, .em *::after { animation: none !important; transition: none !important; }
 }

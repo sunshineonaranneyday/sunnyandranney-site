@@ -132,6 +132,7 @@
       "Plan your visit",
       "/visit/"
     ],
+    "layout": "tall-left",
     "photos": [
       {
         "src": "cf:sunny-ranney-interior",

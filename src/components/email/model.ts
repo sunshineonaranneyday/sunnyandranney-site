@@ -140,7 +140,8 @@ export interface Parts {
   preheader: string;
   /** A library photo's id, or '' for the store's wide shot. */
   hero: string;
-  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[]; reveal: string };
+  /** layout: the collage's layout (collage-layouts.mjs), or '' for the one that fits its photos best. */
+  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[]; reveal: string; layout: string };
   /** The charity kid's slug, or '' for the most recent reveal. */
   kid: string;
   /** One of that family's photos ("cf:" id), or '' for their finished room. */
