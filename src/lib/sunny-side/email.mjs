@@ -45,6 +45,7 @@
 
 import { icsUrl, photoPath } from './addresses.mjs';
 import { CLASSIC, LAYOUTS, layoutOf, paddings, solve } from './collage-layouts.mjs';
+import { photoSource } from './photo-store.mjs';
 import { money } from './product.mjs';
 
 // ── Tokens ──────────────────────────────────────────────────────────────────
@@ -319,8 +320,10 @@ export class Email {
 
   static photo(src, w, h) {
     if (src.startsWith('photo:')) {
-      const file = `${photoOrigin}${photoPath(src.slice(6))}`;
-      return photoDirect ? file : `${RESIZE}/width=${w},height=${h},fit=cover,gravity=auto,quality=64,format=jpeg/${file}`;
+      // "photo:<id>", or "photo:<id>@0.42x0.31" with the part every crop keeps in view (photo-store.mjs)
+      const { id, gravity } = photoSource(src);
+      const file = `${photoOrigin}${photoPath(id)}`;
+      return photoDirect ? file : `${RESIZE}/width=${w},height=${h},fit=cover,gravity=${gravity},quality=64,format=jpeg/${file}`;
     }
     if (src.startsWith('cf:')) return `${CF}/${src.slice(3)}/w=${w},h=${h},fit=cover,gravity=auto,quality=64,format=jpeg`;
     // Shopify won't send a PNG saved with a transparency channel as a JPEG, even when nothing in it is

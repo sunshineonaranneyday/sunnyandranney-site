@@ -12,6 +12,7 @@
 import { fillLine, lines, offerClaims, plain } from './email.mjs';
 import { LAYOUT_ID, layoutFor, ratioOf } from './collage-layouts.mjs';
 import { KID_PHOTO, KID_SLUG, kidFor, missionOf, revealOf } from './kids.mjs';
+import { withFocus } from './photo-store.mjs';
 import { typeset } from './special.mjs';
 
 export const PART_LIMITS = { subject: 80, preheader: 110, label: 40, headline: 70, body: 320, cta: 30 };
@@ -134,8 +135,9 @@ export function linesOf(p, sale) {
 }
 
 /**
- * The parts as the email draws them. `photos` maps an id to its library record ({ alt, w, h });
- * `photoSrc` makes an id into the email's photo source.
+ * The parts as the email draws them. `photos` maps an id to its library record ({ alt, w, h, focus });
+ * `photoSrc` makes an id into the email's photo source, which carries the photo's focus point
+ * ("photo:<id>@0.42x0.31") so every crop keeps that part in view (Email.photo).
  */
 /**
  * @param {ReturnType<typeof cleanParts>} p
@@ -143,7 +145,7 @@ export function linesOf(p, sale) {
  */
 export function briefParts(p, { sale, photos, kids = [], reveals = [], photoSrc = (id) => `photo:${id}` }) {
   // Alt text stays plain: the email escapes it where it draws the photo
-  const pic = (id) => ({ src: photoSrc(id), alt: photos.get(id)?.alt || '' });
+  const pic = (id) => ({ src: withFocus(photoSrc(id), photos.get(id)?.focus), alt: photos.get(id)?.alt || '' });
   const s = p.story;
   const kid = kidFor(p.kid, kids);
   const reveal = s.reveal ? reveals.find((r) => r.slug === s.reveal) : null;
