@@ -10,6 +10,8 @@ import { eventsFrom } from '@/lib/sunny-side/event-store.mjs';
 import { pastWeeks, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { IMPACT_PAGE, impactFromPage } from '@/lib/sunny-side/impact.mjs';
 import { broadcastUrl, kitClient, statusOf, subscriberCount, usualTime } from '@/lib/sunny-side/kit.mjs';
+import { againView } from '@/lib/sunny-side/again.mjs';
+import { getAgain } from '@/lib/sunny-side/again-store.mjs';
 import { listRevealedKids, listUpcomingReveals } from '@/lib/sunny-side/kids.mjs';
 import { blankParts } from '@/lib/sunny-side/parts.mjs';
 import { listPhotos, photosByIds } from '@/lib/sunny-side/photo-store.mjs';
@@ -95,7 +97,9 @@ if (record?.kit && kitStatus?.status === 'gone') {
   await setKit(db, { send, id: null });
   record.kit = null;
 }
-const kitSend = record?.kit ? { ...record.kit, url: broadcastUrl(record.kit.id), status: kitStatus?.status ?? 'scheduled' } : null;
+// And whether it goes again to the people who don't open it (again.mjs)
+const againRow = record?.kit ? await getAgain(db, send) : null;
+const kitSend = record?.kit ? { ...record.kit, url: broadcastUrl(record.kit.id), status: kitStatus?.status ?? 'scheduled', again: againRow && againView(againRow, { owner }) } : null;
 // What each ready-made sale opens with: the store's last of its kind, else the usual (special.mjs)
 const lastOf = (kind: string) => past.find((r) => r.special?.kind === kind)?.special ?? null;
 type Tier = { spend: number | null; percent: number | null };

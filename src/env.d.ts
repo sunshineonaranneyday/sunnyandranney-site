@@ -45,6 +45,8 @@ declare namespace Cloudflare {
     KIT_TEMPLATE_ID?: string;
     /** A stand-in Kit for local tests. Never set in production. */
     KIT_API_BASE?: string;
+    /** The email-again worker's secret: it may call /api/email-again/, which sends the weekly email again to who didn't open it. */
+    EMAIL_AGAIN_SECRET?: string;
     /** The charity's own database (soard-db), read for its kids: the email's charity section. Only ever read. */
     SOARD_DB?: D1Database;
     /** The site's own files, for reading the prerendered catalog from a server route. */

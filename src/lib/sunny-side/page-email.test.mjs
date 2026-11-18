@@ -97,7 +97,7 @@ test('the collage lays out 1 to 5 photos edge to edge, in the layout she picks o
 test('the parts are checked: lengths, links, the subject against the sale, alt text, and what the finished email needs', () => {
   const ok = story(2);
   assert.deepEqual(checkParts(ok, { sale, photos, ready: true }), {});
-  assert.match(checkParts(cleanParts({ subject: 'Half off everything: 50% off!' }), { sale }).subject, /It says .*50%/);
+  assert.match(checkParts(cleanParts({ subject: 'Half off everything: 50% off!' }), { sale }).subject, /^The subject says 50%, but the sale gives \d+%\. Change the words/);
   assert.match(checkParts(cleanParts({ subject: 'x'.repeat(81) }), {}).subject, /81 characters; keep it to 80/);
   // Only the subject is needed: the story's words are gone, and a week can go without photos
   const empty = checkParts(blankParts(), { sale, ready: true });

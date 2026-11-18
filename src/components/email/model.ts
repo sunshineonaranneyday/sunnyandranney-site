@@ -205,6 +205,20 @@ export interface KitSend {
   by: string;
   sendAt: string;
   status: string;
+  /** Going again to the people who didn't open it (again.mjs againView), or null. */
+  again?: AgainView | null;
+}
+/** A week's email going again to the people who didn't open it, as the page sees it. */
+export interface AgainView {
+  state: 'waiting' | 'scheduled' | 'sent' | 'skipped' | 'cancelled';
+  sendAt: string;
+  subject: string;
+  people: number | null;
+  left: Record<string, number> | null;
+  note: string | null;
+  stoppedBy: string | null;
+  kitId: string | null;
+  detail?: string;
 }
 export const partsSnapshot = (p: Parts) => JSON.stringify(p);
 

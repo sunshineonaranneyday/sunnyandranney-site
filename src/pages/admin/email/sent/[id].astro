@@ -7,7 +7,11 @@ export const prerender = false;
  */
 
 import AdminBase from '@/layouts/AdminBase.astro';
-import { broadcastUrl, kitClient, sentEmail } from '@/lib/sunny-side/kit.mjs';
+import { viewFor } from '@/lib/admin/nav.mjs';
+import { againLine } from '@/lib/sunny-side/again.mjs';
+import { againOfEmail } from '@/lib/sunny-side/again-store.mjs';
+import { listPeople } from '@/lib/sunny-side/again-run.mjs';
+import { broadcastUrl, didWith, filterIds, kitClient, sentEmail, statsOf } from '@/lib/sunny-side/kit.mjs';
 
 const admin = Astro.locals.admin;
 if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
@@ -19,12 +23,75 @@ if (!env.KIT_API_KEY) return Astro.redirect('/admin/email/sent/', 302);
 
 let email: Awaited<ReturnType<typeof sentEmail>> = null;
 let problem: string | null = null;
+const kit = kitClient({ key: env.KIT_API_KEY, base: env.KIT_API_BASE || undefined });
 try {
-  email = await sentEmail(kitClient({ key: env.KIT_API_KEY, base: env.KIT_API_BASE || undefined }), id);
+  email = await sentEmail(kit, id);
 } catch (err) {
   problem = `${err instanceof Error ? err.message : 'Kit didn’t answer.'} Reload to try again.`;
 }
 if (!email && !problem) return Astro.redirect('/admin/email/sent/', 302);
+
+// Whether it went again to the people who didn't open it (again.mjs), and how each send did
+const again = email ? await againOfEmail(env.DB, email.id).catch(() => null) : null;
+type Stats = Awaited<ReturnType<typeof statsOf>> & { clicked: number | null };
+/** Kit's report of a send, with who clicked counted from Kit's filter (the report gives a rate, not a count). */
+const statsNow = async (kitId: string | number): Promise<Stats | null> => {
+  try {
+    const [s, clicked] = await Promise.all([statsOf(kit, kitId), filterIds(kit, [didWith('clicks', [Number(kitId)])]).then((ids) => ids.size).catch(() => null)]);
+    return { ...s, clicked };
+  } catch {
+    return null;
+  }
+};
+const [firstStats, againStats] = again?.state === 'sent' && again.kitId ? await Promise.all([statsNow(email!.id), statsNow(again.kitId)]) : [null, null];
+const owner = viewFor(admin, Astro.url.hostname.toLowerCase()).owner;
+// The owner's check, read-only: who it would go again to now, worked out as the run does and held to
+// Kit's own report of the email. Nothing is tagged or sent. ?again-check on the address.
+let check: { people: number; left: Record<string, number> } | { error: string } | null = null;
+if (owner && email && Astro.url.searchParams.has('again-check')) {
+  try {
+    const { people, left } = await listPeople(kit, env.DB, { emailId: Number(email.id), now: Date.now() });
+    check = { people: people.size, left };
+  } catch (err) {
+    check = { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+const n = (k: number) => k.toLocaleString('en-US');
+const pct = (part: number | null, whole: number | null) => (part != null && whole ? `${Math.round((part / whole) * 100)}%` : '');
+/** "812 people, 97 opened it (12%), 14 clicked, 2 unsubscribed" */
+const results = (s: Stats | null) =>
+  s && s.recipients != null
+    ? [
+        `${n(s.recipients)} ${s.recipients === 1 ? 'person' : 'people'}`,
+        s.opened != null ? `${n(s.opened)} opened it (${pct(s.opened, s.recipients)})` : '',
+        s.clicked != null ? `${n(s.clicked)} clicked (${pct(s.clicked, s.recipients)})` : '',
+        s.unsubscribes ? `${n(s.unsubscribes)} unsubscribed` : '',
+      ]
+        .filter(Boolean)
+        .join(', ')
+    : '';
+// The resend goes only to who hadn't opened the first, so who opened either adds up: what the resend is worth
+const together =
+  firstStats?.opened != null && againStats?.opened != null && firstStats.recipients
+    ? `${n(firstStats.opened + againStats.opened)} of ${n(firstStats.recipients)} opened it (${pct(firstStats.opened + againStats.opened, firstStats.recipients)}${againStats.opened ? `, up from ${pct(firstStats.opened, firstStats.recipients)}` : ', no more than the first time'})${
+        firstStats.clicked != null && againStats.clicked != null ? `, ${n(firstStats.clicked + againStats.clicked)} clicked` : ''
+      }`
+    : '';
+const LEFT_WORDS: Record<string, string> = {
+  read: 'opened it',
+  cold: 'haven’t opened one of the store’s emails in 60 days',
+  lately: 'got one of these in the last four weeks',
+  mailed: 'got another email from the account that day',
+  noMarketing: 'asked for no marketing since',
+  gone: 'unsubscribed or left the store’s list since',
+};
+const leftLine = again?.left
+  ? Object.entries(LEFT_WORDS)
+      .filter(([k]) => (again.left?.[k] ?? 0) > 0)
+      .map(([k, words]) => `${n(again.left![k])} who ${words}`)
+      .join('; ')
+  : '';
+const whenShort = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 // The page's JSON can't close its own script tag.
@@ -63,6 +130,73 @@ const data = email ? JSON.stringify({ html: email.html }).replace(/</g, '\\u003c
           <p class="inbox-subject">{email.subject || '(No subject)'}</p>
           {email.preheader && <p class="inbox-pre">{email.preheader}</p>}
         </section>
+        {again && (
+          <section class="card again" aria-label="Sent again to the people who didn’t open it">
+            <h2>{again.state === 'sent' ? 'Sent again' : again.state === 'waiting' || again.state === 'scheduled' ? 'Going again' : 'Not sent again'}</h2>
+            <p class="again-line">{againLine(again, (iso) => whenShort.format(new Date(iso)))}</p>
+            {(again.state === 'waiting' || again.state === 'scheduled') && <p class="muted">With the subject line “{again.subject}”.</p>}
+            {again.state === 'sent' && <p class="muted">As “{again.subject}”.</p>}
+            {again.state === 'sent' && (results(firstStats) || results(againStats)) && (
+              <dl class="again-results">
+                {results(firstStats) && (
+                  <>
+                    <dt>First</dt>
+                    <dd>{results(firstStats)}</dd>
+                  </>
+                )}
+                {results(againStats) && (
+                  <>
+                    <dt>Again</dt>
+                    <dd>{results(againStats)}</dd>
+                  </>
+                )}
+                {together && (
+                  <>
+                    <dt>Both</dt>
+                    <dd>{together}</dd>
+                  </>
+                )}
+              </dl>
+            )}
+            {leftLine && again.state !== 'waiting' && again.state !== 'cancelled' && <p class="muted">Left out: {leftLine}.</p>}
+            {again.state === 'scheduled' && again.note && <p class="muted">{again.note}</p>}
+            {owner && again.detail && <p class="again-owner">For you: {again.detail}</p>}
+            {(again.state === 'waiting' || again.state === 'scheduled' || (again.state === 'sent' && again.kitId)) && (
+              <div class="again-actions" data-again-stop={again.send}>
+                {again.kitId && (again.state === 'scheduled' || again.state === 'sent') && (
+                  <a class="btn btn-small" href={broadcastUrl(again.kitId)} target="_blank" rel="noopener noreferrer">See it in Kit →</a>
+                )}
+                {again.state !== 'sent' && (
+                  <>
+                    <button type="button" class="btn btn-small" data-ask>Don’t send it again</button>
+                    <span class="again-confirm" data-confirm hidden>
+                      It went once already; this stops only the second time.
+                      <button type="button" class="btn btn-small" data-keep>Keep it</button>
+                      <button type="button" class="btn btn-small btn-danger" data-stop>Don’t send it again</button>
+                    </span>
+                    <p class="again-problem" role="alert" data-problem hidden></p>
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+        {check && (
+          <section class="card again again-check" aria-label="Owner’s check">
+            <h2>Check: who it would go again to now</h2>
+            {'error' in check ? (
+              <p class="again-owner">It wouldn’t go: {check.error}</p>
+            ) : (
+              <p>
+                {n(check.people)} {check.people === 1 ? 'person' : 'people'}. Left out:{' '}
+                {Object.entries(LEFT_WORDS)
+                  .map(([k, words]) => `${n(check.left[k] ?? 0)} who ${words}`)
+                  .join('; ')}
+                . Kit’s report backs up the list. Nothing was tagged or sent.
+              </p>
+            )}
+          </section>
+        )}
         <section class="card shown">
           <iframe id="sent-frame" title={`The email: ${email.subject}`} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"></iframe>
         </section>
@@ -75,8 +209,10 @@ const data = email ? JSON.stringify({ html: email.html }).replace(/</g, '\\u003c
 <script>
   // Imports keep this script bundled: the admin's Content-Security-Policy blocks inline scripts.
   import { showSent } from '@/components/email/sent';
+  import { wireAgainStop } from '@/components/email/again-stop';
 
   showSent();
+  wireAgainStop();
 </script>
 
 <style>
@@ -89,6 +225,19 @@ const data = email ? JSON.stringify({ html: email.html }).replace(/</g, '\\u003c
   .inbox-from { font-size: 0.8125rem; font-weight: 700; color: var(--ink-3); }
   .inbox-subject { font-weight: 700; overflow-wrap: anywhere; }
   .inbox-pre { font-size: 0.9375rem; color: var(--ink-2); overflow-wrap: anywhere; }
+  .again { display: grid; gap: 0.375rem; justify-items: start; padding: 1rem 1.25rem; }
+  .again h2 { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin: 0; }
+  .again p { margin: 0; overflow-wrap: anywhere; }
+  .again-line { font-weight: 700; }
+  .again-results { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.25rem 0.875rem; margin: 0.25rem 0; }
+  .again-results dt { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); padding-top: 0.2rem; }
+  .again-results dd { margin: 0; }
+  .again-owner { font-size: 0.875rem; color: var(--red); }
+  .again-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.375rem; }
+  .again-problem { flex-basis: 100%; }
+  .again-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: 0.875rem; }
+  .again-confirm[hidden] { display: none; }
+  .again-problem { color: var(--red); font-size: 0.875rem; }
   .shown { padding: 0; overflow: hidden; }
   .shown iframe { display: block; width: 100%; height: 900px; border: 0; background: #fff; }
 </style>

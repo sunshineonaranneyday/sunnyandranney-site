@@ -161,21 +161,40 @@ export async function schedule(kit, { subject, preheader, html, description, tem
   const body = { subject, preview_text: preheader, content: html, description, email_template_id: templateId, email_address: from, public: false, send_at: sendAt, subscriber_filter: filter };
   const { broadcast } = await kit.call('/broadcasts', { method: 'POST', body });
   const id = broadcast.id;
-  let now = (await kit.call(`/broadcasts/${id}`)).broadcast;
-  if (!sameAudience(audienceOf(now.subscriber_filter), wanted)) {
+  // From here until it's checked, any failure (Kit busy or down, a check failing) takes it back out of
+  // Kit: a broadcast nobody checked, or that the admin has no record of, must never be left to go
+  try {
+    let now = (await kit.call(`/broadcasts/${id}`)).broadcast;
+    if (!sameAudience(audienceOf(now.subscriber_filter), wanted)) throw new Error('Kit didn’t keep it to just the people it was for, so it was deleted before it could go. Nothing was sent.');
+    if (now.public) {
+      await kit.call(`/broadcasts/${id}`, { method: 'PUT', body: { public: false } });
+      now = (await kit.call(`/broadcasts/${id}`)).broadcast;
+      if (now.public) throw new Error('Kit put the email on the web and wouldn’t take it off, so it was deleted. Nothing was sent.');
+    }
+    if (!now.send_at || now.status === 'draft') throw new Error('Kit kept it as a draft instead of scheduling it, so it was deleted. Nothing was sent.');
+    return { id, status: now.status ?? 'scheduled', sendAt: now.send_at };
+  } catch (err) {
     await kit.call(`/broadcasts/${id}`, { method: 'DELETE' }).catch(() => {});
-    throw new Error('Kit didn’t keep it to just the people it was for, so it was deleted before it could go. Nothing was sent.');
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(/Nothing was sent\.$/.test(message) ? message : `Kit didn’t confirm it (${message}), so it was taken back out of Kit. Nothing was sent. Try again.`);
   }
-  if (now.public) {
-    await kit.call(`/broadcasts/${id}`, { method: 'PUT', body: { public: false } });
-    now = (await kit.call(`/broadcasts/${id}`)).broadcast;
-    if (now.public) throw new Error('Kit put the email on the web, and wouldn’t take it off. It’s still scheduled: unpublish it in Kit.');
-  }
-  if (!now.send_at || now.status === 'draft') {
-    await kit.call(`/broadcasts/${id}`, { method: 'DELETE' }).catch(() => {});
-    throw new Error('Kit kept it as a draft instead of scheduling it, so nothing was sent.');
-  }
-  return { id, status: now.status ?? 'scheduled', sendAt: now.send_at };
+}
+
+/**
+ * Takes out of Kit any broadcast still waiting to go whose description is this one (or passes this
+ * test) and isn't `keep`: one made by a try that failed before it was noted here. Run before making
+ * one, so a try after a failure can't send it twice. Returns how many it took out.
+ * @param {Kit} kit @param {string | ((description: string) => boolean)} matches @param {string | number | null} [keep]
+ */
+export async function dropStrays(kit, matches, keep = null) {
+  const is = typeof matches === 'string' ? (d) => d === matches : matches;
+  const { broadcasts = [] } = await kit.call('/broadcasts?status=scheduled&per_page=1000');
+  // Kit's own status filter, and again here: one that has started sending or gone is never touched
+  // (Kit doesn't promise a status on each; without one, only one whose time is still ahead counts)
+  const waiting = (b) => (b.status ? ['scheduled', 'draft'].includes(b.status) : Boolean(b.send_at) && Date.parse(b.send_at) > Date.now());
+  const strays = broadcasts.filter((b) => is(b.description || '') && waiting(b) && String(b.id) !== String(keep));
+  for (const b of strays) await kit.call(`/broadcasts/${b.id}`, { method: 'DELETE' });
+  return strays.length;
 }
 
 /**
@@ -285,7 +304,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 export async function sentEmails(kit, { limit = 52, now = Date.now() } = {}) {
   return (await completed(kit, now, { bodies: true }))
-    .filter(isStoreEmail)
+    .filter((b) => isStoreEmail(b) && !isAgainEmail(b))
     .slice(0, limit)
     .map((b) => ({ id: b.id, subject: b.subject || '', preheader: b.preview_text || '', sentAt: b.send_at }));
 }
@@ -333,6 +352,13 @@ export function isStoreEmail(b) {
 export const fromThisAdmin = (b) => /^The Sunny Side for .*, from the store admin$/.test(b?.description || '');
 
 /**
+ * A week's email sent again to the people who didn't open it (again-run.mjs againDescription). It
+ * shows on its email's page in Sent emails, not as an email of its own, and its time isn't the
+ * store's usual one.
+ */
+export const isAgainEmail = (b) => /^The Sunny Side for .*, again to the people who didn’t open it$/.test(b?.description || '');
+
+/**
  * One of the store's emails as Kit sent it, with its HTML, or null when it isn't one that went to
  * subscribers (a draft, one still scheduled, a test, one deleted in Kit) or isn't the store's.
  * @returns {Promise<(SentEmail & { html: string, status: string }) | null>}
@@ -363,4 +389,109 @@ export async function usualTime(kit, now = Date.now()) {
     counts.set(t, (counts.get(t) ?? 0) + 1);
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
+
+/*
+ * For sending the email again to the people who didn't open it (again-run.mjs)
+ * ---------------------------------------------------------------------------
+ * Kit's API sends a broadcast to tags or segments only, and can't make a segment, so the people it
+ * goes to are found with Kit's subscriber filter and given a tag of their own, one at a time (the
+ * bulk endpoints are OAuth-only, and the site uses an API key).
+ */
+
+/** A Kit subscriber filter condition on one tag. */
+export const onTag = (id) => ({ type: 'tags', any: [{ type: 'ids', matching: [id] }] });
+/** A Kit subscriber filter condition: did `what` ('sent', 'opens', 'clicks') with any of these broadcasts, optionally since a day. */
+export const didWith = (what, ids, after) => ({ type: what, count_greater_than_or_equal: 1, ...(after ? { after } : {}), any: [{ type: 'broadcasts', ids }] });
+export const ACTIVE = { type: 'subscriber_state', states: ['active'] };
+
+/**
+ * Everyone Kit's subscriber filter finds (every condition in `all`), as ids, every page of them. Throws
+ * rather than give part of a list: a page that says there's more with no way to get it, or one
+ * that repeats.
+ * @returns {Promise<Set<string>>}
+ */
+export async function filterIds(kit, all) {
+  const ids = new Set();
+  const seen = new Set();
+  let after = '';
+  for (let page = 0; page < 100; page++) {
+    const data = await kit.call(`/subscribers/filter?per_page=1000${after ? `&after=${encodeURIComponent(after)}` : ''}`, { method: 'POST', body: { all } });
+    if (!Array.isArray(data?.subscribers)) throw new Error('Kit’s subscriber filter answered without a list.');
+    for (const s of data.subscribers) ids.add(String(s.id));
+    const p = data.pagination ?? {};
+    if (!p.has_next_page) return ids;
+    if (!p.end_cursor || seen.has(p.end_cursor)) throw new Error('Kit’s subscriber filter said there were more but gave no next page.');
+    seen.add(p.end_cursor);
+    after = p.end_cursor;
+  }
+  throw new Error('Kit’s subscriber filter went on for 100 pages.');
+}
+
+/** Everyone with a tag, in any state (subscribed or not), as ids. @returns {Promise<Set<string>>} */
+export async function tagMembers(kit, tagId) {
+  const ids = new Set();
+  const seen = new Set();
+  let after = '';
+  for (let page = 0; page < 100; page++) {
+    const data = await kit.call(`/tags/${tagId}/subscribers?status=all&per_page=1000${after ? `&after=${encodeURIComponent(after)}` : ''}`);
+    if (!Array.isArray(data?.subscribers)) throw new Error('Kit answered a tag’s list without one.');
+    for (const s of data.subscribers) ids.add(String(s.id));
+    const p = data.pagination ?? {};
+    if (!p.has_next_page) return ids;
+    if (!p.end_cursor || seen.has(p.end_cursor)) throw new Error('Kit said a tag’s list had more but gave no next page.');
+    seen.add(p.end_cursor);
+    after = p.end_cursor;
+  }
+  throw new Error('A tag’s list went on for 100 pages.');
+}
+
+/** The id of the tag with this name, made if Kit has none (Kit's create answers with the one it has). */
+export async function tagNamed(kit, name) {
+  const { tag } = await kit.call('/tags', { method: 'POST', body: { name } });
+  if (!tag?.id || tag.name !== name) throw new Error(`Kit didn’t make the “${name}” tag.`);
+  return Number(tag.id);
+}
+
+/** The ids of the store's tag and its no-marketing tag (STORE_TAG, NO_MARKETING_TAG). */
+export async function storeTags(kit) {
+  const [store, noMarketing] = await Promise.all([idNamed(kit, 'tags', STORE_TAG), idNamed(kit, 'tags', NO_MARKETING_TAG)]);
+  if (!store || !noMarketing) throw new Error(`Kit has no “${store ? NO_MARKETING_TAG : STORE_TAG}” tag.`);
+  return { store, noMarketing };
+}
+
+/** Tags someone; false if Kit no longer has them. */
+export async function addTag(kit, tagId, id) {
+  try {
+    await kit.call(`/tags/${tagId}/subscribers/${id}`, { method: 'POST', body: {} });
+    return true;
+  } catch (err) {
+    if (/** @type {{ status?: number }} */ (err).status === 404) return false;
+    throw err;
+  }
+}
+export async function removeTag(kit, tagId, id) {
+  try {
+    await kit.call(`/tags/${tagId}/subscribers/${id}`, { method: 'DELETE' });
+  } catch (err) {
+    // Already off it, or no longer in Kit
+    if (/** @type {{ status?: number }} */ (err).status !== 404) throw err;
+  }
+}
+
+/**
+ * Kit's completed broadcasts since a day (YYYY-MM-DD), tests left out, as { id, sentAt, store }:
+ * store is true for the store's own emails (isStoreEmail), read with their HTML.
+ */
+export async function sentSince(kit, since) {
+  const { broadcasts = [] } = await kit.call(`/broadcasts?status=completed&sent_after=${since}&per_page=1000`);
+  return broadcasts.filter((b) => b.send_at && !isTest(b)).map((b) => ({ id: Number(b.id), sentAt: b.send_at, store: isStoreEmail(b) }));
+}
+
+/** A broadcast's numbers from Kit: who it went to, opened and clicked it, and who unsubscribed. */
+export async function statsOf(kit, id) {
+  const { broadcast } = await kit.call(`/broadcasts/${id}/stats`);
+  const s = broadcast?.stats ?? {};
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  return { recipients: n(s.recipients), opened: n(s.emails_opened), openRate: n(s.open_rate), clickRate: n(s.click_rate), unsubscribes: n(s.unsubscribes), status: s.status ?? null };
 }

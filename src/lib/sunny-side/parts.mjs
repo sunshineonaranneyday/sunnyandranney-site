@@ -90,7 +90,8 @@ export function checkParts(p, { sale = null, photos = null, kids = null, reveals
         continue;
       }
       const claims = offerClaims(filled, sale, k);
-      if (claims.length) e[k] = `It says ${claims.join(' ')} Change the words, or use {offer} and the email writes the sale for you.`;
+      // Each claim is its own sentence ("The subject says 50%, but the sale gives 20%."): "It says" before them read "It says The subject says"
+      if (claims.length) e[k] = `${claims.join(' ')} Change the words, or use {offer} and the email writes the sale for you.`;
     }
   }
   const s = p.story;

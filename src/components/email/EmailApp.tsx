@@ -619,6 +619,8 @@ export default function EmailApp(props: AppProps) {
               subscribers={props.subscribers}
               subject={inbox.subject}
               preheader={inbox.preheader}
+              saleEnds={saleOk && special.ends ? special.ends : null}
+              revealStart={reveal?.start ?? null}
             />
           </Section>
 
