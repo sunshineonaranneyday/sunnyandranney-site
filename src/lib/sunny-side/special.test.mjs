@@ -325,9 +325,11 @@ test('the charity section is one short band: the headline, the photo picked, a f
   assert.match(html, /utm_content=mission-link"[^>]*padding:10px 0;[^>]*>Read more about Remi &amp; Nico&nbsp;&#8594;<\/a>/);
   assert.match(new Email({ ...brief, mission: { ...brief.mission, name: '' } }).mission(), />Read more about them&nbsp;&#8594;</);
   assert.doesNotMatch(html, /mission-button|bgcolor="#FFDA24"/, 'no yellow button in the charity section');
-  // The numbers in the same band, under a muted rule, three across even on the smallest phone
+  // The numbers in the same band, under a muted rule, a third of the column each even on the smallest phone,
+  // at 32px there while each has three digits at most
   assert.match(html, /border-top:1px solid #5A5B61;">[^]*>295\+<[^]*>208\+<[^]*>\$0</);
-  assert.equal((html.match(/<div class="stat" style="display:inline-block;vertical-align:top;width:100%;max-width:93px;/g) || []).length, 3);
+  assert.equal((html.match(/<div class="stat" style="display:inline-block;vertical-align:top;width:33\.333%;/g) || []).length, 3);
+  assert.equal((html.match(/class="soard-stat soard-serif" style="[^"]*font-size:32px;line-height:36px;/g) || []).length, 3);
   const none = new Email({ ...brief, mission: { ...brief.mission, impact: undefined } }).mission();
   assert.doesNotMatch(none, /Room makeovers|#5A5B61/);
 });

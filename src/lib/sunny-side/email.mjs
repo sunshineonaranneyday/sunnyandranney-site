@@ -59,10 +59,13 @@ const PHONE_SIDE = 20; // the column's sides on a phone (32 on a computer)
 const WIDTH = 600, COLUMN = WIDTH - 2 * S4;
 /** Wider than this, the style block's computer sizes apply (min-width); this wide or narrower, a phone's. */
 const DESKTOP = 621;
-/** Each of the charity's numbers: three fit across the smallest phone's 280px column, and a computer's 536. */
-const STAT_PHONE = 93, STAT_DESKTOP = 178;
 /** The visit row's button column, beside the address on a computer. */
 const VISIT_BUTTON = 210;
+/**
+ * The phone size and line height of the charity's numbers: 32/36 while every one has three digits at
+ * most, 24/28 once one has more, so the widest still fits a third of a 320px phone (Email#impact).
+ */
+export const statSize = (nums) => (nums.every((t) => String(t).replace(/\D/g, '').length <= 3) ? [32, 36] : [24, 28]);
 const R_BTN = 8, R_CARD = 12;
 const LABEL_LH = 16; // line height of the small uppercase labels
 const GUTTER = 4; // between photo wall tiles
@@ -98,10 +101,14 @@ export const SOARD_WARM = '#F5F4F0', SOARD_MUTED = '#5A5B61';
 // Two more as the charity's own emails draw them (its reveal invite, measured in Gmail on Nov 16, 2026):
 // the cream its story sections sit on, and the soft white of the italic line over its headline.
 export const SOARD_CREAM = '#FEFCF5', SOARD_SOFT = '#E4E4E5';
-const SERIF = "'Libre Baskerville', Georgia, 'Times New Roman', serif";
-// Numbers fall back to Times New Roman, not Georgia: Georgia's figures are old-style, so in Gmail
-// (no web fonts) "$0" read as "$o" and "295" dropped below the line.
-const NUMERALS = "'Libre Baskerville', 'Times New Roman', Times, serif";
+// The charity's serif, for its headlines and its numbers alike. Gmail and Outlook load no web fonts, so
+// what they show is the next font here the device has, and every one of them draws its digits the same
+// height on the line (measured Nov 18, 2026): Baskerville, built into every Mac, iPhone and iPad and the
+// face Libre Baskerville was drawn from ("218+" 2.29em wide against its 2.28); Palatino Linotype, on
+// every Windows; Times New Roman only after those. Never Georgia: its figures are old-style, so "$0"
+// read as "$o" and "295" dropped below the line; and Times New Roman first made the numbers in Gmail
+// a different face from the headline over them (Peter, Nov 18, 2026: "the fonts (See the numbers ...").
+export const SERIF = "'Libre Baskerville', Baskerville, 'Palatino Linotype', Palatino, 'Times New Roman', serif";
 const OUTFIT = "'Outfit', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 // The logo the charity's own emails open with on their Dark Deep (its reveal invite, Nov 16, 2026):
 // the guide's display logo for dark backgrounds with "Dreams Built Here", the 600x600 file's logo
@@ -1004,22 +1011,26 @@ export class Email {
 
   /**
    * The charity's numbers, as its site shows them, Sunshine Yellow on Dark Deep, centered, under a
-   * muted rule at the foot of its section: three across at any width from 320px up. Each is a block of
-   * its own (statColumns), at most a third of the smallest phone's 280px column; a label too long for
+   * muted rule at the foot of its section: three across at any width from 320px up, each in a third of
+   * the column (statColumns), so they reach its edges as the words over them do; a label too long for
    * one line breaks between its words ("Room / makeovers"), never inside one.
+   * Their size is the charity's own for them (its brand page: 32 to 44px). On a phone, 32px while every
+   * number has three digits at most ("999+" is 83px of a 320px phone's 93px third in Libre Baskerville
+   * Bold, its widest face), else 24 ("2,480+" is 85px there); 40px on a computer (.soard-stat), where
+   * "2,480+" is 141px of 178.
    */
   impact(n) {
     const stats = [
       [n.rooms, 'Room makeovers'],
       [n.children, 'Children served'],
       // On a phone it breaks after "to", where a third of the column would have left "families" alone on
-      // its line (verify.mjs's rule); a computer's 178px holds it on one line, so the break is a phone's (.phone-br)
+      // its line (verify.mjs's rule); a computer's third holds it on one line, so the break is a phone's (.phone-br)
       ['$0', 'Cost to <br class="phone-br">families'],
     ];
+    const [size, lh] = statSize(stats.map(([num]) => num));
     const cells = stats.map(
       ([num, what]) =>
-        // 24/28 on a phone, 32/36 on a computer (.soard-stat)
-        Email.text(num, { size: 24, lh: 28, weight: 700, color: SOARD_YELLOW, font: NUMERALS, cls: 'soard-stat soard-serif', track: '-0.02em', mb: 4, align: 'center' }) +
+        Email.text(num, { size, lh, weight: 700, color: SOARD_YELLOW, font: SERIF, cls: 'soard-stat soard-serif', track: '-0.02em', mb: 6, align: 'center' }) +
         Email.label(what, { color: WHITE, mb: 0, font: OUTFIT, track: '0.06em', align: 'center' }),
     );
     return Email.gap(12) + Email.T(`<tr><td style="padding-top:${S3}px;border-top:1px solid ${SOARD_MUTED};">${Email.statColumns(cells)}</td></tr>`);
@@ -1031,15 +1042,16 @@ export class Email {
   }
 
   /**
-   * Blocks that sit side by side while they fit and wrap to the next line, centered, when they don't:
-   * inline blocks, each at most STAT_PHONE wide (STAT_DESKTOP on a computer, .stat), so two fit across
-   * the smallest phone (280px of column) and three across a computer's 536. No media query decides it,
-   * so it holds in a mail app that throws the style block away. Outlook, which ignores max-width, gets
-   * a table of its own (the "ghost table").
+   * Blocks side by side, each an equal share of the column (a third for three) at every width, so the
+   * first starts at the column's left edge and the last ends at its right, as the words above them do.
+   * Percent widths hold with no media query, so they hold in a mail app that throws the style block
+   * away. Outlook, which lays inline blocks out its own way, gets a table of its own (the "ghost table").
    */
   static statColumns(cells) {
     const { ghost } = Email;
     const w = Math.floor(COLUMN / cells.length);
+    // Rounded down, so the shares never add up to more than the column and push the last one down a line
+    const share = Math.floor((100 / cells.length) * 1000) / 1000;
     return (
       `<div style="font-size:0;line-height:0;text-align:center;">` +
       ghost(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`) +
@@ -1047,7 +1059,7 @@ export class Email {
         .map(
           (c) =>
             ghost(Email.td('top', `width="${w}" align="center"`)) +
-            `<div class="stat" style="display:inline-block;vertical-align:top;width:100%;max-width:${STAT_PHONE}px;font-size:16px;line-height:24px;">${c}</div>` +
+            `<div class="stat" style="display:inline-block;vertical-align:top;width:${share}%;font-size:16px;line-height:24px;">${c}</div>` +
             ghost('</td>'),
         )
         .join('') +
@@ -1189,7 +1201,7 @@ export class Email {
       '    .soard-body { font-size:17px !important; line-height:29px !important; }',
       '    .soard-mark { width:96px !important; }',
       `    .tile-cap { padding-left:${S4}px !important; padding-right:12px !important; }`,
-      '    .soard-stat { font-size:32px !important; line-height:36px !important; }',
+      '    .soard-stat { font-size:40px !important; line-height:44px !important; }',
     ].join('\n');
     return `<!DOCTYPE html>
 <html lang="en" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -1204,7 +1216,7 @@ export class Email {
 <title>${escape(subject)}</title>
 <!--[if !mso]><!--><link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400;1,700&family=Outfit:wght@400;700&display=swap" rel="stylesheet"><!--<![endif]-->
 <!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
-<!--[if mso]><style>body, table, td, p, a, h1, h2, span { font-family: Arial, Helvetica, sans-serif !important; } .soard-serif, .soard-serif em { font-family: Georgia, serif !important; } .soard-stat { font-family: 'Times New Roman', serif !important; }
+<!--[if mso]><style>body, table, td, p, a, h1, h2, span { font-family: Arial, Helvetica, sans-serif !important; } .soard-serif, .soard-serif em { font-family: 'Palatino Linotype', Palatino, 'Times New Roman', serif !important; }
 ${computer}
 </style><![endif]-->
 <style>
@@ -1223,7 +1235,6 @@ ${tierRules(1)}
   }
   @media (min-width:${DESKTOP}px) {
 ${computer}
-    .stat { max-width:${STAT_DESKTOP}px !important; }
     .phone-br { display:none !important; }
     .btn { width:auto !important; }
     .btn a { display:inline-block !important; }

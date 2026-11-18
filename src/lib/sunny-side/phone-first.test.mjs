@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { Email, bareEmail, render } from './email.mjs';
+import { Email, SERIF, bareEmail, render, statSize } from './email.mjs';
 import { cleanReport } from './layout-store.mjs';
 
 const brief = JSON.parse(readFileSync(new URL('../../../scripts/sunny-side/tests/edge-maximum.json', import.meta.url), 'utf8'));
@@ -91,12 +91,45 @@ test('a gap between side by side columns is there only while they stack, with no
   assert.doesNotMatch(html, /visit-gap/);
 });
 
-test('the charity’s three numbers fit across the smallest phone and a computer', () => {
+test('where an inbox loads no web fonts (Gmail, Outlook), every serif falls back to one face, with every digit the same height', () => {
+  // Peter, Nov 18, 2026, of the charity's numbers in Gmail: "the fonts (See the numbers ...": its numbers
+  // fell back to Times New Roman under a headline in Georgia
+  const reveal = JSON.parse(readFileSync(new URL('../../../scripts/sunny-side/tests/edge-reveal.json', import.meta.url), 'utf8'));
+  for (const email of [html, render(reveal)]) {
+    const serifs = [...email.matchAll(/font-family:\s*([^;"]*serif)[;"]/g)].map((m) => m[1].trim()).filter((f) => !/sans-serif/.test(f));
+    assert.ok(serifs.length >= 4, 'the charity’s headline and numbers are in it');
+    // One stack for its headlines and its numbers alike, so no inbox shows two serifs in one section
+    assert.deepEqual([...new Set(serifs.filter((f) => !f.includes('!important')))], [SERIF]);
+  }
+  const faces = SERIF.split(',').map((f) => f.trim().replace(/'/g, ''));
+  // What Gmail shows on a Mac or an iPhone, then on Windows, before Times New Roman; never Georgia, whose
+  // old-style figures made "$0" read "$o" and dropped "295" below the line
+  assert.deepEqual(faces, ['Libre Baskerville', 'Baskerville', 'Palatino Linotype', 'Palatino', 'Times New Roman', 'serif']);
+  assert.doesNotMatch(html, /Georgia/);
+  // Outlook for Windows: the same face as Gmail on Windows, for every serif, numbers too
+  const mso = html.match(/<!--\[if mso\]><style>([\s\S]*?)<\/style><!\[endif\]-->/)[1];
+  assert.match(mso, /\.soard-serif, \.soard-serif em \{ font-family: 'Palatino Linotype', Palatino, 'Times New Roman', serif !important; \}/);
+  assert.match(html, /class="soard-stat soard-serif"/);
+});
+
+test('the charity’s three numbers each take a third of the column at every width, edge to edge, with no media query', () => {
   const strip = Email.statColumns(['1', '2', '3']);
-  const phone = Number(strip.match(/max-width:(\d+)px/)[1]);
-  assert.ok(3 * phone <= 320 - 2 * 20, `three at ${phone}px fit a 320px phone's 280px column`);
-  const desktop = Number(style.match(/\.stat \{ max-width:(\d+)px/)[1]);
-  assert.ok(3 * desktop <= 536, `three at ${desktop}px fit a computer's 536px column`);
+  const shares = [...strip.matchAll(/class="stat" style="[^"]*width:([\d.]+)%;/g)].map((m) => Number(m[1]));
+  assert.deepEqual(shares, [33.333, 33.333, 33.333]);
+  assert.ok(shares.reduce((a, b) => a + b) <= 100, 'never more than the column, or the last would drop a line');
+  assert.doesNotMatch(strip, /max-width/);
+  assert.doesNotMatch(style, /\.stat \{/);
+});
+
+test('the charity’s numbers are as big as fits: 32px on a phone up to three digits, 24 past that, 40 on a computer', () => {
+  assert.deepEqual(statSize(['310+', '218+', '$0']), [32, 36]);
+  assert.deepEqual(statSize(['999+', '999+', '$0']), [32, 36]);
+  // "2,480+" is 85px at 24px in Libre Baskerville Bold, of a 320px phone's 93px third; 113 at 32
+  assert.deepEqual(statSize(['1,295+', '2,480+', '$0']), [24, 28]);
+  const computer = style.match(/@media \(min-width:621px\) \{([\s\S]*?)\n {2}\}/)[1];
+  assert.match(computer, /\.soard-stat \{ font-size:40px !important; line-height:44px !important; \}/);
+  // edge-maximum's own numbers, as written
+  assert.match(html, new RegExp(`class="soard-stat soard-serif" style="[^"]*font-size:${statSize([brief.mission.impact.rooms, brief.mission.impact.children, '$0'])[0]}px;`));
 });
 
 test('a layout report is a word, how far over, at a phone width, for a send date; anything else is refused', () => {
