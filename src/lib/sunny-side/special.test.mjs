@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Email, amount, escape, lines, noWidow, offerClaims, offerLine, render } from './email.mjs';
+import { Email, amount, escape, lead, lines, noWidow, offerClaims, offerLine, render } from './email.mjs';
 import { STORE_TIERS, USUAL_PERCENT, blank, check, clean, defaults, draftSale, emailToWorkOn, forKind, isSendDate, isSendDay, nextSend, previewBrief, sendDays, sendLabel, summary, termsLine, thisWeeksSend, toSale, typeset, usualEnds } from './special.mjs';
 import { WORKWEEK_START_DAY } from '../time-clock/hours.mjs';
 import { impactFromPage } from './impact.mjs';
@@ -296,36 +296,56 @@ test('impact numbers come from the charity page, and anything unexpected stops t
   assert.throws(() => impactFromPage('<p>295+ Room Makeovers</p><p>300+ Room Makeovers</p><p>208+ Children Served</p>'), /found 295\+, 300\+/);
 });
 
-test('the charity section shows its live numbers, and leaves the strip out without them', () => {
+test('the charity section is one short band: the headline, the photo picked, a few lines with Read more, and its numbers', () => {
   const brief = {
     send_date: SEND,
-    mission: { photo: { src: 'cf:x.jpg', alt: 'A family' }, name: 'Remi &amp; Nico', caption: 'Ages 14 and 12.', story: 'Story.', cta: 'See their reveal', url: 'https://sunshineonaranneyday.com/kids/x/', impact: { rooms: '295+', children: '208+' } },
+    mission: {
+      photo: { src: 'cf:x.jpg', alt: 'A family' },
+      name: 'Remi &amp; Nico',
+      caption: 'Remi &amp; Nico&#8217;s new accessible bathroom.',
+      // The charity's summary as its site has it (Nov 17, 2026): two sentences, 209 letters
+      story: 'Remi and Nico, sisters with rare genetic conditions, rely fully on their parents for daily care. Thanks to Helen and Jimmy Carlos, SOARD created a girly wheelchair-accessible bathroom fully customized to them.',
+      url: 'https://sunshineonaranneyday.com/kids/x/',
+      impact: { rooms: '295+', children: '208+' },
+    },
   };
   const html = new Email(brief).mission();
-  // Laid out like the charity's own emails: a Dark Deep top (its dark-background logo, the yellow
-  // label, an italic line over the headline, the key words in yellow italic, the finished room with
-  // its caption), then a cream story led by the yellow dash and the family's name, then the numbers
+  // One Dark Deep band (Peter, 2026-11-17: "blend in the numbers with the section ... shorten this section")
+  assert.equal((html.match(/data-part="mission"/g) || []).length, 1);
+  assert.doesNotMatch(html, /#FEFCF5|Every purchase builds|dream&nbsp;room/);
+  // Centered like the charity's own emails: its logo, the yellow label, "See where your money goes."
   assert.match(html, /brand-logo-dark-bg-tagline-display\/trim=88;91;120;92,w=192,format=png" width="96" height="90"/);
-  assert.match(html, /bgcolor="#1E1F25"[\s\S]*Where 100% of our profits go[\s\S]*Every purchase builds<\/p>[\s\S]*a&nbsp;<em [^>]*color:#FFDA24;">dream&nbsp;room<\/em>\.<\/h2>/);
+  assert.match(html, /utm_content=charity-logo/);
+  assert.match(html, />100% of our profits<\/p><h2 [^>]*text-align:center;[^>]*>See where your <em [^>]*color:#FFDA24;">money&nbsp;goes<\/em>\.<\/h2>/);
   // On the column: 536 wide on a computer (and Outlook's size), up to 560 where the style block is gone
   assert.match(html, /w=1120,h=560,[^"]*" width="536" height="268" alt="A family" style="display:block;width:100%;max-width:560px;/);
-  assert.match(html, />Ages 14 and&nbsp;12\.<\/p>/); // never a word alone on the caption's last line
-  assert.match(html, /bgcolor="#FEFCF5"[\s\S]*>Remi &amp; Nico&#8217;s story<\/p>[\s\S]*>Story\.<\/p>/);
-  assert.match(html, /utm_content=mission-link"[^>]*padding:10px 0;[^>]*>See their reveal&nbsp;&#8594;<\/a>/);
-  // Without a name, the label still reads
-  assert.match(new Email({ ...brief, mission: { ...brief.mission, name: undefined } }).mission(), />Their story<\/p>/);
+  // The caption, the first sentence only, then Read more to their page
+  assert.match(html, /<strong [^>]*>Remi &amp; Nico&#8217;s new accessible bathroom\.<\/strong> Remi and Nico, sisters with rare genetic conditions, rely fully on their parents for daily&nbsp;care\.<\/p>/);
+  assert.doesNotMatch(html, /Helen and Jimmy/);
+  assert.match(html, /utm_content=mission-link"[^>]*padding:10px 0;[^>]*>Read more about Remi &amp; Nico&nbsp;&#8594;<\/a>/);
+  assert.match(new Email({ ...brief, mission: { ...brief.mission, name: '' } }).mission(), />Read more about them&nbsp;&#8594;</);
   assert.doesNotMatch(html, /mission-button|bgcolor="#FFDA24"/, 'no yellow button in the charity section');
-  assert.match(html, />295\+</);
-  assert.match(html, />208\+</);
-  assert.match(html, /\$0</);
-  assert.match(html, /utm_content=charity-logo/);
-  // The numbers wrap by their own widths, centered, like the charity's site: no table cell squeezes
-  // them, and no media query is needed for two to sit across a 320px phone (140 each, 280 of column)
-  assert.equal((html.match(/<div class="stat" style="display:inline-block;vertical-align:top;width:100%;max-width:140px;/g) || []).length, 3);
-  assert.match(html, /<div style="font-size:0;line-height:0;text-align:center;">/);
-  assert.doesNotMatch(html, /table-layout:fixed/, 'the strip is not three fixed cells');
+  // The numbers in the same band, under a muted rule, three across even on the smallest phone
+  assert.match(html, /border-top:1px solid #5A5B61;">[^]*>295\+<[^]*>208\+<[^]*>\$0</);
+  assert.equal((html.match(/<div class="stat" style="display:inline-block;vertical-align:top;width:100%;max-width:93px;/g) || []).length, 3);
   const none = new Email({ ...brief, mission: { ...brief.mission, impact: undefined } }).mission();
-  assert.doesNotMatch(none, /Room makeovers/);
+  assert.doesNotMatch(none, /Room makeovers|#5A5B61/);
+});
+
+test('a family’s words are cut to their first sentences that fit, and one long sentence at a word', () => {
+  // All 18 of the charity's summaries run 180–220 letters (Nov 17, 2026); these are three of them
+  assert.equal(lead('Isla was diagnosed with a cancerous kidney tumor at just three years old. Now six and full of energy, SOARD built Isla a special Barbie-themed therapy room in partnership with Make-A-Wish Georgia.'), 'Isla was diagnosed with a cancerous kidney tumor at just three years old.');
+  assert.equal(
+    lead('Desmond received a life-changing home makeover from SOARD, with support from the Myfifident Foundation—creating a safe, imaginative bedroom and an accessible bathroom that fosters independence and comfort.'),
+    'Desmond received a life-changing home makeover from SOARD, with support from the Myfifident Foundation—creating a safe, imaginative bedroom&#8230;',
+  );
+  // Short enough whole, it stays whole; an abbreviation isn't a sentence's end
+  assert.equal(lead('Dylan has MECP2 Duplication Syndrome. SOARD is building a therapy room so he can learn and grow.'), 'Dylan has MECP2 Duplication Syndrome. SOARD is building a therapy room so he can learn and grow.');
+  assert.equal(lead('Amari met Dr. Lee in 2020, after the crash, and the two have worked on his walking every week since, through two surgeries and a long recovery. He loves it.'), 'Amari met Dr. Lee in 2020, after the crash, and the two have worked on his walking every week since, through two surgeries and a long&#8230;');
+  // Typeset words count as one letter each, and a cut never lands inside one
+  const typeset = 'Their bathroom door was only two feet wide, too narrow to wheel the sisters through. Now they have a bathroom built around their needs, at no cost to their&nbsp;family.';
+  assert.equal(lead(typeset), 'Their bathroom door was only two feet wide, too narrow to wheel the sisters through.');
+  assert.ok(!/&[#\w]*$/.test(lead('x'.repeat(10) + ' &#8220;' + 'y '.repeat(80))));
 });
 
 test('the ready-made spend-more sale starts on the store’s own amounts, a sale ready to go', () => {

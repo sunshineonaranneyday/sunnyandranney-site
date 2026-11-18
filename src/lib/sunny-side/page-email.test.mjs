@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Miniflare } from 'miniflare';
 import { Email, lines, plain, render, usePhotoOrigin } from './email.mjs';
 import { NO_MARKETING_TAG, STORE_SEGMENT, STORE_TAG, audienceOf, broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, statusOf, storeSegmentId, subscriberCount, templateFor, usualTime } from './kit.mjs';
-import { KID_PHOTOS, cfIdOf, kidFor, missionOf, photosDate, photosOf, revealedKids, roomsPhrase } from './kids.mjs';
+import { KID_PHOTOS, cfIdOf, kidFor, missionOf, photosDate, photosOf, revealedKids, roomsPhrase, tilePhotoFor } from './kids.mjs';
 import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
 import { DEFAULT_HERO, arrangeCollage, blankParts, briefParts, checkParts, cleanParts, linesOf } from './parts.mjs';
@@ -468,7 +468,7 @@ test('the charity’s kids: the most recent reveal first, by its recorded date, 
   assert.deepEqual(k.photo, { src: 'cf:kids/newer/1791465775704-a.jpg', alt: 'Newer in the new room' });
   assert.equal(k.caption, 'Newer’s new dream bedroom and accessible bathroom.');
   assert.equal(k.page, 'https://sunshineonaranneyday.com/kids/newer/');
-  assert.deepEqual(missionOf(k), { photo: k.photo, name: 'Newer', caption: 'Newer’s new dream bedroom and accessible bathroom.', story: 'newer got a new room.', cta: 'See their story', url: k.page });
+  assert.deepEqual(missionOf(k), { photo: k.photo, name: 'Newer', caption: 'Newer’s new dream bedroom and accessible bathroom.', story: 'newer got a new room.', url: k.page });
   assert.equal(kidFor('', [k]), k);
   assert.equal(kidFor('older', revealedKids(rows, reveals, '2026-11-16')).slug, 'older');
   assert.equal(cfIdOf('https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ/kids/adrian/photo-18/public'), 'kids/adrian/photo-18');
@@ -554,4 +554,17 @@ test('the photo library and the people live in D1', async () => {
   } finally {
     await mf.dispose();
   }
+});
+
+test('the picked family’s tile shows the photo the email uses; the others, their finished room', () => {
+  const after = { src: 'cf:kids/a/1-after.jpg', alt: 'The room', after: true };
+  const party = { src: 'cf:kids/a/2-party.jpg', alt: 'The family' };
+  const a = { slug: 'a', photo: after, photos: [after, party] };
+  const b = { slug: 'b', photo: { src: 'cf:kids/b/1.jpg', alt: '' }, photos: [] };
+  // Remi & Nico on Nov 17, 2026: the fourth photo picked, the tile still on the finished room
+  assert.equal(tilePhotoFor(a, a, party.src), party);
+  assert.equal(tilePhotoFor(a, a, ''), after);
+  assert.equal(tilePhotoFor(b, a, party.src), b.photo);
+  // A picked photo no longer on their page falls back, as the email does
+  assert.equal(tilePhotoFor(a, a, 'cf:kids/a/gone.jpg'), after);
 });

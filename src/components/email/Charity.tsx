@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 import { useState } from 'preact/hooks';
 import { Email } from '@/lib/sunny-side/email.mjs';
-import { kidFor, kidPhotoFor } from '@/lib/sunny-side/kids.mjs';
+import { kidFor, kidPhotoFor, tilePhotoFor } from '@/lib/sunny-side/kids.mjs';
 import { type Kid, type KidPhoto, type Parts, fieldId } from './model';
 import { FieldError } from './parts';
 
@@ -55,7 +55,7 @@ export function Charity({ parts, setParts, kids, error }: { parts: Parts; setPar
             <li key={k.slug}>
               <button type="button" class="em-family" aria-pressed={k === kid} onClick={() => pickFamily(k)}>
                 <span class="em-family-photo">
-                  <img src={Email.photo(k.photo.src, 400, 200)} alt="" width={200} height={100} loading="lazy" decoding="async" />
+                  <img src={Email.photo((tilePhotoFor(k, kid, parts.kidPhoto) as KidPhoto).src, 400, 200)} alt="" width={200} height={100} loading="lazy" decoding="async" />
                   {k === kid && <Check />}
                 </span>
                 <span class="em-family-name">{k.name}</span>

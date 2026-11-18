@@ -136,9 +136,16 @@ export const kidFor = (slug, kids) => (slug && kids.find((k) => k.slug === slug)
 /** The family photo the email shows: the one picked, if it's still on their page, else the finished room. */
 export const kidPhotoFor = (src, kid) => (src && kid.photos?.find((p) => p.src === src)) || kid.photo;
 
+/**
+ * The photo a family's tile shows on the admin page: for the family the email shows, the photo it
+ * uses; for the rest, their finished room (Peter, 2026-11-17: the tile kept the finished room after
+ * another photo was picked, so it didn't match the email).
+ */
+export const tilePhotoFor = (k, kid, src) => (k === kid ? kidPhotoFor(src, k) : k.photo);
+
 /** The charity section as the email draws it, from the kid and the photo picked, in the charity's words. */
 export function missionOf(kid, photo = '') {
-  return { photo: kidPhotoFor(photo, kid), name: typeset(kid.name), caption: typeset(kid.caption), story: typeset(kid.story), cta: 'See their story', url: kid.page };
+  return { photo: kidPhotoFor(photo, kid), name: typeset(kid.name), caption: typeset(kid.caption), story: typeset(kid.story), url: kid.page };
 }
 
 // ── Reveals still ahead, for the story spot ─────────────────────────────────
