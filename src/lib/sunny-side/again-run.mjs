@@ -130,7 +130,9 @@ export async function listPeople(kit, db, { emailId, now }) {
   if (!Number.isInteger(report.opened) || Math.abs(opened.size - report.opened) > report.opened * SENT_SLACK + 5 || (report.opened > 0 && opened.size === 0)) {
     throw new Trust(`Kit’s filter found ${opened.size} people who opened the email, and Kit’s report says ${report.opened}. It didn’t go again rather than go to the wrong people.`);
   }
-  return againAudience(sets);
+  // With what Kit's filter found and what Kit's report says, for the owner's check to show side by side
+  // Both are whole numbers here: the checks above throw Trust on anything else
+  return { ...againAudience(sets), kit: { onList: sent.size, opened: opened.size, recipients: /** @type {number} */ (went), reportOpened: /** @type {number} */ (report.opened) } };
 }
 
 /** The list couldn't be trusted: it doesn't go, and the owner is told why. */
