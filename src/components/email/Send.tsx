@@ -324,7 +324,7 @@ export function Send(props: Props) {
 
       <div class="em-send-card">
         <h3>Send a test</h3>
-        <p class="em-hint">Pick who gets it. Kit sends it about a minute later, exactly as subscribers will get it, with “[Test]” before the subject.</p>
+        <p class="em-hint">Pick who gets it. Kit sends it about a minute later, exactly as subscribers will get it, with “[Test]” and the time before the subject.</p>
         <div class="em-people" ref={list}>
           <ul class="em-test-list" aria-label="Who gets the test">
             {people.flatMap((p, i) => {

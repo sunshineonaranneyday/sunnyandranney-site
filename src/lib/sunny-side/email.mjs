@@ -85,7 +85,6 @@ export function usePhotoOrigin(origin, { direct = false } = {}) {
   photoOrigin = origin;
   photoDirect = direct;
 }
-const isPng = (url) => /\.png(\?|$)/i.test(url);
 const LOGO = `${CF}/logo-tagline-light-bg/w=360,h=144,fit=scale-down,format=png`; // 1000x400 original, 2.5:1
 const PIG = `${CF}/logo-tagline-light-bg/trim=2;300;192;230,w=192,format=png`; // the flying pig, 192x84
 const GREG = `${CF}/team/greg-ranney/w=88,h=88,fit=cover,gravity=auto,quality=70,format=jpeg`;
@@ -153,15 +152,22 @@ function formEncode(params) {
 }
 
 /**
- * Joins the last two words, so a wide line (headlines, the "when" line) never ends with one word
- * alone. Not for narrow columns, where the joined pair would force an earlier, worse break.
+ * Joins the last two words, so a line never ends with one word alone ("Terrace 4 Door" over
+ * "Cabinet" in a phone's product tile, Nov 17, 2026). In a narrow column, `max` is the most
+ * characters the joined pair may have: a longer one would force an earlier, worse break, so it's
+ * left to break where it falls.
  */
-export function noWidow(t) {
+export function noWidow(t, max = Infinity) {
   let inside = 0;
   for (let i = t.length - 1; i >= 0; i--) {
     if (t[i] === '>') inside++;
     else if (t[i] === '<') inside--;
-    else if (t[i] === ' ' && !inside) return t.slice(0, i) + '&nbsp;' + t.slice(i + 1);
+    else if (t[i] === ' ' && !inside) {
+      // The pair as a reader sees it: no tags, each HTML code one character
+      const before = t.slice(0, i).replace(/<[^>]*>/g, '').replace(/&#?\w+;/g, '.').split(/\s+/).pop() ?? '';
+      const after = t.slice(i + 1).replace(/<[^>]*>/g, '').replace(/&#?\w+;/g, '.');
+      return before.length + 1 + after.length <= max ? t.slice(0, i) + '&nbsp;' + t.slice(i + 1) : t;
+    }
   }
   return t;
 }
@@ -320,6 +326,7 @@ export class Email {
   constructor(brief) {
     this.b = brief;
     this.campaign = 'sunny-side-' + brief.send_date;
+    this.lastBg = null; // the color of the last band drawn, for the edge above the next section (edge)
   }
 
   // ── links and images ──
@@ -338,13 +345,15 @@ export class Email {
       return photoDirect ? file : `${RESIZE}/width=${w},height=${h},fit=cover,gravity=${gravity},quality=64,format=jpeg/${file}`;
     }
     if (src.startsWith('cf:')) return `${CF}/${src.slice(3)}/w=${w},h=${h},fit=cover,gravity=auto,quality=64,format=jpeg`;
-    // Shopify won't send a PNG saved with a transparency channel as a JPEG, even when nothing in it is
-    // see-through, and Mac screenshots all save one (49 of the 51 PNG-only products in stock on Nov 12,
-    // 2026 were screenshots), so the store's PNGs go through Cloudflare's resizing on its own domain
-    // (RESIZE), which sends every one as a JPEG, on white if anything is see-through. It accepts only
-    // the store's own Shopify files (SHOP_FILES). Shopify resizes the rest itself, and sends its WebP,
-    // AVIF and HEIC photos as JPEGs too, which Outlook can show. verify.mjs fetches every image as sent.
-    if (isPng(src) && src.startsWith(SHOP_FILES)) return `${RESIZE}/width=${w},height=${h},fit=cover,gravity=center,quality=64,format=jpeg,background=white/${src}`;
+    // The store's own Shopify files (SHOP_FILES, the only source it accepts) go through Cloudflare's
+    // resizing on the store's domain (RESIZE), which sends exactly the shape asked for, as a JPEG, on
+    // white where anything is see-through. Shopify's own resizing did neither every time: it skips the
+    // crop when a photo is smaller than the size asked for (the lead product's 1000px photo, asked for
+    // at 1200x800, came back an uncropped 800x800, and the email showed it square in the 3:2 spot, Nov
+    // 17, 2026), and it won't send a PNG saved with a transparency channel as a JPEG, even when nothing
+    // in it is see-through (49 of the 51 PNG-only products in stock on Nov 12, 2026 were Mac
+    // screenshots, which all save one). verify.mjs fetches every image as sent and checks its shape.
+    if (src.startsWith(SHOP_FILES)) return `${RESIZE}/width=${w},height=${h},fit=cover,gravity=center,quality=64,format=jpeg,background=white/${src}`;
     return `${src}${src.includes('?') ? '&' : '?'}width=${w}&height=${h}&crop=center&quality=64&format=jpg`;
   }
 
@@ -405,6 +414,17 @@ export class Email {
   }
 
   // ── layout primitives ──
+  /**
+   * A table cell aligned to its row's top, middle or bottom. Kit's template says
+   * `table td { vertical-align:top; }` (scripts/sunny-side/kit-wrapper.mjs), which beats a bare
+   * valign in every inbox that reads its style block: the issue date and "Shop all" sat at the top of
+   * their rows in Gmail (Nov 17, 2026). So the alignment is inline too, which no style block beats,
+   * and valign stays for Outlook. `rest` is the cell's other attributes and `style` its other styles.
+   */
+  static td(valign, rest = '', style = '') {
+    return `<td${rest ? ` ${rest}` : ''} valign="${valign}" style="vertical-align:${valign};${style}">`;
+  }
+
   static T(inner, attrs = 'width="100%"') {
     return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" ${attrs}>${inner}</table>`;
   }
@@ -420,6 +440,7 @@ export class Email {
     // that's too wide is in, and send Staci there, instead of guessing from the page's structure
     const attr = (c ? ` class="${c}"` : '') + (part ? ` data-part="${part}"` : '');
     const phone = { top: top === S5 ? S4 : top, side: side === S4 ? PHONE_SIDE : side, bottom: bottom === S5 ? S4 : bottom };
+    this.lastBg = bg;
     return (
       `<tr><td${attr} bgcolor="${bg}" style="background-color:${bg};color:${CHARCOAL};` +
       `padding:${phone.top}px ${phone.side}px ${phone.bottom}px;">${inner}</td></tr>`
@@ -434,6 +455,20 @@ export class Email {
   /** White space between a photo and a block it doesn't belong to (40px, 32 on phones: 32 inline, phones first). */
   breather() {
     return this.band(Email.gap(S4, 'g40'), { top: 0, side: 0, bottom: 0 });
+  }
+
+  /**
+   * What goes above a section of color `bg`: nothing under a section of another color, a breather under
+   * white (a photo or words) or under its own color. Sections of color meet edge to edge, the way the
+   * charity's own emails stack their bands: a strip of white between the teal events and the
+   * charity's Dark Deep read as a seam, as if a section were missing (Peter, 2026-11-16, "remove the
+   * white gap"), and the reveal still had one on each side (Nov 17). Two of the same color, two events
+   * running, keep the white between them, or they'd read as one.
+   */
+  edge(bg) {
+    // Nothing above it (a section drawn on its own, as the admin's preview does): nothing to keep it from
+    if (!this.lastBg) return '';
+    return this.lastBg !== WHITE && this.lastBg !== bg ? '' : this.breather();
   }
 
   /** A paragraph. `size` and `lh` are a phone's (phones first); a class in the style block gives a computer bigger ones. */
@@ -472,7 +507,7 @@ export class Email {
       Email.label('The Sunny Side', { mb: 2, align: 'right' }) +
       Email.text(`${monthShort(d)} ${d.getUTCDate()}, ${d.getUTCFullYear()}`, { size: 13, lh: 18, align: 'right' });
     return this.band(
-      Email.T(`<tr><td valign="middle">${logo}</td>` + `<td align="right" valign="middle" style="padding-left:${S2}px;">${name}</td></tr>`),
+      Email.T(`<tr>${Email.td('middle')}${logo}</td>` + `${Email.td('middle', 'align="right"', `padding-left:${S2}px;`)}${name}</td></tr>`),
       { top: S2, bottom: S2 },
     );
   }
@@ -495,7 +530,7 @@ export class Email {
       // Under 375px "off" sits over the amount in every column (min-content), so the columns stay even
       const caption = n === 4 ? { size: 13, lh: 18 } : { size: 15, lh: 20 };
       tds +=
-        `<td width="${pct(100 / n)}%" valign="top" style="${rule}${clear}">` +
+        Email.td('top', `width="${pct(100 / n)}%"`, `${rule}${clear}`) +
         Email.text(`${percent}%`, { size, lh: size, weight: 700, cls: `tier${n}`, track: '-0.04em', mb: 4 }) +
         Email.text(`off ${amount(spend, short)}`, { ...caption, weight: 700, cls: cap, css: n >= 3 ? 'width:min-content;' : '' }) +
         '</td>';
@@ -519,7 +554,8 @@ export class Email {
     }
     out += this.button(`${s.cta} &#8594;`, SITE + s.url, 'offer-button', CHARCOAL, WHITE);
     // fine print after the button, so it never pushes the button down
-    if (s.details) out += Email.gap(S2) + Email.text(s.details, { size: 15, lh: 22, cls: 'fine' });
+    // Never a word alone on its last line: "Ends Saturday, Nov" over "21." on a 390px phone (Nov 17, 2026)
+    if (s.details) out += Email.gap(S2) + Email.text(noWidow(s.details), { size: 15, lh: 22, cls: 'fine' });
     return this.band(out, { bg: GOLD, top: S4, part: 'offer' });
   }
 
@@ -536,7 +572,7 @@ export class Email {
       `style="display:block;width:100%;max-width:${cw}px;height:auto;border:0;">` +
       // Inset by the column's side: 20px on a phone, 32 on a computer (.tile-cap)
       `<span class="tile-cap" style="display:block;padding:10px ${S1}px ${S3}px ${PHONE_SIDE}px;">` +
-      `<span class="tile-name" style="display:block;font-family:${SANS};font-size:15px;line-height:20px;font-weight:700;color:${CHARCOAL};">${ph.name}</span>` +
+      `<span class="tile-name" style="display:block;font-family:${SANS};font-size:15px;line-height:20px;font-weight:700;color:${CHARCOAL};">${noWidow(ph.name, 14)}</span>` +
       `<span class="tile-price" style="display:block;font-family:${SANS};font-size:15px;line-height:20px;font-weight:400;color:${CHARCOAL};">${money(ph.price)}</span>` +
       `</span></a>`
     );
@@ -547,8 +583,8 @@ export class Email {
     const shop = SITE + (w.more || '/shop/'); // "Shop all" goes where the brief says the products come from
     const head =
       Email.T(
-        `<tr><td valign="middle">${Email.label(w.label, { mb: 0 })}</td>` +
-          `<td align="right" valign="middle" style="white-space:nowrap;padding-left:${S2}px;">` +
+        `<tr>${Email.td('middle')}${Email.label(w.label, { mb: 0 })}</td>` +
+          Email.td('middle', 'align="right"', `white-space:nowrap;padding-left:${S2}px;`) +
           `${this.link('Shop all &#8594;', shop, 'wall-shop-all')}</td></tr>`,
       ) + Email.h2(w.headline, { mb: 0 });
     let rows = '';
@@ -561,7 +597,7 @@ export class Email {
         // outer tiles touch the edges: tile k pads GUTTER*k/n on the left, the rest on the right.
         const left = (GUTTER * k) / n, right = (GUTTER * (n - 1 - k)) / n;
         tds +=
-          `<td width="${pct(100 / n)}%" valign="top" style="padding:0 ${px(right)} 0 ${px(left)};">` +
+          Email.td('top', `width="${pct(100 / n)}%"`, `padding:0 ${px(right)} 0 ${px(left)};`) +
           this.tile(ph, cw, ch, `wall-${i + k + 1}`) +
           '</td>';
       });
@@ -576,7 +612,7 @@ export class Email {
     if (!s) return '';
     const href = SITE + s.cta[1];
     return (
-      this.band(Email.label(s.label) + Email.h2(s.headline) + Email.text(s.body, { mb: S1 }) + this.link(`${s.cta[0]} &#8594;`, href, 'story-link'), {
+      this.band(Email.label(s.label) + Email.h2(s.headline) + Email.text(noWidow(s.body), { mb: S1 }) + this.link(`${s.cta[0]} &#8594;`, href, 'story-link'), {
         top: S5,
         bottom: S2,
         part: 'story',
@@ -644,7 +680,7 @@ export class Email {
       Email.gap(S1) +
       `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:20px;">${remind}</p>` +
       Email.text('The reveal page turns into the live video the moment we&nbsp;start.', { size: 14, lh: 21, color: WHITE, font: OUTFIT });
-    return this.breather() + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S5, cls: 'soard', part: 'reveal' });
+    return this.edge(SOARD_DEEP) + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S5, cls: 'soard', part: 'reveal' });
   }
 
   /**
@@ -682,7 +718,7 @@ export class Email {
         const [left, right] = pads[k];
         const inner = draw(c, s.kids[k], s.f[k] * w + s.c[k]);
         const padded = left || right ? Email.T(`<tr><td style="padding:0 ${px(right)} 0 ${px(left)};">${inner}</td></tr>`, fixed) : inner;
-        return `<td width="${pct(100 * s.f[k])}%" valign="top">${padded}</td>`;
+        return `${Email.td('top', `width="${pct(100 * s.f[k])}%"`)}${padded}</td>`;
       });
       return Email.T(`<tr>${tds.join('')}</tr>`, fixed);
     };
@@ -801,7 +837,7 @@ export class Email {
   static greg(it) {
     if (!it.greg) return '';
     return (
-      `<td width="52" align="right" valign="middle"><img src="${GREG}" width="44" height="44" ` +
+      `${Email.td('middle', 'width="52" align="right"')}<img src="${GREG}" width="44" height="44" ` +
       `alt="Greg, the store&#8217;s French bulldog" style="display:block;width:44px;height:44px;` +
       `border-radius:22px;border:0;"></td>`
     );
@@ -813,12 +849,13 @@ export class Email {
       const [first, rest, when] = this.upcoming(e);
       if (!first) continue;
       const spot = Email.T(
-        `<tr><td valign="top" bgcolor="${WHITE}" style="background-color:${WHITE};border-radius:${R_CARD}px;padding:${S2}px;">` +
+        `<tr>${Email.td('top', `bgcolor="${WHITE}"`, `background-color:${WHITE};border-radius:${R_CARD}px;padding:${S2}px;`)}` +
           Email.T(
-            `<tr><td valign="middle">` +
+            `<tr>${Email.td('middle')}` +
               Email.label(when, { mb: 6 }) +
-              // 21/26 on a phone, 24/29 on a computer (.spot)
-              Email.text(noWidow(first.what), { size: 21, lh: 26, weight: 700, cls: 'spot' }) +
+              // 21/26 on a phone, 24/29 on a computer (.spot); 4px under it, so a two-line title's
+              // last line doesn't sit on the time under it
+              Email.text(noWidow(first.what), { size: 21, lh: 26, weight: 700, cls: 'spot', mb: 4 }) +
               (first.note ? Email.text(first.note, { size: 15, lh: 21 }) : '') +
               Email.text(`${first.time || e.time} at the showroom`, { size: 15, lh: 21, weight: 700 }) +
               (e.one ? this.addOne(e, first) : '') +
@@ -840,14 +877,15 @@ export class Email {
             Email.text(monthShort(it.d).toUpperCase() + `&nbsp;${it.d.getUTCDate()}`, { size: 15, lh: 22, weight: 700, color: WHITE, track: '0.06em' });
           const ownTime = it.time !== e.time ? it.time : undefined; // the series time is in "when"
           const whatCell =
-            Email.text(it.what, { size: 16, lh: 22, weight: 700, color: WHITE }) + // narrow column: no widow joins
+            // A narrow column (about 16 characters a line on a small phone beside Greg): joined only where the pair fits
+            Email.text(noWidow(it.what, 16), { size: 16, lh: 22, weight: 700, color: WHITE }) +
             (ownTime ? Email.text(ownTime, { size: 14, lh: 20, weight: 700, color: WHITE }) : '') +
-            (it.note ? Email.text(it.note, { size: 14, lh: 20, color: WHITE }) : '');
-          const level = days ? ` style="padding-top:${LABEL_LH + 2}px;"` : ''; // level with the date
+            (it.note ? Email.text(noWidow(it.note, 16), { size: 14, lh: 20, color: WHITE }) : '');
+          const level = days ? `padding-top:${LABEL_LH + 2}px;` : ''; // level with the date
           rows +=
             `<tr><td style="${rule}padding:12px 0;">` +
             Email.T(
-              `<tr><td width="76" valign="top" style="padding-right:${S1}px;">${dateCell}</td>` + `<td valign="top"${level}>${whatCell}</td>${Email.greg(it)}</tr>`,
+              `<tr>${Email.td('top', 'width="76"', `padding-right:${S1}px;`)}${dateCell}</td>` + `${Email.td('top', '', level)}${whatCell}</td>${Email.greg(it)}</tr>`,
             ) +
             '</td></tr>';
         });
@@ -861,7 +899,7 @@ export class Email {
       // Every date, once there's more than the one the card already offers
       const series = e.calendar && (rest.length || !e.one);
       const foot = Email.gap(S2) + (series ? this.calendar(e, [first, ...rest]) : '');
-      out += this.breather() + this.band(head + spot + agenda + foot, { bg: TEAL, bottom: S4, part: 'events' });
+      out += this.edge(TEAL) + this.band(head + spot + agenda + foot, { bg: TEAL, bottom: S4, part: 'events' });
     }
     return out;
   }
@@ -882,7 +920,7 @@ export class Email {
   /** The charity's logo for its Dark Deep tops, linked to its site: 80px on a phone, 96 on a computer (.soard-mark); the width attribute is Outlook's. */
   soardLogo(content) {
     return (
-      `<a href="${escape(this.url(SOARD_HOME, content))}" target="_blank" class="soard-mark" style="display:inline-block;width:80px;color:${WHITE};">` +
+      `<a href="${escape(this.url(SOARD_HOME, content))}" target="_blank" class="soard-mark" style="display:inline-block;vertical-align:top;width:80px;color:${WHITE};">` +
       `<img class="soard-logo soard-mark" src="${SOARD_LOGO_DARK}" width="${SOARD_LOGO_DARK_W}" height="${SOARD_LOGO_DARK_H}" alt="Sunshine on a Ranney Day" ` +
       `style="display:block;width:80px;height:auto;border:0;margin:0 auto;font-family:${OUTFIT};font-size:14px;font-weight:700;color:${WHITE};"></a>`
     );
@@ -908,13 +946,13 @@ export class Email {
       Email.gap(20) +
       // On the column: 536px on a computer, and up to 560 where the style block is gone (20px sides at any width)
       this.img(Email.photo(m.photo.src, 1120, 560), COLUMN, COLUMN / 2, m.photo.alt, m.url, 'mission-photo', 20, '', WIDTH - 2 * PHONE_SIDE) +
-      (m.caption ? Email.gap(10) + Email.text(m.caption, { size: 14, lh: 20, color: SOARD_SOFT, font: OUTFIT, align: 'center' }) : '');
+      (m.caption ? Email.gap(10) + Email.text(noWidow(m.caption), { size: 14, lh: 20, color: SOARD_SOFT, font: OUTFIT, align: 'center' }) : '');
     // The label names the family, as the charity's emails say "Dylan's story"
     const label =
       Email.T(
-        `<tr><td width="28" valign="middle" style="padding-right:12px;">` +
+        `<tr>${Email.td('middle', 'width="28"', 'padding-right:12px;')}` +
           `<div style="width:28px;height:8px;line-height:8px;font-size:8px;background-color:${SOARD_YELLOW};border-radius:2px;">&nbsp;</div></td>` +
-          `<td valign="middle">${Email.label(m.name ? `${m.name}&#8217;s story` : 'Their story', { color: SOARD_DARK, mb: 0, font: OUTFIT, track: '0.16em' })}</td></tr>`,
+          `${Email.td('middle')}${Email.label(m.name ? `${m.name}&#8217;s story` : 'Their story', { color: SOARD_DARK, mb: 0, font: OUTFIT, track: '0.16em' })}</td></tr>`,
       ) + Email.gap(12);
     const link =
       `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:24px;">` +
@@ -923,10 +961,9 @@ export class Email {
       `${m.cta}&nbsp;&#8594;</a></p>`;
     // 16/26 on a phone, 17/29 on a computer (.soard-body)
     const story = label + Email.text(noWidow(m.story), { size: 16, lh: 26, color: SOARD_DARK, font: SERIF, cls: 'soard-body soard-serif', mb: 4 }) + link;
-    // No white strip before it (Peter, 2026-11-16: "remove the white gap"): a 32px band of white
-    // between the teal events and the charity's Dark Deep read as a seam, as if a section were
-    // missing. The charity's own emails stack their bands edge to edge.
+    // Edge to edge under the events or a reveal, white under a photo (edge)
     return (
+      this.edge(SOARD_DEEP) +
       this.band(`<div style="text-align:center;">${top}</div>`, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4, cls: 'soard', part: 'mission' }) +
       this.band(story, { bg: SOARD_CREAM, top: S3 + 4, bottom: S2, cls: 'soard', part: 'mission' }) +
       (m.impact ? this.impact(m.impact) : '')
@@ -977,7 +1014,7 @@ export class Email {
       cells
         .map(
           (c) =>
-            ghost(`<td width="${w}" valign="top" align="center">`) +
+            ghost(Email.td('top', `width="${w}" align="center"`)) +
             `<div class="stat" style="display:inline-block;vertical-align:top;width:100%;max-width:${STAT_PHONE}px;font-size:16px;line-height:24px;">${c}</div>` +
             ghost('</td>'),
         )
@@ -1017,7 +1054,7 @@ export class Email {
       cols
         .map(
           ({ html, width, align = 'left' }) =>
-            ghost(`<td width="${width}" valign="middle" align="${align}">`) +
+            ghost(Email.td('middle', `width="${width}" align="${align}"`)) +
             `<div style="display:inline-block;vertical-align:middle;min-width:${share(width)}%;max-width:100%;width:100%;` +
             `width:calc(${at * at}px - ${at * 100}%);font-size:16px;line-height:24px;text-align:${align};">${html}</div>` +
             ghost('</td>'),
@@ -1144,6 +1181,10 @@ ${computer}
   table { border-collapse:collapse; mso-table-lspace:0; mso-table-rspace:0; }
   img { -ms-interpolation-mode:bicubic; }
   a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !important; }
+  /* Kit's template sets ".email * { word-break: break-word; }" in the same style block as this one
+     (scripts/sunny-side/kit-wrapper.mjs): on a 320px phone the sale's tiers squeezed to a letter a
+     line, "off $5k+" in seven lines (Nov 17, 2026). The email breaks words as it was checked to. */
+  .sunny, .sunny * { word-break:normal !important; }
   @media (min-width:375px) {
 ${tierRules(1)}
     .cap { width:auto !important; }
@@ -1158,7 +1199,7 @@ ${computer}
 </style>
 </head>
 <body style="margin:0;padding:0;background-color:${WHITE};color:${CHARCOAL};">
-<div role="article" aria-roledescription="email" aria-label="${escape(subject)}" lang="en" dir="ltr">
+<div class="sunny" role="article" aria-roledescription="email" aria-label="${escape(subject)}" lang="en" dir="ltr">
 <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${escape(preheader)}${spacer}</div>
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="${WHITE}" style="background-color:${WHITE};">
 <tr><td align="center" style="padding:0;">

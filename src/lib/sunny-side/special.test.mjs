@@ -309,7 +309,7 @@ test('the charity section shows its live numbers, and leaves the strip out witho
   assert.match(html, /bgcolor="#1E1F25"[\s\S]*Where 100% of our profits go[\s\S]*Every purchase builds<\/p>[\s\S]*a&nbsp;<em [^>]*color:#FFDA24;">dream&nbsp;room<\/em>\.<\/h2>/);
   // On the column: 536 wide on a computer (and Outlook's size), up to 560 where the style block is gone
   assert.match(html, /w=1120,h=560,[^"]*" width="536" height="268" alt="A family" style="display:block;width:100%;max-width:560px;/);
-  assert.match(html, />Ages 14 and 12\.<\/p>/);
+  assert.match(html, />Ages 14 and&nbsp;12\.<\/p>/); // never a word alone on the caption's last line
   assert.match(html, /bgcolor="#FEFCF5"[\s\S]*>Remi &amp; Nico&#8217;s story<\/p>[\s\S]*>Story\.<\/p>/);
   assert.match(html, /utm_content=mission-link"[^>]*padding:10px 0;[^>]*>See their reveal&nbsp;&#8594;<\/a>/);
   // Without a name, the label still reads

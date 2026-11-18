@@ -128,21 +128,27 @@ test('the picks become the email’s photo wall, which the email draws', () => {
   assert.equal(preview.photos[1].price, 200);
   const sale = toSale(clean({ kind: 'headline', headline: 'Hello' }));
   const html = render({ ...previewBrief(sale, SEND), wall: preview }, ['masthead', 'hero', 'offer', 'wall']);
-  assert.match(html, /Product 2<\/span>/);
+  // Its last two words kept together, so a name never ends with one word alone on a phone (noWidow)
+  assert.match(html, /Product&nbsp;2<\/span>/);
   assert.match(html, /\$200</);
   assert.match(html, /utm_content=wall-5/);
 });
 
-test('every photo goes out as a JPEG: the store’s PNGs through the site’s image resizing, the rest from Shopify', () => {
+test('every store photo goes out as a JPEG of exactly its spot’s shape, through the site’s image resizing', () => {
+  // Shopify's own resizing skipped the crop of a photo smaller than asked for: the lead product's
+  // 1000px photo came back 800x800 for its 1200x800 spot (Nov 17, 2026). And it wouldn't send a PNG
+  // with a transparency channel as a JPEG. Cloudflare's cover does both, for every store photo.
   const png = 'https://cdn.shopify.com/s/files/1/0930/2117/6092/files/x.png?v=2';
+  const webp = 'https://cdn.shopify.com/s/files/1/0930/2117/6092/files/w.webp?v=3';
   const p = item('png', { photos: [{ url: png, w: 1, h: 1 }] });
-  const webp = item('webp', { photos: [{ url: 'https://cdn.shopify.com/s/files/1/0930/2117/6092/files/w.webp?v=3', w: 1, h: 1 }] });
-  const items = [p, webp, item('c'), item('d')];
+  const w = item('webp', { photos: [{ url: webp, w: 1, h: 1 }] });
+  const items = [p, w, item('c'), item('d')];
   const sale = toSale(clean({ kind: 'headline', headline: 'Hello' }));
   const html = render({ ...previewBrief(sale, SEND), wall: previewWall(cleanWall({ picks: items.map((x) => pickOf(x)) }), catalogOf(...items), SITE) }, ['wall']);
-  assert.ok(html.includes(`src="https://shop.sunnyandranney.com/cdn-cgi/image/width=596,height=596,fit=cover,gravity=center,quality=64,format=jpeg,background=white/${png}"`));
-  assert.match(html, /w\.webp\?v=3&amp;width=596&amp;height=596&amp;crop=center&amp;quality=64&amp;format=jpg"/);
-  assert.match(html, /c\.jpg\?v=1&amp;width=596&amp;height=596&amp;crop=center&amp;quality=64&amp;format=jpg"/);
-  // A PNG from anywhere else can't go through the site's resizing, which accepts only the store's files
+  const resized = (src) => `src="https://shop.sunnyandranney.com/cdn-cgi/image/width=596,height=596,fit=cover,gravity=center,quality=64,format=jpeg,background=white/${src}"`;
+  assert.ok(html.includes(resized(png)));
+  assert.ok(html.includes(resized(webp)));
+  assert.ok(!/crop=center/.test(html), 'no store photo is left to Shopify’s resizing');
+  // A photo from anywhere else can't go through the site's resizing, which accepts only the store's files
   assert.equal(Email.photo('https://example.com/y.png', 10, 10), 'https://example.com/y.png?width=10&height=10&crop=center&quality=64&format=jpg');
 });

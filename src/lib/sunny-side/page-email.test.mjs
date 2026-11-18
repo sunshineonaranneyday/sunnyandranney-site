@@ -226,7 +226,8 @@ test('a test goes through Kit to just the testers, a minute later, never publish
   const sent = await sendTest(kit, { ...msg, tagIds: [11, 12], now: Date.parse('2026-11-16T15:00:00Z') });
   assert.equal(sent.id, 90);
   const made = calls.find((c) => c.key === 'POST /broadcasts').body;
-  assert.equal(made.subject, '[Test] S');
+  // The store's time it goes out, so each test is a thread of its own in Gmail (testTag)
+  assert.equal(made.subject, '[Test 10:01 AM] S');
   assert.equal(made.public, false);
   assert.equal(made.send_at, '2026-11-16T15:01:00.000Z');
   assert.deepEqual(made.subscriber_filter, [{ any: [{ type: 'tag', ids: [11, 12] }] }]);
@@ -385,6 +386,7 @@ test('a scheduled send can be cancelled until it goes; the template, count and u
         { subject: 'A', send_at: '2026-11-10T15:00:00Z', description: 'The Sunny Side for Tue, Nov 10, from the store admin' },
         { subject: 'B', send_at: '2026-11-03T15:00:00Z', description: 'The Sunny Side for Tue, Nov 3, going Wed, Nov 4, from the store admin' },
         { subject: '[Test] C', send_at: '2026-11-02T20:00:00Z', description: 'Test of the Tue, Nov 3 email, from the store admin' },
+        { subject: '[Test 3:32 PM] C', send_at: '2026-11-03T20:32:00Z', description: 'Test of the Tue, Nov 3 email, from the store admin' },
         { subject: 'D', send_at: '2026-10-27T13:30:00Z', description: 'The Sunny Side for Tue, Oct 27, from the store admin' },
         // The charity's emails from the same account, more of them and at their own time, count for nothing
         { subject: 'Reveal day', send_at: '2026-11-16T20:31:00Z', description: null },

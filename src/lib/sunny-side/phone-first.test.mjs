@@ -73,7 +73,7 @@ test('side by side columns stack on a phone with no media query, and never hold 
   // Full width under 536px of room, its own width from there: (536px - 100%) * 536, written without parentheses
   assert.equal((cols.match(/width:100%;width:calc\(287296px - 53600%\)/g) || []).length, 2);
   // Outlook gets the columns as a table
-  assert.match(cols, /<!--\[if mso\]><td width="326" valign="middle" align="left"><!\[endif\]-->/);
+  assert.match(cols, /<!--\[if mso\]><td width="326" align="left" valign="middle" style="vertical-align:middle;"><!\[endif\]-->/);
   // No gap asked for, no spacer
   assert.doesNotMatch(cols, /fab-gap/);
 });
