@@ -106,11 +106,17 @@ test('a reveal before the send day stops the send', () => {
   assert.deepEqual(kitProblems({ ...ok, send: '2026-11-19' }), [{ text: 'Dylan’s reveal was Wed, Nov 18, before this email goes out. Pick another, or no reveal.', section: 'em-reveal' }]);
 });
 
-test('the invite: the charity’s day, time, room and calendar links, the live page, and never an address', () => {
+test('the invite: the charity’s day, time and calendar links, the live page, and never an address', () => {
   const brief = { send_date: '2026-11-17', ...briefParts(cleanParts({ reveal: 'dylan-2026' }), { sale: null, photos: new Map(), reveals }) };
   assert.ok(brief.reveal && !brief.story);
   const html = render(brief, ['story', 'reveal']);
-  for (const words of ['Reveal Day &middot; Wed, Nov 18', 'Dylan&#8217;s <em', 'Wednesday, November 18<br>4:00 PM', 'Therapy Room', 'Email me when it starts']) assert.ok(html.includes(words), words);
+  for (const words of ['Reveal Day &middot; Wed, Nov 18', 'Dylan&#8217;s <em', 'Wed, Nov 18<br>4:00 PM', '>Live online</a>', 'Email me when it starts']) assert.ok(html.includes(words), words);
+  // Tightened (Peter, 2026-11-17): When and Where side by side, a 2:1 photo, the family's words cut to
+  // fit before the calendar links, and no closing note
+  assert.match(html, /<td width="50%" valign="top" [^>]*>[^]*?>When<\/p>[^]*?<td width="50%" valign="top" [^>]*>[^]*?>Where<\/p>/);
+  assert.match(html, /w=1072,h=536,[^"]*" width="536" height="268"/);
+  assert.match(html, />Dylan has MECP2 Duplication Syndrome\. SOARD is building a therapy room so he can learn and&nbsp;grow\.<\/p>/);
+  assert.doesNotMatch(html, /Room<\/p>|turns into the live video/);
   for (const app of ['google', '', 'outlook']) assert.ok(html.includes(`href="${revealCalendar('dylan-2026', app).replace(/&/g, '&amp;')}"`), app || 'apple');
   assert.match(html, /live\/dylan-2026\/\?utm_source=kit[^"]*utm_content=reveal-remind#remind"/);
   assert.doesNotMatch(html.slice(html.indexOf("<body")), /Oak Street|Hembree|Roswell|GA 30\d{3}/);

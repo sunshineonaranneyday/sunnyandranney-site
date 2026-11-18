@@ -91,10 +91,10 @@ test('a gap between side by side columns is there only while they stack, with no
   assert.doesNotMatch(html, /visit-gap/);
 });
 
-test('two of the charity’s numbers fit across the smallest phone, three across a computer', () => {
+test('the charity’s three numbers fit across the smallest phone and a computer', () => {
   const strip = Email.statColumns(['1', '2', '3']);
   const phone = Number(strip.match(/max-width:(\d+)px/)[1]);
-  assert.ok(2 * phone <= 320 - 2 * 20, `two at ${phone}px fit a 320px phone's 280px column`);
+  assert.ok(3 * phone <= 320 - 2 * 20, `three at ${phone}px fit a 320px phone's 280px column`);
   const desktop = Number(style.match(/\.stat \{ max-width:(\d+)px/)[1]);
   assert.ok(3 * desktop <= 536, `three at ${desktop}px fit a computer's 536px column`);
 });

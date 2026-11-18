@@ -59,8 +59,8 @@ const PHONE_SIDE = 20; // the column's sides on a phone (32 on a computer)
 const WIDTH = 600, COLUMN = WIDTH - 2 * S4;
 /** Wider than this, the style block's computer sizes apply (min-width); this wide or narrower, a phone's. */
 const DESKTOP = 621;
-/** Each of the charity's numbers: two fit across the smallest phone's 280px column, three across a computer's 536. */
-const STAT_PHONE = 140, STAT_DESKTOP = 178;
+/** Each of the charity's numbers: three fit across the smallest phone's 280px column, and a computer's 536. */
+const STAT_PHONE = 93, STAT_DESKTOP = 178;
 /** The visit row's button column, beside the address on a computer. */
 const VISIT_BUTTON = 210;
 const R_BTN = 8, R_CARD = 12;
@@ -164,6 +164,34 @@ export function noWidow(t) {
     else if (t[i] === ' ' && !inside) return t.slice(0, i) + '&nbsp;' + t.slice(i + 1);
   }
   return t;
+}
+
+/** How much of a family's summary the email shows, in letters, before "Read more" (the charity's run 180–220). */
+export const LEAD = 140;
+const SENTENCE_END = /(?<!\b(?:Dr|Mr|Mrs|Ms|St|Jr|Sr|Mt|Ft))[.!?](?:&#8221;|&#8217;)?(?=(?:\s|&nbsp;)+(?:[A-Z0-9]|&#8220;|&#8216;))/g;
+/**
+ * The start of a summary the charity wrote (HTML text, as typeset): its whole sentences while they fit
+ * in LEAD letters, and at least the first. A first sentence longer than that (two of the charity's 18,
+ * Nov 17, 2026, are one 205-letter sentence) is cut at a word, with an ellipsis.
+ */
+export function lead(t, max = LEAD) {
+  const s = String(t).trim();
+  const letters = (x) => x.replace(/&#?\w+;/g, '_').length;
+  let out = '';
+  for (const m of s.matchAll(SENTENCE_END)) {
+    const next = s.slice(0, m.index + m[0].length);
+    if (out && letters(next) > max) break;
+    out = next;
+  }
+  // The last sentence has no sentence after it to find it by: the whole summary, when it all fits
+  if (!out || letters(s) <= max) out = s;
+  if (letters(out) <= max) return out;
+  // Too long: up to the last word that fits, without the comma or dash it ended on
+  const bits = out.match(/&#?\w+;|[\s\S]/g);
+  let n = 0;
+  let cut = 0;
+  for (let i = 0; i < bits.length && n < max; i++, n++) if (bits[i] === ' ' || bits[i] === '&nbsp;') cut = i;
+  return bits.slice(0, cut).join('').replace(/(?:[,;:–—-]|&#8212;|&#8211;|&mdash;|&ndash;)+$/, '') + '&#8230;';
 }
 
 /** A CSS pixel length, keeping fractions (the wall's split gutters) and dropping trailing zeros. */
@@ -588,21 +616,32 @@ export class Email {
    * A charity reveal still ahead, its own section under the story: the charity's invite to watch it live, built like its own
    * reveal email ("Join Us Live for Dylan’s Reveal Day!", Nov 16, 2026) in its identity: Dark Deep,
    * its logo over a centered top, a Sunshine Yellow date, the Libre Baskerville line with the key words in yellow italic, the family's
-   * photo, When / Where / Room, and its calendar links, which hold the day, the time and the link to
-   * watch, never the family's address. "Get an email" goes to the reveal page's own sign-up (the
-   * charity emails the day before, an hour before and when it goes live). Rules on Dark Deep are its
-   * muted gray, the only gray in the charity's palette (verify.mjs holds the section to it).
+   * photo, When and Where side by side, the start of the family's story (lead()), and its calendar
+   * links, which hold the day, the time and the link to watch, never the family's address. "Get an
+   * email" goes to the reveal page's own sign-up (the charity emails the day before, an hour before
+   * and when it goes live). Tightened 2026-11-17 (Peter: "tigheting up the section about the reveal"):
+   * 1105px tall on a 390px phone with Dylan before.
    */
   reveal() {
     const r = this.b.reveal;
     if (!r) return '';
-    const row = (what, value, first = false, pb = 13) =>
-      `<tr><td style="padding:12px 0 ${pb}px;${first ? '' : `border-top:1px solid ${SOARD_MUTED};`}">` +
-      Email.label(what, { color: SOARD_YELLOW, mb: 4, font: OUTFIT, track: '0.12em' }) +
-      `<div style="font-family:${OUTFIT};font-size:17px;line-height:24px;font-weight:700;color:${WHITE};">${value}</div></td></tr>`;
-    const live =
-      `<a href="${escape(this.url(r.live, 'reveal-where'))}" target="_blank" style="display:inline-block;padding:10px 0;` +
-      `font-family:${OUTFIT};font-weight:700;color:${WHITE};text-decoration:underline;text-underline-offset:3px;">Live on the charity&#8217;s website</a>`;
+    // When and where side by side, half the column each: the charity's invite stacks When, Where and
+    // Room (Peter, 2026-11-17: tighter; the room is in the family's words). The day leads on its own
+    // line, so the cells' text starts level with the link's, which is padded to the 44px a thumb needs.
+    const value = `font-family:${OUTFIT};font-size:17px;line-height:24px;font-weight:700;color:${WHITE};`;
+    const cell = (what, inner, pad) =>
+      `<td width="50%" valign="top" style="padding:${pad};">${Email.label(what, { color: SOARD_YELLOW, mb: 0, font: OUTFIT, track: '0.12em' })}${inner}</td>`;
+    const details = Email.T(
+      `<tr>${cell('When', `<div style="padding-top:10px;${value}">${r.short}<br>${r.time}</div>`, '0 8px 0 0')}` +
+        cell(
+          'Where',
+          `<div style="${value}"><a href="${escape(this.url(r.live, 'reveal-where'))}" target="_blank" style="display:inline-block;padding:10px 0;${value}` +
+            `text-decoration:underline;text-underline-offset:3px;">Live online</a></div>`,
+          '0 0 0 8px',
+        ) +
+        '</tr>',
+      'width="100%" style="table-layout:fixed;"',
+    );
     // Three yellow pills sharing the column's width, so the row shrinks with a small phone instead of spilling off it.
     // The charity's own calendar links, as they are (no tracking added: the file is the invite).
     const pill = (text, href, pad) =>
@@ -634,17 +673,18 @@ export class Email {
       `<div style="text-align:center;">${top}</div>` +
       Email.gap(S3) +
       // On the column, rounded like the charity's: 536 on a computer, up to 560 where the style block is gone
-      this.img(Email.photo(r.photo.src, 1072, 716), COLUMN, 358, r.photo.alt, r.live, 'reveal-photo', 16, '', WIDTH - 2 * PHONE_SIDE) +
+      // 2:1, as the charity section's photo (Peter, 2026-11-17: tighter; it was 3:2)
+      this.img(Email.photo(r.photo.src, 1072, 536), COLUMN, COLUMN / 2, r.photo.alt, r.live, 'reveal-photo', 16, '', WIDTH - 2 * PHONE_SIDE) +
       Email.gap(S2) +
-      Email.T(row('When', `${r.long}<br>${r.time}`, true) + row('Where', live, false, 3) + row('Room', r.room)) +
+      details +
       Email.gap(S2) +
-      Email.text(noWidow(r.story), { size: 16, lh: 25, color: WHITE, mb: S3, font: OUTFIT }) +
+      Email.text(noWidow(lead(r.story)), { size: 16, lh: 24, color: WHITE, mb: S3, font: OUTFIT }) +
       Email.text('Save it to your calendar', { size: 15, lh: 20, weight: 700, color: WHITE, mb: 12, font: OUTFIT }) +
       pills +
       Email.gap(S1) +
-      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:20px;">${remind}</p>` +
-      Email.text('The reveal page turns into the live video the moment we&nbsp;start.', { size: 14, lh: 21, color: WHITE, font: OUTFIT });
-    return this.breather() + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S5, cls: 'soard', part: 'reveal' });
+      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:20px;">${remind}</p>`;
+    // As much under the link as over the logo; the link's own padding makes up the rest
+    return this.breather() + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3, cls: 'soard', part: 'reveal' });
   }
 
   /**
@@ -866,19 +906,6 @@ export class Email {
     return out;
   }
 
-  /**
-   * The charity's section, laid out the way the charity's own emails are (Peter, 2026-11-16: "make it
-   * top tier ... to match that from my sunshine emails"; its reveal invite, measured in Gmail that day):
-   *   - a Dark Deep top, centered: its logo, "Where 100% of our profits go" in Sunshine Yellow, an
-   *     italic line in soft white ("Every purchase builds"), the headline in white with its key words
-   *     in yellow italic ("a *dream room*."), and the finished room, rounded, with its caption;
-   *   - a cream story, led by the yellow dash and the family's name ("Remi & Nico's story"), the
-   *     charity's own summary in Libre Baskerville, and a link to their page;
-   *   - then its impact strip (impact()), so the section runs dark, light, dark, as its emails do.
-   * Phones first: every size inline is a phone's; the computer's come from the style block. The
-   * `soard` class lets verify.mjs hold the section to the charity's palette and the rest of the email
-   * to the store's.
-   */
   /** The charity's logo for its Dark Deep tops, linked to its site: 80px on a phone, 96 on a computer (.soard-mark); the width attribute is Outlook's. */
   soardLogo(content) {
     return (
@@ -888,57 +915,59 @@ export class Email {
     );
   }
 
+  /**
+   * The charity's section, one Dark Deep band (Peter, 2026-11-17: "the story is too long, would like to
+   * have a read more about them type thing and blend in the numbers with the section. overall id like
+   * to shorten this section", headed "see where your money goes"). It was three bands (a dark top, a
+   * cream story and a numbers strip), 903px tall on a 390px phone with Remi & Nico (Nov 17, 2026).
+   *   - centered, as the charity's own emails open: its logo, "100% of our profits" in Sunshine Yellow,
+   *     and "See where your *money goes*." in Libre Baskerville with the key words in yellow italic;
+   *   - the family's photo, the one picked, rounded on the column;
+   *   - the charity's caption and the start of its summary (lead()), then "Read more about <name>" to
+   *     their page on its site;
+   *   - under a muted rule, its numbers three across (impact()), in the same band.
+   * Phones first: every size inline is a phone's; the computer's come from the style block. The
+   * `soard` class lets verify.mjs hold the section to the charity's palette and the rest of the email
+   * to the store's.
+   */
   mission() {
     const m = this.b.mission;
-    const logo = this.soardLogo('charity-logo');
-    // 20/26 on a phone, 24/31 on a computer (.soard-lead)
-    const lead = Email.text('Every purchase builds', { size: 20, lh: 26, color: SOARD_SOFT, font: SERIF, cls: 'soard-lead soard-serif', align: 'center', mb: 2, css: 'font-style:italic;' });
     // 32/36 on a phone, 38/42 on a computer (.soard-h)
     const headline =
       `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:32px;line-height:36px;font-weight:700;` +
-      `letter-spacing:-0.01em;color:${WHITE};text-align:center;mso-line-height-rule:exactly;">a&nbsp;` +
-      `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_YELLOW};">dream&nbsp;room</em>.</h2>`;
-    // Spaced to keep the section near the compact one it replaced (831px on a 390px phone)
+      `letter-spacing:-0.01em;color:${WHITE};text-align:center;mso-line-height-rule:exactly;">See where your ` +
+      `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_YELLOW};">money&nbsp;goes</em>.</h2>`;
     const top =
-      logo +
+      this.soardLogo('charity-logo') +
       Email.gap(S2) +
-      Email.label('Where 100% of our profits go', { color: SOARD_YELLOW, font: OUTFIT, track: '0.18em', align: 'center', mb: 12 }) +
-      lead +
-      headline +
+      Email.label('100% of our profits', { color: SOARD_YELLOW, font: OUTFIT, track: '0.18em', align: 'center', mb: S1 }) +
+      headline;
+    // The caption leads, in white, as the admin shows the family's words
+    const words = (m.caption ? `<strong style="font-weight:700;color:${WHITE};">${m.caption}</strong> ` : '') + noWidow(lead(m.story));
+    const link =
+      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:24px;">` +
+      // A text link, padded to the 44px a thumb needs
+      `<a href="${escape(this.url(m.url, 'mission-link'))}" target="_blank" style="display:inline-block;padding:10px 0;font-family:${OUTFIT};font-weight:700;` +
+      `color:${SOARD_YELLOW};text-decoration:underline;text-underline-offset:3px;">Read more about ${m.name || 'them'}&nbsp;&#8594;</a></p>`;
+    const body =
+      `<div style="text-align:center;">${top}</div>` +
       Email.gap(20) +
       // On the column: 536px on a computer, and up to 560 where the style block is gone (20px sides at any width)
       this.img(Email.photo(m.photo.src, 1120, 560), COLUMN, COLUMN / 2, m.photo.alt, m.url, 'mission-photo', 20, '', WIDTH - 2 * PHONE_SIDE) +
-      (m.caption ? Email.gap(10) + Email.text(m.caption, { size: 14, lh: 20, color: SOARD_SOFT, font: OUTFIT, align: 'center' }) : '');
-    // The label names the family, as the charity's emails say "Dylan's story"
-    const label =
-      Email.T(
-        `<tr><td width="28" valign="middle" style="padding-right:12px;">` +
-          `<div style="width:28px;height:8px;line-height:8px;font-size:8px;background-color:${SOARD_YELLOW};border-radius:2px;">&nbsp;</div></td>` +
-          `<td valign="middle">${Email.label(m.name ? `${m.name}&#8217;s story` : 'Their story', { color: SOARD_DARK, mb: 0, font: OUTFIT, track: '0.16em' })}</td></tr>`,
-      ) + Email.gap(12);
-    const link =
-      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:24px;">` +
-      // A text link, padded to the 44px a thumb needs; the band's bottom is short by that padding
-      `<a href="${escape(this.url(m.url, 'mission-link'))}" target="_blank" style="display:inline-block;padding:10px 0;font-family:${OUTFIT};font-weight:700;color:${SOARD_DARK};text-decoration:underline;text-underline-offset:3px;">` +
-      `${m.cta}&nbsp;&#8594;</a></p>`;
-    // 16/26 on a phone, 17/29 on a computer (.soard-body)
-    const story = label + Email.text(noWidow(m.story), { size: 16, lh: 26, color: SOARD_DARK, font: SERIF, cls: 'soard-body soard-serif', mb: 4 }) + link;
-    // No white strip before it (Peter, 2026-11-16: "remove the white gap"): a 32px band of white
-    // between the teal events and the charity's Dark Deep read as a seam, as if a section were
-    // missing. The charity's own emails stack their bands edge to edge.
-    return (
-      this.band(`<div style="text-align:center;">${top}</div>`, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4, cls: 'soard', part: 'mission' }) +
-      this.band(story, { bg: SOARD_CREAM, top: S3 + 4, bottom: S2, cls: 'soard', part: 'mission' }) +
-      (m.impact ? this.impact(m.impact) : '')
-    );
+      Email.gap(S2) +
+      Email.text(words, { size: 16, lh: 24, color: SOARD_SOFT, font: OUTFIT }) +
+      link +
+      (m.impact ? this.impact(m.impact) : '');
+    // No white strip before it (Peter, 2026-11-16: "remove the white gap"): the charity's own emails
+    // stack their bands edge to edge.
+    return this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4, cls: 'soard', part: 'mission' });
   }
 
   /**
-   * The charity's impact strip: its own numbers, as its site shows them, Sunshine Yellow on Dark Deep,
-   * centered. Three across on a computer; on a phone two across and the third centered under them,
-   * as sunshineonaranneyday.com lays them out at 390px (checked Nov 16, 2026). Each number is a block
-   * of its own that wraps by its width (statColumns), so no number or label is ever squeezed into a
-   * third of a phone: three equal cells left "Room makeovers" 2px short at 320px (Nov 16, 2026).
+   * The charity's numbers, as its site shows them, Sunshine Yellow on Dark Deep, centered, under a
+   * muted rule at the foot of its section: three across at any width from 320px up. Each is a block of
+   * its own (statColumns), at most a third of the smallest phone's 280px column; a label too long for
+   * one line breaks between its words ("Room / makeovers"), never inside one.
    */
   impact(n) {
     const stats = [
@@ -948,12 +977,11 @@ export class Email {
     ];
     const cells = stats.map(
       ([num, what]) =>
-        // 28/32 under 375px, 32/36 on a phone, 40/44 on a computer (.soard-stat)
-        Email.text(num, { size: 28, lh: 32, weight: 700, color: SOARD_YELLOW, font: NUMERALS, cls: 'soard-stat soard-serif', track: '-0.02em', mb: 4, align: 'center' }) +
-        Email.label(what, { color: WHITE, mb: S2, font: OUTFIT, track: '0.08em', align: 'center' }),
+        // 24/28 on a phone, 32/36 on a computer (.soard-stat)
+        Email.text(num, { size: 24, lh: 28, weight: 700, color: SOARD_YELLOW, font: NUMERALS, cls: 'soard-stat soard-serif', track: '-0.02em', mb: 4, align: 'center' }) +
+        Email.label(what, { color: WHITE, mb: 0, font: OUTFIT, track: '0.06em', align: 'center' }),
     );
-    // Each number keeps 16px under it, for when they wrap; the band is that much shorter at the bottom
-    return this.band(Email.statColumns(cells), { bg: SOARD_DEEP, top: S4, bottom: S4 - S2, cls: 'soard', part: 'mission' });
+    return Email.gap(12) + Email.T(`<tr><td style="padding-top:${S3}px;border-top:1px solid ${SOARD_MUTED};">${Email.statColumns(cells)}</td></tr>`);
   }
 
   /** Markup only Outlook for Windows reads: the table it lays side by side columns out with (the "ghost table"). */
@@ -1120,7 +1148,7 @@ export class Email {
       '    .soard-body { font-size:17px !important; line-height:29px !important; }',
       '    .soard-mark { width:96px !important; }',
       `    .tile-cap { padding-left:${S4}px !important; padding-right:12px !important; }`,
-      '    .soard-stat { font-size:40px !important; line-height:44px !important; }',
+      '    .soard-stat { font-size:32px !important; line-height:36px !important; }',
     ].join('\n');
     return `<!DOCTYPE html>
 <html lang="en" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -1147,7 +1175,6 @@ ${computer}
   @media (min-width:375px) {
 ${tierRules(1)}
     .cap { width:auto !important; }
-    .soard-stat { font-size:32px !important; line-height:36px !important; }
   }
   @media (min-width:${DESKTOP}px) {
 ${computer}
