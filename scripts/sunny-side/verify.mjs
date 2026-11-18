@@ -286,8 +286,67 @@ for (const f of files) {
         ...tagged('[bgcolor="#2B7A96"]', 'events'), ...tagged('td.soard:not([data-part="reveal"])', 'mission'),
         ...tagged('a[href*="utm_content=reveal-"]', 'reveal'),
       ])];
+      // Even space (Peter, Nov 18, 2026: "so all the spacing is top tier", "check it all"). In a band or a card
+      // of its own color, as much space you can see over its first thing as under its last, 6px either way;
+      // and between a band of color and the words or photos on white beside it, the white every section
+      // has, 32px on a phone and 40 on a computer. Text counts by its glyphs, so the padding that gives a
+      // link the 44px a thumb needs, which nobody sees, doesn't: "Shop the floor" sat 45px under the sale
+      // where every label sits 32 under its band's edge, the events ended 45px under their last link with
+      // 32 over their first word, and the white over the reveal was 58px.
+      const uneven = [];
+      const bgOf = (el) => getComputedStyle(el).backgroundColor;
+      const clear = (c) => c === 'rgba(0, 0, 0, 0)' || c === 'transparent';
+      const sitsOn = (el) => { for (let a = el.parentElement; a; a = a.parentElement) if (!clear(bgOf(a))) return bgOf(a); return 'rgb(255, 255, 255)'; };
+      const ownColor = (el) => !clear(bgOf(el)) && bgOf(el) !== sitsOn(el);
+      const seen = (el) => {
+        let top = Infinity, bottom = -Infinity;
+        const add = (t, b) => { if (b > t) { top = Math.min(top, t); bottom = Math.max(bottom, b); } };
+        const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        while (walk.nextNode()) {
+          const n = walk.currentNode;
+          if (!n.textContent.trim() || !n.parentElement.getClientRects().length) continue;
+          const r = document.createRange();
+          r.selectNodeContents(n);
+          for (const q of r.getClientRects()) if (q.width > 0) add(q.top, q.bottom);
+        }
+        for (const i of el.querySelectorAll('img')) { const q = i.getBoundingClientRect(); if (q.width > 0) add(q.top, q.bottom); }
+        for (const x of el.querySelectorAll('*')) {
+          const q = x.getBoundingClientRect();
+          if (!q.width) continue;
+          if (ownColor(x)) add(q.top, q.bottom); // a card, a button: its whole box shows
+          else { const bw = parseFloat(getComputedStyle(x).borderTopWidth); if (bw > 0) add(q.top, q.top + bw); } // a rule: only the line shows
+        }
+        return top === Infinity ? null : { top, bottom };
+      };
+      const named = (el) => `${el.closest('[data-part]')?.getAttribute('data-part') || 'band'} "${el.textContent.trim().replace(/\s+/g, ' ').slice(0, 18)}"`;
+      for (const el of document.querySelectorAll('td, a, div')) {
+        const q = el.getBoundingClientRect();
+        if (q.height < 40 || q.width < 40 || !ownColor(el)) continue;
+        const v = seen(el);
+        if (!v) continue;
+        const over = Math.round(v.top - q.top), under = Math.round(q.bottom - v.bottom);
+        if (over > 1 && under > 1 && Math.abs(over - under) > 6) uneven.push(`${named(el)}: ${over}px over its first thing, ${under} under its last`);
+      }
+      const want = innerWidth <= 620 || bare ? 32 : 40;
+      const bands = [...document.querySelector('table[style*="max-width:600px"]').tBodies[0].rows].filter((r) => r.getBoundingClientRect().height > 0);
+      bands.forEach((row, i) => {
+        const band = row.cells[0];
+        if (!band || !ownColor(band)) return;
+        const q = band.getBoundingClientRect();
+        for (const dir of [-1, 1]) {
+          for (let k = i + dir; k >= 0 && k < bands.length; k += dir) {
+            if (bands[k].cells[0] && ownColor(bands[k].cells[0])) break; // bands of color meet edge to edge
+            const v = seen(bands[k]);
+            if (!v) continue; // white space only
+            const gap = Math.round(dir < 0 ? q.top - v.bottom : v.top - q.bottom);
+            // 0: a photo meeting the band, edge to edge, as the top photo meets the sale
+            if (gap > 1 && Math.abs(gap - want) > 6) uneven.push(`${named(band)}: ${gap}px of white ${dir < 0 ? 'over' : 'under'} it, where every section has ${want}`);
+            break;
+          }
+        }
+      });
       return {
-        unlabeled, longNames, untagged, widows,
+        unlabeled, longNames, untagged, widows, uneven,
         spill, codes,
         misaligned: drift,
         h: document.documentElement.scrollHeight, overflow: document.documentElement.scrollWidth > innerWidth, off,
@@ -319,6 +378,7 @@ for (const f of files) {
       m.unlabeled && `${m.unlabeled} products without a name and price`,
       m.longNames.length && 'product names over two lines ' + m.longNames.join(' '),
       m.widows.length && 'a word alone on its last line ' + m.widows.join(' '),
+      m.uneven.length && 'uneven space: ' + m.uneven.join('; '),
       r.w < 600 && m.offerY > FIRST_SCREEN && `sale button below the first screen (${m.offerY}px)`,
       m.offerY === null && 'no sale button',
       m.beside && 'fine print beside the sale button, not under it'].filter(Boolean);
