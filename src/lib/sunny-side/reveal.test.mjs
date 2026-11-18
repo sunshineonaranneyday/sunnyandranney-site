@@ -59,7 +59,7 @@ test('the reveal is its own part: nothing to write for it, and a gone reveal say
   assert.deepEqual(checkParts(cleanParts({ reveal: 'zed' }), {}), {});
 });
 
-test('a week saved while the reveal took the story’s place keeps both: the reveal, and the story with its photos', () => {
+test('a week saved with a story keeps the reveal and the photos, and never sends the story’s words', () => {
   // The Nov 17 week as saved: the story written, five photos, and Dylan's reveal inside the story
   const saved = { subject: 'Hi', story: { headline: 'Christmas is here.', body: 'The trees are up.', photos: ['aaaaaaaaaaaa1', 'aaaaaaaaaaaa2'], reveal: 'dylan-2026', layout: '' } };
   const p = cleanParts(saved);
@@ -69,13 +69,15 @@ test('a week saved while the reveal took the story’s place keeps both: the rev
   assert.equal(cleanParts({ ...saved, reveal: '' }).reveal, '');
   const photos = new Map(p.story.photos.map((id) => [id, { id, w: 1800, h: 2400, alt: 'The tree', focus: '' }]));
   const brief = { send_date: '2026-11-17', ...briefParts(p, { sale: null, photos, reveals }) };
-  assert.equal(brief.story.headline, 'Christmas is here.');
+  // Peter, 2026-11-17: "i want the "story" fuckong gone": its words never reach the email, its photos do
+  assert.equal(brief.story.headline, undefined);
   assert.equal(brief.story.photos.length, 2);
   assert.equal(brief.reveal.name, 'Dylan');
   const html = render(brief, SECTIONS.filter((s) => s === 'story' || s === 'reveal'));
-  // The invite right after the products (Peter, 2026-11-17: "put the reveal after the prodcuts"), then the story and its collage, each tagged with its own part
+  // The invite right after the products (Peter, 2026-11-17: "put the reveal after the prodcuts"), then the photos, each tagged with its own part
   assert.equal(SECTIONS.indexOf('reveal'), SECTIONS.indexOf('wall') + 1);
   assert.ok(html.indexOf('data-part="reveal"') < html.indexOf('data-part="story"'));
+  assert.doesNotMatch(html, /Christmas is|The trees are up/);
   assert.match(html, /utm_content=story-photo-2/);
   assert.match(html, /data-part="reveal"/);
 });
@@ -92,13 +94,10 @@ test('the reveal opens with the charity’s logo, centered over the date and hea
   assert.match(html, /<h2 class="soard-h soard-serif" [^>]*text-align:center;/);
 });
 
-test('a week can go with the reveal and no story, but a story started needs its words', () => {
+test('nothing asks for a story: a week goes with or without a reveal or photos', () => {
   assert.deepEqual(checkParts(cleanParts({ subject: 'Hi', reveal: 'dylan-2026' }), { reveals, ready: true }), {});
-  // Photos picked but nothing written: "Your headline" would go out
-  const started = checkParts(cleanParts({ subject: 'Hi', reveal: 'dylan-2026', story: { photos: ['aaaaaaaaaaaa1'] } }), { reveals, ready: true });
-  assert.ok(started['story.headline'] && started['story.body']);
-  // No reveal: the story is the email's own words, so it's needed
-  assert.ok(checkParts(cleanParts({ subject: 'Hi' }), { ready: true })['story.headline']);
+  assert.deepEqual(checkParts(cleanParts({ subject: 'Hi', reveal: 'dylan-2026', story: { photos: ['aaaaaaaaaaaa1'] } }), { reveals, ready: true }), {});
+  assert.deepEqual(checkParts(cleanParts({ subject: 'Hi' }), { ready: true }), {});
 });
 
 test('a reveal before the send day stops the send', () => {

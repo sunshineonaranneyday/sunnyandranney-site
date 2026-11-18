@@ -481,7 +481,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
         <input type="file" accept="image/*" multiple disabled={Boolean(uploading)} onChange={(e) => void upload((e.target as HTMLInputElement).files).then(() => ((e.target as HTMLInputElement).value = ''))} />
         <span class="btn btn-dark">{uploading ? `Uploading ${uploading.done + 1 > uploading.of ? uploading.of : uploading.done + 1} of ${uploading.of}…` : 'Add photos'}</span>
         <span class="em-dropzone-or">or drag them here</span>
-        <span class="em-dropzone-hint">For the top photo and the story’s collage. Photos from a phone are made smaller before they go up.</span>
+        <span class="em-dropzone-hint">For the top photo and the collage. Photos from a phone are made smaller before they go up.</span>
       </label>
       {problem && (
         <p class="em-error" role="alert">
@@ -491,7 +491,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
       <FieldError id="em-photos-error" message={error} />
 
       <fieldset class={`em-collage is-${stage}${fromLibrary ? ' is-taking' : ''}`} ref={panel}>
-        <legend>The story’s collage{shownLayout ? ` · ${shownLayout.name}` : ''}</legend>
+        <legend>The collage{shownLayout ? ` · ${shownLayout.name}` : ''}</legend>
         {/* The collage's one status line: what to do, what a held photo will do, or the last change and its Undo.
             At the top of the collage, where the page's floating buttons on a phone can't cover it. */}
         {(n > 0 || stage !== 'rest' || undo) && (
@@ -623,10 +623,10 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
             {fromLibrary ? (
               <span>{n > story.length ? 'Let go to add it here.' : 'Drop it here to add it at the end.'}</span>
             ) : n ? (
-              <span>Room for {room} more. Drag one up from the library, or tick “In the story”.</span>
+              <span>Room for {room} more. Drag one up from the library, or tick “In the collage”.</span>
             ) : (
               <span>
-                <strong>No photos in the story yet.</strong> Drag photos up from the library, or tick “In the story” on up to {COLLAGE_MAX}.
+                <strong>No photos in the collage yet.</strong> Drag photos up from the library, or tick “In the collage” on up to {COLLAGE_MAX}.
               </span>
             )}
           </div>
@@ -679,7 +679,7 @@ export function Photos({ photos, setPhotos, parts, setParts, error, local }: Pro
             </label>
             <label class="em-chip">
               <input type="checkbox" class="visually-hidden" checked={story.includes(p.id)} onChange={() => toggleStory(p.id)} />
-              <span>In the story</span>
+              <span>In the collage</span>
             </label>
           </li>
         ))}
@@ -811,7 +811,7 @@ function PhotoDetails({ photo, local, alt, setAlt, saveAlt, hero, setHero, inSto
             </label>
             <label class="em-chip">
               <input type="checkbox" class="visually-hidden" checked={inStory} onChange={toggleStory} />
-              <span>In the story</span>
+              <span>In the collage</span>
             </label>
           </div>
           <button type="button" class="btn em-photo-sheet-focus" onClick={showFocus}>

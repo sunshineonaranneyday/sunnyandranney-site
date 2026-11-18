@@ -635,17 +635,18 @@ export class Email {
     return this.band(head, { top: S5, bottom: S2, part: 'wall' }) + this.band(Email.T(rows), { top: 0, side: 0, bottom: 0, part: 'wall' });
   }
 
+  /**
+   * The week's photos, edge to edge, after the reveal (Peter, 2026-11-17: "subject, sale, products,
+   * reveal, photos, events, charity, send"). There are no words over them: the story's are gone ("i
+   * want the "story" fuckong gone"), and a brief that still has some (a week saved before then, an
+   * old stress test) shows only its photos. They link to the store's page the week names (/visit/).
+   */
   story() {
     const s = this.b.story;
     if (!s) return '';
-    const href = SITE + s.cta[1];
-    return (
-      this.band(Email.label(s.label) + Email.h2(s.headline) + Email.text(noWidow(s.body), { mb: S1 }) + this.link(`${s.cta[0]} &#8594;`, href, 'story-link'), {
-        top: S5,
-        bottom: S2,
-        part: 'story',
-      }) + (s.photos?.length ? this.collage(s.photos, href, s.layout) : s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo', 'story') : '')
-    );
+    const href = SITE + (s.link || (Array.isArray(s.cta) ? s.cta[1] : '') || '/visit/');
+    if (s.photos?.length) return this.collage(s.photos, href, s.layout);
+    return s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo', 'story') : '';
   }
 
   /**
