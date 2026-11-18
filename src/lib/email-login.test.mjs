@@ -40,6 +40,8 @@ const EMAIL_ROUTES = [
   '/admin/email/',
   '/admin/email/sent/',
   '/admin/email/sent/x/',
+  // "Don't send it again": whoever can schedule the email can turn off its going again (again.mjs)
+  '/api/admin/email/again/',
   '/api/admin/email/event/',
   // The preview's report of a problem in the email's own layout, which only the owner is shown (and may clear)
   '/api/admin/email/layout/',

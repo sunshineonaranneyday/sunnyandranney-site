@@ -1,8 +1,10 @@
 /** @jsxImportSource preact */
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { againDays, againLine, againTimes, usualAgainDay, usualAgainSubject, usualAgainTime } from '@/lib/sunny-side/again.mjs';
+import { PART_LIMITS } from '@/lib/sunny-side/parts.mjs';
 import { sendLabel } from '@/lib/sunny-side/special.mjs';
 import { checkPerson, cleanPerson, namesOf } from '@/lib/sunny-side/testers.mjs';
-import { type KitSend, type TestPerson, type TestSent, at, send as call, toast, who } from './model';
+import { type AgainView, type KitSend, type TestPerson, type TestSent, at, send as call, toast, who } from './model';
 import { FieldError } from './parts';
 import { X } from './Sale';
 
@@ -81,6 +83,9 @@ interface Props {
   subscribers: number | null;
   subject: string;
   preheader: string;
+  /** The sale's last day and when a reveal the email invites people to starts, if any: it can't go again after either. */
+  saleEnds: string | null;
+  revealStart: string | null;
 }
 
 /**
@@ -164,6 +169,32 @@ export function Send(props: Props) {
   const [confirmCancel, setConfirmCancel] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
 
+  // Going again, a few days later, to the people who don't open it (again.mjs). On unless turned off.
+  const againAt = { day, time, revealStart: props.revealStart };
+  const againIn = againDays({ send, ...againAt, saleEnds: props.saleEnds });
+  const [againWanted, setAgainWanted] = useState(true);
+  const againOn = againWanted && againIn.length > 0;
+  const [pickedAgainDay, setAgainDay] = useState<string | null>(null);
+  const againDay = pickedAgainDay && againIn.includes(pickedAgainDay) ? pickedAgainDay : usualAgainDay(againIn);
+  const againOk = againDay ? againTimes(againDay, againAt) : [];
+  const againTimeList = TIMES.filter((t) => againOk.includes(t.value));
+  const [pickedAgainTime, setAgainTime] = useState<string | null>(null);
+  const againTime = pickedAgainTime && againOk.includes(pickedAgainTime) ? pickedAgainTime : againDay ? usualAgainTime(againDay, againAt) : time;
+  // Follows the subject line until it's typed in
+  const [typedAgainSubject, setAgainSubject] = useState<string | null>(null);
+  const againSubject = typedAgainSubject ?? usualAgainSubject(props.subject);
+  const [againError, setAgainError] = useState<{ field: 'again.day' | 'again.subject'; message: string } | null>(null);
+  const againSubjectInput = useRef<HTMLInputElement>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
+  /** What's wrong with the subject line it goes again with that the page can see without asking; the server checks the rest. */
+  const againSubjectProblem = () => {
+    const v = againSubject.replace(/\s+/g, ' ').trim();
+    if (!v) return 'Write the subject line it goes again with.';
+    if (v.length > PART_LIMITS.subject) return `This subject line is ${v.length} characters; keep it to ${PART_LIMITS.subject}.`;
+    if (v.toLowerCase() === props.subject.trim().toLowerCase()) return 'Use a new subject line: a new one gets more of them to open it.';
+    return '';
+  };
+
   useEffect(() => {
     const last = remembered()?.filter((e) => props.people.some((p) => p.email === e));
     if (last?.length) setChosen(new Set(last));
@@ -198,18 +229,47 @@ export function Send(props: Props) {
   async function openSchedule() {
     if (busy || saving || !ready) return;
     setProblem(null);
+    const wrong = againOn ? againSubjectProblem() : '';
+    if (wrong) {
+      setAgainError({ field: 'again.subject', message: wrong });
+      againSubjectInput.current?.focus();
+      return;
+    }
+    setAgainError(null);
     if (dirty && !(await saveFirst())) return;
     dialog.current?.showModal();
   }
 
   async function schedule() {
     setBusy('schedule');
-    const res = await call<{ kit: KitSend }>('/api/admin/email/send/', 'PUT', { send, day, time });
+    const again = againOn && againDay ? { day: againDay, time: againTime, subject: againSubject } : null;
+    const res = await call<{ kit: KitSend }>('/api/admin/email/send/', 'PUT', { send, day, time, again });
     setBusy(null);
     dialog.current?.close();
-    if (!res.ok) return setProblem(res.error);
+    if (!res.ok) {
+      // A problem with going again shows by its field
+      const field = (res.body as { field?: string } | undefined)?.field;
+      if (field === 'again.day' || field === 'again.subject') {
+        setAgainError({ field, message: res.error });
+        if (field === 'again.subject') againSubjectInput.current?.focus();
+        else document.getElementById('em-again-day')?.scrollIntoView({ block: 'center' });
+        return;
+      }
+      return setProblem(res.error);
+    }
     setKitSend(res.body.kit);
     toast(`Scheduled for ${when.format(new Date(res.body.kit.sendAt))}`);
+  }
+
+  /** "Don't send it again": it still goes once, as scheduled. */
+  async function stopAgain() {
+    setBusy('cancel');
+    const res = await call<{ again: AgainView | null }>('/api/admin/email/again/', 'DELETE', { send });
+    setBusy(null);
+    setConfirmStop(false);
+    if (!res.ok) return setProblem(res.error);
+    if (kitSend) setKitSend({ ...kitSend, again: res.body.again });
+    toast('It won’t go again.');
   }
 
   async function cancelSend() {
@@ -467,6 +527,31 @@ export function Send(props: Props) {
                     </button>
                   ))}
               </div>
+              {kitSend.again && (
+                <div class="em-again-set" key={kitSend.again.state}>
+                  <p>{againLine(kitSend.again, (iso) => when.format(new Date(iso)))}</p>
+                  {(kitSend.again.state === 'waiting' || kitSend.again.state === 'scheduled') && (
+                    <>
+                      <p class="em-hint">With the subject line “{kitSend.again.subject}”.</p>
+                      {confirmStop ? (
+                        <span class="em-confirm" role="group" aria-label="Don’t send it again">
+                          It still goes once, as scheduled.
+                          <button type="button" class="btn btn-small" onClick={() => setConfirmStop(false)}>
+                            Keep it
+                          </button>
+                          <button type="button" class="btn btn-small btn-danger" onClick={() => void stopAgain()} disabled={busy === 'cancel'}>
+                            {busy === 'cancel' ? 'Turning it off…' : 'Don’t send it again'}
+                          </button>
+                        </span>
+                      ) : (
+                        <button type="button" class="btn btn-small" onClick={() => setConfirmStop(true)}>
+                          Don’t send it again
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -521,6 +606,92 @@ export function Send(props: Props) {
                   )}
                 </fieldset>
                 <p class="em-hint">To {count(subscribers)}.</p>
+                <div class={`em-again${againOn ? ' is-on' : ''}`}>
+                  <label class="em-again-switch">
+                    <input
+                      type="checkbox"
+                      checked={againOn}
+                      disabled={!againIn.length}
+                      onChange={(e) => {
+                        setAgainWanted((e.target as HTMLInputElement).checked);
+                        setAgainError(null);
+                      }}
+                      aria-describedby="em-again-who"
+                    />
+                    <span>
+                      <strong>Send it again to people who don’t open it</strong>
+                      <small id="em-again-who">
+                        {againIn.length
+                          ? 'A few days later, under a new subject line, to those who’ve opened one of the store’s emails in the last 60 days. No one gets more than one of these a month.'
+                          : props.revealStart
+                            ? 'Not this time: it goes again at least two days after, in the same week, while the sale is on, and before the reveal it invites people to.'
+                            : 'Not this time: it goes again at least two days after, in the same week, while the sale is on.'}
+                      </small>
+                    </span>
+                  </label>
+                  {againOn && againDay && (
+                    <div class="em-again-fields">
+                      <fieldset class="em-seg em-days" id="em-again-day">
+                        <legend>Day it goes again</legend>
+                        <div class="em-seg-row">
+                          {againIn.map((d) => {
+                            const { wd, md } = dayParts(d);
+                            return (
+                              <label class="em-seg-option">
+                                <input
+                                  type="radio"
+                                  name="em-again-day"
+                                  value={d}
+                                  checked={d === againDay}
+                                  onChange={() => {
+                                    setAgainDay(d);
+                                    setAgainError(null);
+                                  }}
+                                />
+                                <span>
+                                  <strong>{wd}</strong>
+                                  <small>{md}</small>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        {againError?.field === 'again.day' && <FieldError id="em-again-day-error" message={againError.message} />}
+                      </fieldset>
+                      <div class="field em-again-time">
+                        <label for="em-again-time">Time it goes again, Eastern</label>
+                        <select id="em-again-time" value={againTime} onChange={(e) => setAgainTime((e.target as HTMLSelectElement).value)}>
+                          {againTimeList.map((t) => (
+                            <option value={t.value}>
+                              {t.label}
+                              {t.value === time ? ' (same time)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div class="field em-again-subject">
+                        <label for="em-again-subject">Subject line when it goes again</label>
+                        <input
+                          id="em-again-subject"
+                          ref={againSubjectInput}
+                          value={againSubject}
+                          maxLength={PART_LIMITS.subject + 20}
+                          onInput={(e) => {
+                            setAgainSubject((e.target as HTMLInputElement).value);
+                            if (againError?.field === 'again.subject') setAgainError(null);
+                          }}
+                          {...(againError?.field === 'again.subject' ? { 'aria-invalid': true, 'aria-describedby': 'em-again-subject-error' } : { 'aria-describedby': 'em-again-subject-hint' })}
+                        />
+                        <FieldError id="em-again-subject-error" message={againError?.field === 'again.subject' ? againError.message : undefined} />
+                        {againError?.field !== 'again.subject' && (
+                          <p class="em-hint" id="em-again-subject-hint">
+                            A new subject line gets more of them to open it. Products sold by then are left out of it.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <p class="em-hint">This email’s week is over, so it can’t be scheduled.</p>
@@ -549,6 +720,14 @@ export function Send(props: Props) {
           <dd>{props.subject}</dd>
           <dt>Preview</dt>
           <dd>{props.preheader}</dd>
+          {againOn && againDay && (
+            <>
+              <dt>Again</dt>
+              <dd>
+                {sendLabel(againDay)}, {timeLabel(againTime)}, to people who haven’t opened it, as “{againSubject.replace(/\s+/g, ' ').trim()}”
+              </dd>
+            </>
+          )}
         </dl>
         <p class="em-hint">You can cancel it here until it goes.</p>
         <div class="em-dialog-actions">
