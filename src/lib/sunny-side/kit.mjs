@@ -178,11 +178,19 @@ export async function schedule(kit, { subject, preheader, html, description, tem
   return { id, status: now.status ?? 'scheduled', sendAt: now.send_at };
 }
 
+/**
+ * "[Test 3:32 PM]": a test's tag, with the store's time it goes out. Every test of a week had the same
+ * "[Test] …" subject, so Gmail threaded them, and showed the later ones with whatever matched the one
+ * before folded away under "•••": a reveal looked missing from a test on Nov 17, 2026. A subject of
+ * its own starts a thread of its own.
+ */
+export const testTag = (at) => `[Test ${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }).format(at)}]`;
+
 /** Sends a test now-ish, to these testers' tags. @returns {Promise<{ id: number, status: string, sendAt: string }>} */
 export function sendTest(kit, { subject, preheader, html, templateId, tagIds, description, from, now = Date.now() }) {
   return schedule(kit, {
     from,
-    subject: `[Test] ${subject}`,
+    subject: `${testTag(new Date(now + TEST_LEAD_MS))} ${subject}`,
     preheader,
     html,
     description,
@@ -259,8 +267,8 @@ export async function subscriberCount(kit) {
   return onStore - n;
 }
 
-/** A test, not a real send: the admin's tests go out with "[Test]" before the subject (sendTest). */
-const isTest = (b) => /^\[Test\]/.test(b?.subject || '');
+/** A test, not a real send: the admin's tests go out with "[Test]", or "[Test 3:32 PM]", before the subject (sendTest). */
+const isTest = (b) => /^\[Test( [^\]]*)?\]/.test(b?.subject || '');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**

@@ -81,7 +81,12 @@ export function Segmented({
   );
 }
 
-/** A section of the page: a numbered heading, its state, and its body. */
+/**
+ * A section of the page: a numbered heading, its state, and its body. With `onToggle` its heading
+ * opens and folds it (a button inside the heading, as WAI-ARIA's accordion pattern has it); folded,
+ * it shows a one-line `summary` of what's set, the way Mailchimp's campaign checklist shows each
+ * finished part as a line to open.
+ */
 export function Section({
   n,
   id,
@@ -89,6 +94,9 @@ export function Section({
   state,
   tone,
   locked = false,
+  open = true,
+  summary,
+  onToggle,
   children,
 }: {
   n: number;
@@ -98,16 +106,35 @@ export function Section({
   tone: 'ok' | 'todo' | 'bad';
   /** Scheduled to send: shown, but nothing in it can change until the send is cancelled. */
   locked?: boolean;
+  open?: boolean;
+  /** What's set, in a line, shown while it's folded. */
+  summary?: string;
+  onToggle?: () => void;
   children: preact.ComponentChildren;
 }) {
+  const folded = Boolean(onToggle) && !open;
   return (
-    <section class={`em-section card${locked ? ' is-locked' : ''}`} aria-labelledby={`${id}-title`} id={id} {...(locked ? { inert: true } : {})}>
+    <section class={`em-section card${locked ? ' is-locked' : ''}${folded ? ' is-folded' : ''}${onToggle ? ' is-foldable' : ''}`} aria-labelledby={`${id}-title`} id={id} {...(locked ? { inert: true } : {})}>
       <header class="em-section-head">
         <span class="em-step" aria-hidden="true">
           {n}
         </span>
-        <h2 id={`${id}-title`}>{title}</h2>
+        <h2 id={`${id}-title`}>
+          {onToggle ? (
+            <button type="button" class="em-section-toggle" aria-expanded={open} aria-describedby={folded && summary ? `${id}-summary` : undefined} onClick={onToggle}>
+              {title}
+            </button>
+          ) : (
+            title
+          )}
+        </h2>
         <span class={`badge ${tone === 'ok' ? 'badge-approved' : tone === 'bad' ? 'badge-alert' : 'badge-pending'}`}>{state}</span>
+        {onToggle && <span class="em-section-chevron" aria-hidden="true" />}
+        {folded && summary && (
+          <p class="em-section-summary" id={`${id}-summary`}>
+            {summary}
+          </p>
+        )}
       </header>
       {children}
     </section>

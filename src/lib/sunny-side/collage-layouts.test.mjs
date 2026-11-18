@@ -112,7 +112,7 @@ test('the email asks for each photo in its cell’s exact shape, and a brief nam
   const asked = [...tall.matchAll(/width=(\d+),height=(\d+),fit=cover/g)].map((m) => Number(m[1]) / Number(m[2]));
   assert.deepEqual(asked, [0.75, 4 / 3, 4 / 3]);
   // The tall photo's column and the stack beside it: shares and paddings from solve()
-  assert.match(tall, /<td width="52\.94%" valign="top"><table [^>]+><tr><td style="padding:0 0\.706px 0 0;">/);
+  assert.match(tall, /<td width="52\.94%" valign="top" style="vertical-align:top;"><table [^>]+><tr><td style="padding:0 0\.706px 0 0;">/);
   assert.match(tall, /max-width:316\.941px/);
   assert.match(render(brief(undefined), ['story']), /width="600" height="300" alt="Photo 1"/);
   assert.throws(() => render(brief('grid'), ['story']), /isn't a layout for 3 photos/);

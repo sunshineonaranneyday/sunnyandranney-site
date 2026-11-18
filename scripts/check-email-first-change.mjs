@@ -4,9 +4,9 @@
  * Loads the email page at phone to desktop widths, in Chromium and WebKit, types one letter into the
  * preview line (a plain text field, so nothing of the collage's own steadying is involved), then
  * presses Discard, and checks that the page below the top bar stayed exactly where it was both times.
- * On a phone, Save moves from the top bar to the bottom of the screen at the first change; the bar used
- * to close up behind it and push the page up 56–85px (src/lib/admin/first-change.test.mjs). Nothing is
- * saved. Exits 1 if anything moved.
+ * On a phone, Save used to move from the top bar to the bottom of the screen at the first change, and the
+ * bar closed up behind it and pushed the page up 56–85px; it now waits in the toolbar at the foot of the
+ * screen from the start (src/lib/admin/first-change.test.mjs). Nothing is saved. Exits 1 if anything moved.
  *
  *   npx astro dev --config astro.local.config.mjs   (in another terminal)
  *   node scripts/check-email-first-change.mjs [http://localhost:4321/admin/email/]
@@ -23,6 +23,12 @@ for (const engine of [chromium, webkit]) {
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForSelector('.em-grid');
     await page.waitForTimeout(2000);
+    // A finished section starts folded: open the subject line's, as Staci would
+    const folded = page.locator('#em-lines.is-folded .em-section-toggle');
+    if (await folded.count()) {
+      await folded.click();
+      await page.waitForTimeout(200);
+    }
     const field = page.locator('.em-edit input[id*="preheader"]').first();
     await field.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(300);
