@@ -30,11 +30,36 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The Playwright the lockfile installs, so the tests run in Microsoft's image for exactly that
+  # version, whose browsers are the ones it drives
+  playwright:
+    name: Playwright version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: package-lock.json
+          sparse-checkout-cone-mode: false
+      - id: version
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
+
   tests:
     name: Tests
+    needs: playwright
     # 24.04, not ubuntu-latest: that became Ubuntu 26.04, and the Playwright the email check uses
     # (package.json) has no browsers for it ("Playwright does not support chromium on ubuntu26.04").
     runs-on: ubuntu-24.04
+    # Microsoft's Playwright image for the lockfile's version (Ubuntu 24.04, "noble"): Chromium and
+    # WebKit and every system package they need come in it. Installing them on each run
+    # ("playwright install --with-deps") spent 15 to 20 minutes fetching 138 Ubuntu packages from a
+    # slow mirror, and twice ran out the 20 minutes before the email check began (Nov 18, 2026).
+    # --ipc=host: Chromium runs out of shared memory in Docker's default 64MB.
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
+      options: --ipc=host
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,8 +70,6 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm test
-      - name: Browsers for the weekly email's check
-        run: npx playwright install --with-deps chromium webkit
       - name: The weekly email fits every screen
         env:
           EMAIL_CHECK_OFFLINE: '1'
