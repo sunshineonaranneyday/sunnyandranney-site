@@ -66,6 +66,12 @@ const VISIT_BUTTON = 210;
  * most, 24/28 once one has more, so the widest still fits a third of a 320px phone (Email#impact).
  */
 export const statSize = (nums) => (nums.every((t) => String(t).replace(/\D/g, '').length <= 3) ? [32, 36] : [24, 28]);
+/**
+ * The space a text link carries over and under its words (padding:12px 0), so a thumb gets the 44px it
+ * needs. It's space you see, so where a link starts or ends a band or a card, the band's own padding gives
+ * it back, and what you see over the first words and under the last is the same (verify.mjs, "uneven").
+ */
+const TAP = 12;
 const R_BTN = 8, R_CARD = 12;
 const LABEL_LH = 16; // line height of the small uppercase labels
 const GUTTER = 4; // between photo wall tiles
@@ -410,9 +416,9 @@ export class Email {
     return this.band(this.img(Email.photo(p.src, w * 2, h * 2), w, h, p.alt, href, slot), { top: 0, side: 0, bottom: 0, part });
   }
 
-  link(text, href, slot, color = CHARCOAL, size = 15) {
+  link(text, href, slot, color = CHARCOAL, size = 15, pad = `${TAP}px 0`) {
     return (
-      `<a href="${escape(this.url(href, slot))}" target="_blank" style="display:inline-block;padding:12px 0;` +
+      `<a href="${escape(this.url(href, slot))}" target="_blank" style="display:inline-block;padding:${pad};` +
       `font-family:${SANS};font-size:${size}px;line-height:20px;font-weight:700;color:${color};` +
       `text-decoration:underline;text-underline-offset:3px;">${text}</a>`
     );
@@ -476,6 +482,7 @@ export class Email {
     const attr = (c ? ` class="${c}"` : '') + (part ? ` data-part="${part}"` : '');
     const phone = { top: top === S5 ? S4 : top, side: side === S4 ? PHONE_SIDE : side, bottom: bottom === S5 ? S4 : bottom };
     this.lastBg = bg;
+    this.tail = 0;
     return (
       `<tr><td${attr} bgcolor="${bg}" style="background-color:${bg};color:${CHARCOAL};` +
       `padding:${phone.top}px ${phone.side}px ${phone.bottom}px;">${inner}</td></tr>`
@@ -487,9 +494,15 @@ export class Email {
     return `<div${c} style="height:${h}px;line-height:${h}px;font-size:${h}px;">&nbsp;</div>`;
   }
 
-  /** White space between a photo and a block it doesn't belong to (40px, 32 on phones: 32 inline, phones first). */
-  breather() {
-    return this.band(Email.gap(S4, 'g40'), { top: 0, side: 0, bottom: 0 });
+  /**
+   * White space between a photo or words and a block they don't belong to (40px, 32 on phones: 32 inline,
+   * phones first), less what the band above already ends with (`less`): the products' last captions end
+   * with 24px of their own, and over the reveal the white came to 58px on a phone where every other
+   * section has 32 (measured Nov 18, 2026).
+   */
+  breather(less = 0) {
+    if (![0, S3].includes(less)) throw new Error(`breather: no computer size for ${less}px less`);
+    return this.band(Email.gap(S4 - less, `g${S5 - less}`), { top: 0, side: 0, bottom: 0 });
   }
 
   /**
@@ -503,7 +516,7 @@ export class Email {
   edge(bg) {
     // Nothing above it (a section drawn on its own, as the admin's preview does): nothing to keep it from
     if (!this.lastBg) return '';
-    return this.lastBg !== WHITE && this.lastBg !== bg ? '' : this.breather();
+    return this.lastBg !== WHITE && this.lastBg !== bg ? '' : this.breather(this.tail || 0);
   }
 
   /** A paragraph. `size` and `lh` are a phone's (phones first); a class in the style block gives a computer bigger ones. */
@@ -591,7 +604,7 @@ export class Email {
     // fine print after the button, so it never pushes the button down
     // Never a word alone on its last line: "Ends Saturday, Nov" over "21." on a 390px phone (Nov 17, 2026)
     if (s.details) out += Email.gap(S2) + Email.text(noWidow(s.details), { size: 15, lh: 22, cls: 'fine' });
-    return this.band(out, { bg: GOLD, top: S4, part: 'offer' });
+    return this.band(out, { bg: GOLD, part: 'offer' });
   }
 
   /**
@@ -616,12 +629,21 @@ export class Email {
   wall() {
     const w = this.b.wall;
     const shop = SITE + (w.more || '/shop/'); // "Shop all" goes where the brief says the products come from
+    // The label and "Shop all" share a baseline at the foot of their row, and the link's 44px for a thumb
+    // is all over its words, in the band's top padding (pt-tap): with the link's height centered on the
+    // label, the label sat 45px under the sale where every section's sits at 32, and 12px over the
+    // headline where every other label sits 8 over its own (Nov 18, 2026)
+    const linkUp = 2 * TAP + 4; // the 44px row less the label's 16px line
     const head =
       Email.T(
-        `<tr>${Email.td('middle')}${Email.label(w.label, { mb: 0 })}</td>` +
-          Email.td('middle', 'align="right"', `white-space:nowrap;padding-left:${S2}px;`) +
-          `${this.link('Shop all &#8594;', shop, 'wall-shop-all')}</td></tr>`,
-      ) + Email.h2(w.headline, { mb: 0 });
+        `<tr>${Email.td('bottom')}${Email.label(w.label, { mb: 0 })}</td>` +
+          // No line of its own: Kit's template gives every table a line height of 1.5, and the cell's line
+          // under the link grew 2px past the link and pushed the label down inside Kit (kit-wrapper.mjs)
+          Email.td('bottom', 'align="right"', `white-space:nowrap;padding-left:${S2}px;font-size:0;line-height:0;`) +
+          `${this.link('Shop all &#8594;', shop, 'wall-shop-all', CHARCOAL, 15, `${linkUp}px 0 0`)}</td></tr>`,
+      ) +
+      Email.gap(S1) +
+      Email.h2(w.headline, { mb: 0 });
     let rows = '';
     let i = 0;
     WALL_ROWS[w.photos.length].forEach((n) => {
@@ -639,7 +661,10 @@ export class Email {
       rows += '<tr><td>' + Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"') + '</td></tr>';
       i += n;
     });
-    return this.band(head, { top: S5, bottom: S2, part: 'wall' }) + this.band(Email.T(rows), { top: 0, side: 0, bottom: 0, part: 'wall' });
+    const out = this.band(head, { top: S4 - linkUp, bottom: S2, cls: 'pt-tap', part: 'wall' }) + this.band(Email.T(rows), { top: 0, side: 0, bottom: 0, part: 'wall' });
+    // The last captions end with their own 24px (tile), so the white under them takes that off (breather)
+    this.tail = S3;
+    return out;
   }
 
   /**
@@ -711,8 +736,8 @@ export class Email {
     // needs to be the sunshine on a ranney day logo"; the invite in Gmail: 28px over the logo, 32 under it)
     const top =
       this.soardLogo('reveal-logo') +
-      Email.gap(S4) +
-      Email.label(`Reveal Day &middot; ${r.short}`, { color: SOARD_YELLOW, mb: 12, font: OUTFIT, track: '0.16em', align: 'center' }) +
+      Email.gap(S3) +
+      Email.label(`Reveal Day &middot; ${r.short}`, { color: SOARD_YELLOW, mb: S1, font: OUTFIT, track: '0.16em', align: 'center' }) +
       headline;
     const body =
       `<div style="text-align:center;">${top}</div>` +
@@ -728,8 +753,8 @@ export class Email {
       pills +
       Email.gap(S1) +
       `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:20px;">${remind}</p>`;
-    // As much under the link as over the logo; the link's own padding makes up the rest
-    return this.edge(SOARD_DEEP) + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3, cls: 'soard', part: 'reveal' });
+    // As much under the link's words as over the logo (28): the link's own 12 and 16 more
+    return this.edge(SOARD_DEEP) + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4 - TAP, cls: 'soard', part: 'reveal' });
   }
 
   /**
@@ -898,7 +923,8 @@ export class Email {
       const [first, rest, when] = this.upcoming(e);
       if (!first) continue;
       const spot = Email.T(
-        `<tr>${Email.td('top', `bgcolor="${WHITE}"`, `background-color:${WHITE};border-radius:${R_CARD}px;padding:${S2}px;`)}` +
+        // As much white under its last words as over its first: the links it ends with carry their own 12
+        `<tr>${Email.td('top', `bgcolor="${WHITE}"`, `background-color:${WHITE};border-radius:${R_CARD}px;padding:${S2}px ${S2}px ${e.one ? S2 - TAP : S2}px;`)}` +
           Email.T(
             `<tr>${Email.td('middle')}` +
               Email.label(when, { mb: 6 }) +
@@ -947,8 +973,12 @@ export class Email {
         (line ? Email.text(noWidow(line), { size: 16, lh: 24, color: WHITE, mb: S2 }) : '');
       // Every date, once there's more than the one the card already offers
       const series = e.calendar && (rest.length || !e.one);
-      const foot = Email.gap(S2) + (series ? this.calendar(e, [first, ...rest]) : '');
-      out += this.edge(TEAL) + this.band(head + spot + agenda + foot, { bg: TEAL, bottom: S4, part: 'events' });
+      const foot = series ? Email.gap(S2) + this.calendar(e, [first, ...rest]) : '';
+      // Ending in links or the list's last row, each with 12px of its own under its words, the band takes
+      // that off its own (pb-tap); ending in the card, it's padded as it is on top
+      const tapEnd = Boolean(foot || agenda);
+      const bottom = tapEnd ? { bottom: S4 - TAP, cls: 'pb-tap' } : {};
+      out += this.edge(TEAL) + this.band(head + spot + agenda + foot, { bg: TEAL, ...bottom, part: 'events' });
     }
     return out;
   }
@@ -986,7 +1016,7 @@ export class Email {
       `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_YELLOW};">money&nbsp;goes</em>.</h2>`;
     const top =
       this.soardLogo('charity-logo') +
-      Email.gap(S2) +
+      Email.gap(S3) +
       Email.label('100% of our profits', { color: SOARD_YELLOW, font: OUTFIT, track: '0.18em', align: 'center', mb: S1 }) +
       headline;
     // The caption leads, in white, as the admin shows the family's words
@@ -998,7 +1028,7 @@ export class Email {
       `color:${SOARD_YELLOW};text-decoration:underline;text-underline-offset:3px;">Read more about ${m.name || 'them'}&nbsp;&#8594;</a></p>`;
     const body =
       `<div style="text-align:center;">${top}</div>` +
-      Email.gap(20) +
+      Email.gap(S3) +
       // On the column: 536px on a computer, and up to 560 where the style block is gone (20px sides at any width)
       this.img(Email.photo(m.photo.src, 1120, 560), COLUMN, COLUMN / 2, m.photo.alt, m.url, 'mission-photo', 20, '', WIDTH - 2 * PHONE_SIDE) +
       Email.gap(S2) +
@@ -1006,7 +1036,8 @@ export class Email {
       link +
       (m.impact ? this.impact(m.impact) : '');
     // Edge to edge under the events or a reveal, white under a photo (edge)
-    return this.edge(SOARD_DEEP) + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4, cls: 'soard', part: 'mission' });
+    // 28 under its last words, as over the logo: under the numbers, or under Read more less the link's own 10
+    return this.edge(SOARD_DEEP) + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4 - (m.impact ? 0 : 10), cls: 'soard', part: 'mission' });
   }
 
   /**
@@ -1123,6 +1154,8 @@ export class Email {
     // The address beside the button on a computer; on a phone the button goes under it, full width,
     // whether or not the mail app keeps the style block (fabFour, button)
     const button = this.button('Get directions &#8594;', MAP, 'directions', GOLD, CHARCOAL, 'right');
+    // On a phone the button is last, 32 over the rule; on a computer the address column ends with the
+    // phone number's link, whose own padding the band takes off its 40 (pb-tap)
     return this.band(
       Email.fabFour(
         [
@@ -1132,6 +1165,7 @@ export class Email {
         COLUMN,
         { gap: S3 },
       ),
+      { bottom: S4, cls: 'pb-tap' },
     );
   }
 
@@ -1148,11 +1182,14 @@ export class Email {
       )
       .join('&nbsp;&nbsp;&middot;&nbsp;&nbsp;');
     return this.band(
-      `<div style="height:1px;line-height:1px;font-size:1px;background-color:${STONE};margin:0 0 ${S3}px;">&nbsp;</div>` +
+      // As much white under the rule as over it: 32 on a phone, 40 on a computer (.rule-gap)
+      `<div class="rule-gap" style="height:1px;line-height:1px;font-size:1px;background-color:${STONE};margin:0 0 ${S4}px;">&nbsp;</div>` +
         `<img src="${PIG}" width="96" height="42" alt="" style="display:block;width:96px;height:auto;border:0;margin:0 auto ${S2}px;">` +
         Email.text('Designer finds. Better prices. A&nbsp;really&nbsp;good&nbsp;cause.', { size: 15, lh: 22, weight: 700, align: 'center', mb: 4 }) +
-        Email.text('100% of our profits fund dream rooms for kids with special&nbsp;needs.', { size: 14, lh: 20, align: 'center', mb: 4 }) +
-        Email.text(links, { size: 14, lh: 22, align: 'center', mb: 4 }) +
+        // The links carry 12px over and under their words for a thumb, so the space between the lines of
+        // links and the line over them comes out the same, about 30px (it was 21 over the links, 33 under)
+        Email.text('100% of our profits fund dream rooms for kids with special&nbsp;needs.', { size: 14, lh: 20, align: 'center', mb: S2 }) +
+        Email.text(links, { size: 14, lh: 22, align: 'center' }) +
         // The store's mailing address, written in, as the site publishes it (SEO.astro): not Kit's
         // {{ address }}, which showed as those words in any email Kit didn't send (a test, the
         // preview) and would be the shared Kit account's (the charity's) when it did. A link keeps
@@ -1188,6 +1225,12 @@ export class Email {
       `    .pt { padding-top:${S5}px !important; }`,
       `    .pb { padding-bottom:${S5}px !important; }`,
       `    .g40 { height:${S5}px !important; line-height:${S5}px !important; font-size:${S5}px !important; }`,
+      `    .g16 { height:${S2}px !important; line-height:${S2}px !important; font-size:${S2}px !important; }`,
+      // A band whose first row is a link's 44px (the products' "Shop all") or whose last line is a link's
+      // padded words: 40 over and under what you see, less the link's own space
+      `    .pt-tap { padding-top:${S5 - (2 * TAP + 4)}px !important; }`,
+      `    .pb-tap { padding-bottom:${S5 - TAP}px !important; }`,
+      `    .rule-gap { margin-bottom:${S5}px !important; }`,
       '    .logo { width:150px !important; }',
       '    .h1 { font-size:32px !important; line-height:36px !important; }',
       '    .h2 { font-size:30px !important; line-height:34px !important; }',
