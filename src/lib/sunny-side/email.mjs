@@ -11,7 +11,7 @@
  *   Staci's special           -> brief.sale    kind: "tiers" (2-4) | "percent" | "headline"
  *   Staci's events            -> brief.events  each with dated items; past dates drop out, and the
  *                                                line under the title is written from the dates left
- *   a reveal still ahead      -> brief.reveal  the charity's invite to watch it live, under the story
+ *   a reveal still ahead      -> brief.reveal  the charity's invite to watch it live, right after the products
  *   the latest reveal         -> brief.mission
  *
  * Design: bold color blocks and edge-to-edge photos, like a bright weekly flyer.
@@ -333,7 +333,7 @@ export const COLLAGE_ROWS = { 1: [1], 2: [2], 3: [1, 2], 4: [1, 3], 5: [1, 2, 2]
  * the admin's preview knows which section a too-wide word is in. Untagged bands (the masthead, the top
  * photo, the visit row, the footer) are the email's own layout.
  */
-export const PARTS = ['offer', 'wall', 'story', 'reveal', 'events', 'mission'];
+export const PARTS = ['offer', 'wall', 'reveal', 'story', 'events', 'mission'];
 
 /** The web-font link as the email writes it, hidden from Outlook. */
 export const FONT_LINK = /<!--\[if !mso\]><!--><link href="https:\/\/fonts\.googleapis\.com[^>]*><!--<!\[endif\]-->/;
@@ -347,7 +347,7 @@ export const FONT_LINK = /<!--\[if !mso\]><!--><link href="https:\/\/fonts\.goog
 export const bareEmail = (html) => html.replace(FONT_LINK, '').replace(/<style[\s\S]*?<\/style>/g, '');
 
 /** Every section, top to bottom. A preview can ask for just the first few. */
-export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'story', 'reveal', 'events', 'mission', 'visit', 'footer'];
+export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'reveal', 'story', 'events', 'mission', 'visit', 'footer'];
 
 /** Builds one issue. Holds the brief so every link can be tagged for its slot. */
 export class Email {
@@ -649,7 +649,8 @@ export class Email {
   }
 
   /**
-   * A charity reveal still ahead, its own section under the story: the charity's invite to watch it live, built like its own
+   * A charity reveal still ahead, its own section right after the products, before the story (Peter, 2026-11-17:
+   * "put the reveal after the prodcuts"): the charity's invite to watch it live, built like its own
    * reveal email ("Join Us Live for Dylan’s Reveal Day!", Nov 16, 2026) in its identity: Dark Deep,
    * its logo over a centered top, a Sunshine Yellow date, the Libre Baskerville line with the key words in yellow italic, the family's
    * photo, When and Where side by side, the start of the family's story (lead()), and its calendar

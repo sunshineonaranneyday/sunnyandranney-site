@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { render } from './email.mjs';
+import { SECTIONS, render } from './email.mjs';
 import { easternParts, icsStart, listUpcomingReveals, revealCalendar, upcomingReveals } from './kids.mjs';
 import { kitProblems } from './page-email.mjs';
 import { briefParts, checkParts, cleanParts } from './parts.mjs';
@@ -72,9 +72,10 @@ test('a week saved while the reveal took the story’s place keeps both: the rev
   assert.equal(brief.story.headline, 'Christmas is here.');
   assert.equal(brief.story.photos.length, 2);
   assert.equal(brief.reveal.name, 'Dylan');
-  const html = render(brief, ['story', 'reveal']);
-  // The story and its collage, then the invite, each tagged with its own part
-  assert.ok(html.indexOf('Christmas is here.') < html.indexOf('Reveal Day'));
+  const html = render(brief, SECTIONS.filter((s) => s === 'story' || s === 'reveal'));
+  // The invite right after the products (Peter, 2026-11-17: "put the reveal after the prodcuts"), then the story and its collage, each tagged with its own part
+  assert.equal(SECTIONS.indexOf('reveal'), SECTIONS.indexOf('wall') + 1);
+  assert.ok(html.indexOf('data-part="reveal"') < html.indexOf('data-part="story"'));
   assert.match(html, /utm_content=story-photo-2/);
   assert.match(html, /data-part="reveal"/);
 });
