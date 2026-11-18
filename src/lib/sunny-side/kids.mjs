@@ -205,8 +205,11 @@ export function upcomingReveals(rows, starts, today) {
     if (when.day < today) continue;
     const name = String(row.name || d.name || '').trim();
     const story = String(d.heroSummary || '').trim();
-    // The photo the charity's own invite leads with: the one its page leads with
-    const photo = photosOf({ heroImage: d.heroImage, photos: d.photos }, `${name}, before reveal day`)[0];
+    // The photo the charity's own invite leads with: the one its page leads with. Its words say who it
+    // is: the description the charity's gallery keeps for it was written to describe a photo, and read
+    // a child out by wheelchair and expression ("a neutral expression" for a smiling boy, Nov 17, 2026)
+    const lead = photosOf({ heroImage: d.heroImage, photos: d.photos }, '')[0];
+    const photo = lead && { ...lead, alt: `${name}, before reveal day` };
     if (!name || !story || !photo) continue;
     const rooms = (Array.isArray(d.roomTypes) ? d.roomTypes : []).map((r) => String(r).trim()).filter(Boolean);
     out.push({ slug: row.slug, name, start, ...when, room: rooms.join(' & ') || 'Dream room', photo, story, page: kidPage(row.slug), live: livePage(row.slug) });

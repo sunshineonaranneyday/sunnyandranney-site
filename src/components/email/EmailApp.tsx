@@ -6,6 +6,7 @@ import { check, draftSale, sendDays, sendLabel } from '@/lib/sunny-side/special.
 import { kitProblems, pageEmail, pagePlace, sectionOf } from '@/lib/sunny-side/page-email.mjs';
 import { blankParts, checkParts, linesOf } from '@/lib/sunny-side/parts.mjs';
 import { PICKS, checkWall } from '@/lib/sunny-side/wall.mjs';
+import { layoutFor, ratioOf } from '@/lib/sunny-side/collage-layouts.mjs';
 import { Charity } from './Charity';
 import { type Draft, Events } from './Events';
 import {
@@ -332,39 +333,7 @@ export default function EmailApp(props: AppProps) {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // The phone's "See the preview" button steps aside once the preview itself is on screen, and
-  // while Send is, so it never sits on Schedule or the test button (the preview is just below Send)
-  const [seesPreview, setSeesPreview] = useState(false);
-  useEffect(() => {
-    if (typeof IntersectionObserver === 'undefined') return;
-    const onScreen = new Set<Element>();
-    // On a phone the preview is a sheet over the page (below), there whether open or not: it never counts.
-    // Worked out again when the screen changes size: an iPad turned upright makes the preview a sheet
-    // without moving it, and the button stayed hidden as if the preview were still in view.
-    const update = () => setSeesPreview([...onScreen].some((el) => getComputedStyle(el).position !== 'fixed'));
-    const seen = (entries: IntersectionObserverEntry[]) => {
-      for (const e of entries) e.isIntersecting ? onScreen.add(e.target) : onScreen.delete(e.target);
-      update();
-    };
-    window.addEventListener('resize', update);
-    // The preview counts once it fills the lower part of the screen; Send as soon as any of it shows
-    const watches = [
-      ['em-preview', '0px 0px -25% 0px'],
-      ['em-send', '0px'],
-    ].flatMap(([id, rootMargin]) => {
-      const el = document.getElementById(id);
-      if (!el) return [];
-      const w = new IntersectionObserver(seen, { rootMargin });
-      w.observe(el);
-      return [w];
-    });
-    return () => {
-      watches.forEach((w) => w.disconnect());
-      window.removeEventListener('resize', update);
-    };
-  }, []);
-
-  // On a phone or upright iPad the preview is a sheet over the page: "See the preview" opens it at the
+  // On a phone or upright iPad the preview is a sheet over the page: Preview opens it at the
   // part she's working on, and "Back to editing" closes it with the page just where she left it (as
   // Shopify's and Canva's phone editors keep editing and preview a tap apart). It was 11 screens down
   // the page, below Send. While it's open the page under it is out of reach, and Escape closes it.
@@ -452,6 +421,71 @@ export default function EmailApp(props: AppProps) {
       : reveal && !story.headline && !story.body && !story.photos.length
         ? { state: 'None this week', tone: 'ok' as const }
         : { state: 'Not written', tone: 'todo' as const };
+  // ── Folding: a finished section shows as a line to open, the way Mailchimp's campaign checklist
+  // shows each finished part; an unfinished one stays open, and one with a problem can't be folded.
+  // Whether a section starts open is settled when the page opens, so finishing one never folds it
+  // under her fingers. ──
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const startsOpen = useRef<Record<string, boolean>>({});
+  const folding = (id: string, tone: 'ok' | 'todo' | 'bad') => {
+    if (!(id in startsOpen.current)) startsOpen.current[id] = tone !== 'ok';
+    const open = tone === 'bad' || (opened[id] ?? startsOpen.current[id]);
+    return { open, onToggle: tone === 'bad' && open ? undefined : () => setOpened((o) => ({ ...o, [id]: !open })) };
+  };
+  // A link to a part of a folded section (the list of what to fix, Send's list of what's left, the
+  // Today page) opens it first, then goes there
+  useEffect(() => {
+    const unfold = (el: Element | null) => {
+      const section = el?.closest<HTMLElement>('.em-section');
+      if (!section?.classList.contains('is-folded')) return false;
+      setOpened((o) => ({ ...o, [section.id]: true }));
+      return true;
+    };
+    const go = (el: HTMLElement) =>
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ block: 'start' });
+        el.focus?.({ preventScroll: true });
+      });
+    const click = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.('a[href^="#"]');
+      if (!a) return;
+      const id = decodeURIComponent(a.getAttribute('href')!.slice(1));
+      const el = document.getElementById(id);
+      if (!el || !unfold(el)) return;
+      e.preventDefault();
+      history.replaceState(null, '', `#${id}`);
+      go(el);
+    };
+    document.addEventListener('click', click, true);
+    const arrived = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (arrived && unfold(arrived)) go(arrived);
+    return () => document.removeEventListener('click', click, true);
+  }, []);
+  const shortDay = (iso: string) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '');
+  const ends = form.ends ? ` · ends ${shortDay(form.ends)}` : '';
+  const summaries: Record<string, string> = {
+    'em-lines': inbox.subject ? `“${inbox.subject}”` : '',
+    'em-sale':
+      form.kind === 'percent'
+        ? `${special.percent}% off everything${ends}`
+        : form.kind === 'tiers'
+          ? `Spend more, save more: ${special.tiers.map((t) => `$${(t.spend ?? 0).toLocaleString('en-US')} → ${t.percent}%`).join(', ')}${ends}`
+          : form.kind === 'headline'
+            ? 'No sale this week'
+            : '',
+    'em-products': n ? `${n} products, ${wall.arranged === 'auto' ? 'arranged for you' : 'in your order'}` : '',
+    'em-reveal': reveal ? `${reveal.name}’s reveal, ${reveal.short}` : 'No reveal this week',
+    'em-story': story.headline ? `“${story.headline}”` : 'No story this week',
+    'em-photos': story.photos.length
+      ? `${layoutFor(story.layout, story.photos.map((id) => ratioOf(photosById.get(id)))).name}, ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}`
+      : 'No photos in the story yet',
+    'em-events': shownEvents.length ? shownEvents.map((e) => e?.title).filter(Boolean).join(', ') : 'No events this week',
+    'em-charity': kid ? `${kid.name}, ${parts.kidPhoto ? 'one of their photos' : 'their finished room'}` : '',
+  };
+  const linesTone: 'ok' | 'todo' | 'bad' = partsErrors.subject || partsErrors.preheader ? 'bad' : parts.subject ? 'ok' : 'todo';
+  const photosTone: 'ok' | 'bad' = partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok';
+  const eventsTone: 'ok' | 'todo' = inEmail ? 'ok' : 'todo';
+
   const checks = [
     { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` },
     // Measured as sent and bare (no style block, no web fonts, as the Gmail app shows it to other accounts).
@@ -461,8 +495,18 @@ export default function EmailApp(props: AppProps) {
     ...(!wallReady ? [{ ok: null, text: n ? `Pick ${Math.max(PICKS[0] - n, 0) || 'no more than 9'} more to see the products here.` : `The products show here once ${PICKS[0]} are picked.` }] : []),
   ];
 
+  const status = locked
+    ? kitSend?.status === 'completed'
+      ? 'Sent'
+      : 'Scheduled: cancel the send to change it'
+    : dirty
+      ? 'Unsaved changes'
+      : version
+        ? `Saved ${at.format(new Date(version.updatedAt))} by ${who(version.updatedBy)}`
+        : 'Nothing saved yet';
+
   return (
-    <div class={`em${dirty ? ' is-dirty' : ''}${seesPreview ? ' sees-preview' : ''}${previewing ? ' is-previewing' : ''}`}>
+    <div class={`em${dirty ? ' is-dirty' : ''}${previewing ? ' is-previewing' : ''}`}>
       <div class="em-bar" {...(previewing ? { inert: true } : {})}>
         <div class="em-bar-title">
           <h1>Weekly email</h1>
@@ -472,19 +516,19 @@ export default function EmailApp(props: AppProps) {
             </span>
             <a href="/admin/email/sent/">Sent emails</a>
           </p>
+          <p class="em-status-top" aria-hidden="true">
+            {status}
+          </p>
         </div>
         <div class="em-bar-save">
           <span class="em-status" aria-live="polite">
-            {locked
-              ? kitSend?.status === 'completed'
-                ? 'Sent'
-                : 'Scheduled: cancel the send to change it'
-              : dirty
-                ? 'Unsaved changes'
-                : version
-                  ? `Saved ${at.format(new Date(version.updatedAt))} by ${who(version.updatedBy)}`
-                  : 'Nothing saved yet'}
+            {status}
           </span>
+          {/* Beside Save, where Kit and Mailchimp keep Preview: in the top bar on an upright iPad, in the
+              toolbar at the foot of a phone's screen (email.css). Not drawn once the preview is beside the form. */}
+          <button type="button" class="em-jump btn" ref={jump} aria-haspopup="dialog" onClick={openPreview}>
+            Preview
+          </button>
           {dirty && (
             <button type="button" class="btn" onClick={discard} disabled={saving}>
               Discard
@@ -533,35 +577,35 @@ export default function EmailApp(props: AppProps) {
           {/* In the order Staci decides things (PAGE_SECTIONS in page-email.mjs): the subject line, the
               sale, the products, the reveal, the story, the photos, the events and the charity. Send last.
               The reveal and the story are each their own section of the email: one never takes the other's place. */}
-          <Section n={1} id="em-lines" locked={locked} title="Subject line" state={parts.subject ? 'Written' : 'Not written'} tone={partsErrors.subject || partsErrors.preheader ? 'bad' : parts.subject ? 'ok' : 'todo'}>
+          <Section n={1} id="em-lines" locked={locked} title="Subject line" state={parts.subject ? 'Written' : 'Not written'} tone={linesTone} summary={summaries['em-lines']} {...folding('em-lines', linesTone)}>
             <Subject parts={parts} setParts={setParts} sale={saleOk ? sale : null} shown={shownParts} />
           </Section>
 
-          <Section n={2} id="em-sale" locked={locked} title="The sale" state={saleState.state} tone={saleState.tone}>
+          <Section n={2} id="em-sale" locked={locked} title="The sale" state={saleState.state} tone={saleState.tone} summary={summaries['em-sale']} {...folding('em-sale', saleState.tone)}>
             <Sale form={form} special={special} errors={saleErrors} shown={shownSale} set={set} touch={touch} presets={presets} />
           </Section>
 
-          <Section n={3} id="em-products" locked={locked} title="The products" state={wallState.state} tone={wallState.tone}>
+          <Section n={3} id="em-products" locked={locked} title="The products" state={wallState.state} tone={wallState.tone} summary={summaries['em-products']} {...folding('em-products', wallState.tone)}>
             <Products wall={wall} setWall={setWall} catalog={catalog} collections={collections} catalogProblem={catalogProblem} shown={shownWall} longNames={longNames} today={today} />
           </Section>
 
-          <Section n={4} id="em-reveal" locked={locked} title="The reveal" state={revealState.state} tone={revealState.tone}>
+          <Section n={4} id="em-reveal" locked={locked} title="The reveal" state={revealState.state} tone={revealState.tone} summary={summaries['em-reveal']} {...folding('em-reveal', revealState.tone)}>
             <RevealPick parts={parts} setParts={setParts} shown={shownParts} reveals={props.reveals} />
           </Section>
 
-          <Section n={5} id="em-story" locked={locked} title="The story" state={storyState.state} tone={storyState.tone}>
+          <Section n={5} id="em-story" locked={locked} title="The story" state={storyState.state} tone={storyState.tone} summary={summaries['em-story']} {...folding('em-story', storyState.tone)}>
             <Story parts={parts} setParts={setParts} shown={shownParts} />
           </Section>
 
-          <Section n={6} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.photos.length} in the story`} tone={partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok'}>
+          <Section n={6} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.photos.length} in the story`} tone={photosTone} summary={summaries['em-photos']} {...folding('em-photos', photosTone)}>
             <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} />
           </Section>
 
-          <Section n={7} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={inEmail ? 'ok' : 'todo'}>
+          <Section n={7} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={eventsTone} summary={summaries['em-events']} {...folding('em-events', eventsTone)}>
             <Events events={events} setEvents={setEvents} draft={draft} setDraft={setDraft} sendDate={day} sendLabel={sendLabel(day)} today={today} />
           </Section>
 
-          <Section n={8} id="em-charity" locked={locked} title="The charity" state={charityState.state} tone={charityState.tone}>
+          <Section n={8} id="em-charity" locked={locked} title="The charity" state={charityState.state} tone={charityState.tone} summary={summaries['em-charity']} {...folding('em-charity', charityState.tone)}>
             <Charity parts={parts} setParts={setParts} kids={props.kids} error={partsErrors.kid} />
           </Section>
 
@@ -637,9 +681,6 @@ export default function EmailApp(props: AppProps) {
           <Preview focus={focus} brief={brief} sections={sections} problem={null} checks={checks} onFit={setFit} />
         </div>
       </div>
-      <button type="button" class="em-jump btn btn-dark" ref={jump} aria-haspopup="dialog" onClick={openPreview}>
-        See the preview
-      </button>
     </div>
   );
 }

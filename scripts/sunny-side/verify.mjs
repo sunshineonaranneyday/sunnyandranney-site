@@ -17,11 +17,17 @@
 // Outlook darken backgrounds in dark mode but never images, so that artwork vanishes), and any
 // image that, fetched as an inbox that can't show WebP would fetch it, isn't a JPEG, PNG or GIF or
 // weighs over 150KB (on Nov 12, 2026 the heaviest good image was the 103KB hero, and the screenshot
-// PNGs Shopify wouldn't convert were 177–493KB a tile).
+// PNGs Shopify wouldn't convert were 177–493KB a tile); any photo that comes back another shape than
+// the email gives it (Shopify skipped the crop of a photo smaller than asked for, and the lead product
+// showed square in its 3:2 spot, Nov 17, 2026); and anything that lays out differently inside Kit's
+// wrapper (kit-wrapper.mjs) than on its own: Kit's style block put the masthead's date and "Shop all"
+// at the top of their rows in every inbox (Nov 17, 2026); and a word alone on the last line of a
+// paragraph, heading or product name.
 import { chromium, webkit } from 'playwright';
 import { readdirSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { GMAIL_STRIPS, MODES, SWEEP } from './inboxes.mjs';
+import { inKit } from './kit-wrapper.mjs';
 
 const root = new URL('./out/', import.meta.url).pathname;
 const dirs = [root, join(root, 'tests')].filter(existsSync);
@@ -235,6 +241,28 @@ for (const f of files) {
         if (q.width && (a === 'left' || a === 'start') && !inCard(t) && startsRow(t) && !near(q.left, L))
           drift.push(`"${t.textContent.trim().slice(0, 16)}"@${col(q.left)}`);
       }
+      // No paragraph, heading or product name ends with one word alone on its last line, unless a line
+      // break put it there ("Terrace 4 Door" over "Cabinet" on a phone, "Nov" over "21.", Nov 17, 2026)
+      const widows = [];
+      for (const t of document.querySelectorAll('p,h1,h2,.tile-name')) {
+        if (!t.getBoundingClientRect().width) continue;
+        const range = document.createRange(), words = [];
+        const walk = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+        while (walk.nextNode()) {
+          for (const m of walk.currentNode.textContent.matchAll(/\S+/g)) {
+            range.setStart(walk.currentNode, m.index);
+            range.setEnd(walk.currentNode, m.index + m[0].length);
+            const q = range.getClientRects()[0];
+            if (q) words.push({ node: walk.currentNode, at: m.index, end: m.index + m[0].length, top: q.top, word: m[0] });
+          }
+        }
+        if (words.length < 3) continue;
+        const [prev, last] = words.slice(-2);
+        if (last.top <= prev.top + 2 || !/[\p{L}\p{N}]/u.test(last.word)) continue;
+        range.setStart(prev.node, prev.end);
+        range.setEnd(last.node, last.at);
+        if (!range.cloneContents().querySelector('br')) widows.push(`"…${words.slice(-3).map((w) => w.word).join(' ')}"`);
+      }
       // Text that spills out of its own box: into a neighbor's padding, a rule, or off the email.
       const spill = [...document.querySelectorAll('p,h1,h2,.tile-name,.tile-price')].filter(t => t.getBoundingClientRect().width && t.scrollWidth > t.clientWidth + 1)
         .map(t => `"${t.textContent.trim().slice(0, 12)}"`);
@@ -259,12 +287,18 @@ for (const f of files) {
         ...tagged('a[href*="utm_content=reveal-"]', 'reveal'),
       ])];
       return {
-        unlabeled, longNames, untagged,
+        unlabeled, longNames, untagged, widows,
         spill, codes,
         misaligned: drift,
         h: document.documentElement.scrollHeight, overflow: document.documentElement.scrollWidth > innerWidth, off,
         small, dupes, noAlt: [...document.images].filter(i => !i.hasAttribute('alt')).length,
         broken: [...document.images].filter(i => !i.naturalWidth).length,
+        // Every photo is the shape the email gives it (its width and height), give or take 2%: the
+        // email sizes it by width alone, so a photo of another shape takes another height
+        misshapen: [...document.images].filter(i => {
+          const w = Number(i.getAttribute('width')), h = Number(i.getAttribute('height'));
+          return i.naturalWidth > 4 && w && h && Math.abs(i.naturalWidth / i.naturalHeight - w / h) > 0.02 * (w / h);
+        }).map(i => `${(i.alt || i.closest('a')?.textContent.trim() || 'a photo').slice(0, 24)} is ${i.naturalWidth}x${i.naturalHeight}, not ${i.getAttribute('width')}x${i.getAttribute('height')}`),
         headingsOk: heads.filter(x => x === 'H1').length === 1 && heads[0] === 'H1',
         offerY: offer ? Math.round(offer.getBoundingClientRect().bottom + scrollY) : null,
         // The sale's fine print goes under its button, never beside it (a floated button let it ride up)
@@ -276,6 +310,7 @@ for (const f of files) {
     const problems = [m.overflow && 'overflow', Object.keys(m.off).length && 'off-brand ' + JSON.stringify(m.off),
       m.small.length && 'small ' + m.small, m.dupes.length && 'duplicate links ' + m.dupes.length, m.noAlt && 'no alt',
       m.broken && 'broken images', !m.headingsOk && 'heading order', failed.length && 'failed ' + failed,
+      m.misshapen.length && 'photos of another shape than their spot: ' + m.misshapen.join(', '),
       fontsLoaded.length && `web fonts loaded where none may (${[...new Set(fontsLoaded)].join(', ')})`,
       m.untagged.length && 'not tagged with its part: ' + m.untagged.join(', '),
       m.misaligned.length && 'off the grid ' + m.misaligned.join(' '),
@@ -283,6 +318,7 @@ for (const f of files) {
       m.spill.length && 'text spilling out of its box ' + m.spill.join(' '),
       m.unlabeled && `${m.unlabeled} products without a name and price`,
       m.longNames.length && 'product names over two lines ' + m.longNames.join(' '),
+      m.widows.length && 'a word alone on its last line ' + m.widows.join(' '),
       r.w < 600 && m.offerY > FIRST_SCREEN && `sale button below the first screen (${m.offerY}px)`,
       m.offerY === null && 'no sale button',
       m.beside && 'fine print beside the sale button, not under it'].filter(Boolean);
@@ -291,6 +327,81 @@ for (const f of files) {
     await ctx.close();
   }
   failures += await sweep(f, src);
+  failures += await inKitToo(f, src, shape);
+}
+
+/**
+ * The email inside Kit's wrapper (kit-wrapper.mjs) lays out exactly as on its own, in both engines, at
+ * every width in SWEEP: everything in the email's 600px column the same size, in the same place in its
+ * parent, within 1px. (The wrapper's own tables and the email's outer one may differ: at 700px Kit's
+ * stops at 640.) Photos are stand-ins of their own shape, and the web fonts load (they would in the
+ * inbox), so the only difference between the two renders is the wrapper. Its word breaking squeezed
+ * the sale's tiers to a letter a line at 320px, which three widths would have missed at 330.
+ * @returns {Promise<number>} how many of its renders failed
+ */
+async function inKitToo(f, src, shape) {
+  const name = f.split('/').pop().replace('.html', '');
+  let failing = 0;
+  const boxes = () =>
+    [...document.querySelectorAll('table[style*="max-width:600px"], table[style*="max-width:600px"] *')].map((el) => {
+      const r = el.getBoundingClientRect(), p = el.parentElement.getBoundingClientRect();
+      return [Math.round(r.width), Math.round(r.height), Math.round(r.left - p.left), Math.round(r.top - p.top)];
+    });
+  const what = (i) => {
+    const el = document.querySelectorAll('table[style*="max-width:600px"], table[style*="max-width:600px"] *')[i];
+    return `${el.tagName.toLowerCase()} "${(el.innerText || el.alt || '').trim().replace(/\s+/g, ' ').slice(0, 24)}"`;
+  };
+  for (const [e, browser] of Object.entries(engines)) {
+    const ctx = await browser.newContext({ viewport: { width: SWEEP[0], height: 844 } });
+    await ctx.route(/^https?:\/\//, (x) => {
+      if (x.request().resourceType() !== 'image') return x.fallback();
+      const size = shape.get(x.request().url());
+      return x.fulfill(size ? { status: 200, contentType: 'image/svg+xml', body: standIn(size) } : { status: 200, contentType: 'image/gif', body: BLANK });
+    });
+    const page = await ctx.newPage();
+    // Each layout at every width: loaded once, then the screen turned through the widths
+    const layouts = async (html) => {
+      await page.setViewportSize({ width: SWEEP[0], height: 844 });
+      await page.setContent(html, { waitUntil: 'load' });
+      await page.evaluate(() => document.fonts.ready);
+      const out = [];
+      for (const w of SWEEP) {
+        await page.setViewportSize({ width: w, height: 844 });
+        out.push(await page.evaluate(boxes));
+      }
+      return out;
+    };
+    const own = await layouts(src);
+    const kit = await layouts(inKit(src));
+    const moved = new Map();
+    for (let k = 0; k < SWEEP.length && moved.size < 8; k++) {
+      const [a, b] = [own[k], kit[k]];
+      if (a.length !== b.length) {
+        moved.set('the wrapper changed what the email holds', [SWEEP[k]]);
+        continue;
+      }
+      // The first element of each kind of move: its children move with it
+      const seen = new Set();
+      for (let i = 0; i < a.length && moved.size < 8; i++) {
+        const d = a[i].map((v, j) => b[i][j] - v);
+        // The column itself is the wrapper's to place (centered in Kit's 640px, or in the screen): its size counts, not where it sits
+        if (i === 0) d[2] = d[3] = 0;
+        if (!d.some((x) => Math.abs(x) > 1)) continue;
+        const how = ['width', 'height', 'x', 'y'].map((n, j) => (d[j] ? `${n} ${d[j] > 0 ? '+' : ''}${d[j]}` : '')).filter(Boolean).join(' ');
+        if (seen.has(how)) continue;
+        seen.add(how);
+        const key = `${await page.evaluate(what, i)} ${how}`;
+        (moved.get(key) ?? moved.set(key, []).get(key)).push(SWEEP[k]);
+      }
+    }
+    await ctx.close();
+    const where = `${name.padEnd(34)} ${`in Kit's wrapper ${e}`.padEnd(22)}`;
+    if (moved.size) {
+      failing++;
+      console.log(`FAIL  ${where} ${[...moved].map(([x, ws]) => `${x} at ${widths(ws)}`).join('; ')}`);
+    } else console.log(`pass  ${where} lays out as on its own at ${SWEEP.length} widths, ${SWEEP[0]}–${SWEEP.at(-1)}px`);
+  }
+  return failing;
 }
 
 /** "320–360, 374" from [320, 330, 340, 350, 360, 374]: the widths in SWEEP order, runs joined. */
