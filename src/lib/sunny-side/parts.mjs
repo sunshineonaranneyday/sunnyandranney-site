@@ -60,11 +60,10 @@ export function cleanParts(p) {
 export const blankParts = () => cleanParts({});
 
 const over = (v, max, what) => (v.length > max ? `${what} is ${v.length} characters; keep it to ${max}.` : '');
-const isStorePath = (v) => /^\/[a-z0-9\-/_]*$/i.test(v) && !v.startsWith('//');
 
 /**
  * What's wrong with the parts, keyed by field, or {}. `ready` asks for what the finished email
- * needs (the subject, the story's words); without it, only what's typed is checked, so the week
+ * needs (the subject); without it, only what's typed is checked, so the week
  * can be saved as it's built up. `photos` is the library (id → photo), to check the ids exist.
  */
 /**
@@ -95,16 +94,8 @@ export function checkParts(p, { sale = null, photos = null, kids = null, reveals
     }
   }
   const s = p.story;
-  set('story.label', over(s.label, PART_LIMITS.label, 'The small label'));
-  set('story.headline', over(s.headline, PART_LIMITS.headline, 'The headline'));
-  set('story.body', over(s.body, PART_LIMITS.body, 'The story'));
-  set('story.cta', over(s.cta, PART_LIMITS.cta, 'The link’s words'));
-  if (s.link && !isStorePath(s.link)) e['story.link'] = 'The link goes to a page on sunnyandranney.com, like /visit/ or /shop/.';
-  // A week can go with the reveal and no story; once the story has anything in it, it needs its
-  // headline and words, so "Your headline" never goes out
-  const story = !p.reveal || Boolean(s.headline || s.body || s.photos.length);
-  if (ready && story && !s.headline) e['story.headline'] = 'Give the story a headline.';
-  if (ready && story && !s.body) e['story.body'] = 'Write a few lines for the story.';
+  // No words to check: the story's words are gone (Peter, 2026-11-17: "i want the "story" fuckong
+  // gone"); what's left of it is the collage, in Photos, and a week can go without one
   if (p.reveal && reveals && !reveals.some((r) => r.slug === p.reveal)) {
     e.reveal = reveals.length ? 'That reveal isn’t coming up anymore. Pick another, or no reveal.' : 'The charity’s reveals didn’t load. Reload the page, or pick no reveal.';
   }
@@ -153,6 +144,7 @@ export function briefParts(p, { sale, photos, kids = [], reveals = [], photoSrc 
   // Alt text stays plain: the email escapes it where it draws the photo
   const pic = (id) => ({ src: withFocus(photoSrc(id), photos.get(id)?.focus), alt: photos.get(id)?.alt || '' });
   const s = p.story;
+  const collage = collageOf(s, photos, pic);
   const kid = kidFor(p.kid, kids);
   const reveal = p.reveal ? reveals.find((r) => r.slug === p.reveal) : null;
   const { subject, preheader } = linesOf(p, sale);
@@ -163,16 +155,8 @@ export function briefParts(p, { sale, photos, kids = [], reveals = [], photoSrc 
     subject: plain(typeset(subject)),
     preheader: plain(typeset(preheader)),
     hero: p.hero && photos.has(p.hero) ? pic(p.hero) : DEFAULT_HERO,
-    story:
-      s.headline || s.body || s.photos.length
-        ? {
-            label: typeset(s.label || STORY_DEFAULTS.label),
-            headline: typeset(s.headline || 'Your headline'),
-            body: typeset(s.body || 'A few lines about what’s new in the showroom.').replace(/\n/g, '<br>'),
-            cta: [typeset(s.cta || STORY_DEFAULTS.cta), s.link || STORY_DEFAULTS.link],
-            ...collageOf(s, photos, pic),
-          }
-        : null,
+    // Only the collage: words a week saved before Nov 17, 2026 still holds never go out
+    story: collage.photos.length ? { link: STORY_DEFAULTS.link, ...collage } : null,
     reveal: reveal ? revealOf(reveal) : null,
     mission: kid ? missionOf(kid, p.kidPhoto) : null,
   };

@@ -47,7 +47,8 @@ test('the whole email from the admin: every part in order, the store’s photos 
   assert.match(html, /mso-hide:all;">20% off everything\./); // an empty preview line says the sale
   assert.ok(html.includes(`src="https://shop.sunnyandranney.com/cdn-cgi/image/width=1200,height=600,fit=cover,gravity=auto,quality=64,format=jpeg/${SITE}/media/email/${ids[0]}.jpg/"`));
   assert.match(html, /alt="Photo 1"/);
-  assert.match(html, /Christmas is&nbsp;here\./);
+  // The photos alone: no story's words go out, even from a week that has them (Peter, 2026-11-17)
+  assert.doesNotMatch(html, /Christmas is(&nbsp;| )here|story-link/);
   assert.match(html, /utm_content=story-photo-3/);
   assert.match(html, />233</); // the charity's numbers
   // Kit fills one thing, the unsubscribe link's address, which only it can make for each subscriber.
@@ -98,9 +99,9 @@ test('the parts are checked: lengths, links, the subject against the sale, alt t
   assert.deepEqual(checkParts(ok, { sale, photos, ready: true }), {});
   assert.match(checkParts(cleanParts({ subject: 'Half off everything: 50% off!' }), { sale }).subject, /It says .*50%/);
   assert.match(checkParts(cleanParts({ subject: 'x'.repeat(81) }), {}).subject, /81 characters; keep it to 80/);
+  // Only the subject is needed: the story's words are gone, and a week can go without photos
   const empty = checkParts(blankParts(), { sale, ready: true });
-  assert.ok(empty.subject && empty['story.headline'] && empty['story.body']);
-  assert.match(checkParts(cleanParts({ story: { link: 'https://evil.com' } }), {})['story.link'], /page on sunnyandranney\.com/);
+  assert.deepEqual(Object.keys(empty), ['subject']);
   assert.match(checkParts(cleanParts({ story: { photos: ids } }), {})['story.photos'], /5 photos at most\. Take 1 out/);
   assert.match(checkParts(cleanParts({ hero: 'zzzzzzzzzzzzzzzz' }), { photos }).photos, /isn’t in the library/);
   const noAlt = new Map(photos);
@@ -188,7 +189,6 @@ test('it can go only when it’s finished, and says what’s left, each with the
     { text: 'Write the subject line.', section: 'em-lines' },
     { text: 'Set the sale.', section: 'em-sale' },
     { text: 'Pick 2 more products.', section: 'em-products' },
-    { text: 'Write the story.', section: 'em-story' },
   ]);
   assert.deepEqual(kitProblems({ ...ready, kids: [] }), [{ text: 'The charity’s kids didn’t load, so the charity section can’t be drawn. Reload the page to try again.', section: 'em-charity' }]);
 });

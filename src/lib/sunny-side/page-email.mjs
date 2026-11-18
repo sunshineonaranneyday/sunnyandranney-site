@@ -7,7 +7,7 @@
  * with its live numbers, the visit band and the footer. No Node or browser APIs.
  */
 
-import { lines } from './email.mjs';
+import { SECTIONS, lines } from './email.mjs';
 import { briefParts } from './parts.mjs';
 import { PICKS, previewWall } from './wall.mjs';
 
@@ -29,38 +29,29 @@ export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catal
   const wallReady = Boolean(catalog) && Boolean(wall) && wall.picks.length >= PICKS[0] && wall.picks.length <= PICKS[1];
   if (wallReady) brief.wall = previewWall(wall, catalog, site);
   if (events.length) brief.events = events;
-  const sections = [
-    'masthead',
-    'hero',
-    'offer',
-    ...(wallReady ? ['wall'] : []),
-    ...(brief.story ? ['story'] : []),
-    ...(brief.reveal ? ['reveal'] : []),
-    ...(events.length ? ['events'] : []),
-    ...(brief.mission ? ['mission'] : []),
-    'visit',
-    'footer',
-  ];
+  // In the email's own order (SECTIONS), so the preview and the email sent can't drift from it: a
+  // second list here kept the story above the reveal after the email's moved (Nov 17, 2026)
+  const has = { wall: wallReady, story: Boolean(brief.story), reveal: Boolean(brief.reveal), events: events.length > 0, mission: Boolean(brief.mission) };
+  const sections = SECTIONS.filter((s) => has[s] ?? true);
   return { brief, sections, wallReady };
 }
 
 /**
- * The admin page's sections, top to bottom, in the order Staci decides things (Peter, 2026-11-17):
- * the subject line, the sale, the products, the reveal (a charity reveal still ahead, or none), the
- * story's words, then the photos (the top photo and the story's collage), the events, the charity, and
- * Send. The reveal and the story are each their own section, in the email too: one never takes the
- * other's place. Not the email's own order (SECTIONS in email.mjs). The page, its error list and
- * "Before it can go" all follow this list; page-order.test.mjs holds them to it.
+ * The admin page's sections, top to bottom (Peter, 2026-11-17: "subject, sale, products, reveal,
+ * photos, events, charity, send!!!!!! thats the fucking order"): the subject line, the sale, the
+ * products, the reveal (a charity reveal still ahead, or none), the photos (the top photo and the
+ * collage), the events, the charity, and Send. There is no story: its words are gone from the page
+ * and the email ("i want the "story" fuckong gone"). The page, its error list and "Before it can go"
+ * all follow this list; page-order.test.mjs holds them to it.
  */
-export const PAGE_SECTIONS = ['em-lines', 'em-sale', 'em-products', 'em-reveal', 'em-story', 'em-photos', 'em-events', 'em-charity', 'em-send'];
+export const PAGE_SECTIONS = ['em-lines', 'em-sale', 'em-products', 'em-reveal', 'em-photos', 'em-events', 'em-charity', 'em-send'];
 
 /** The fields each section of the page holds, by the first part of an error's key (check, checkWall, checkParts). */
 const FIELDS = {
   'em-lines': ['subject', 'preheader'],
   'em-sale': ['kind', 'tiers', 'percent', 'ends'],
   'em-reveal': ['reveal'],
-  'em-story': ['story'],
-  'em-photos': ['photos', 'story.photos'],
+  'em-photos': ['photos', 'story'],
   'em-products': ['picks', 'label', 'headline'],
   'em-charity': ['kid'],
 };
@@ -90,7 +81,7 @@ export function kitProblems({ special, wall, parts, photos, kids, reveals = null
   const add = (text, section) => out.push({ text, section });
   const e = checkParts(parts, { sale, photos, kids, reveals, ready: true });
   if (e.subject || e.preheader) add(e.subject && !parts.subject ? 'Write the subject line.' : 'Fix the subject line.', 'em-lines');
-  if (e.photos || e['story.photos']) add(e.photos || 'Fix the story’s photos.', 'em-photos');
+  if (e.photos || e['story.photos']) add(e.photos || 'Fix the collage’s photos.', 'em-photos');
   if (!special) add('Set the sale.', 'em-sale');
   else if (Object.keys(check(special, send)).length) add('Fix the sale.', 'em-sale');
   const n = wall?.picks.length ?? 0;
@@ -100,8 +91,6 @@ export function kitProblems({ special, wall, parts, photos, kids, reveals = null
   // A reveal invite can't go out after the reveal
   const reveal = parts.reveal && reveals?.find((r) => r.slug === parts.reveal);
   if (reveal && reveal.day < send) add(`${reveal.name}’s reveal was ${reveal.short}, before this email goes out. Pick another, or no reveal.`, 'em-reveal');
-  if (e['story.headline'] || e['story.body']) add('Write the story.', 'em-story');
-  else if (Object.keys(e).some((k) => k.startsWith('story.') && k !== 'story.photos')) add('Fix the story.', 'em-story');
   if (e.kid) add(e.kid, 'em-charity');
   // A stable sort: within a section, the order above
   return out.sort((a, b) => pagePlace(a.section) - pagePlace(b.section));

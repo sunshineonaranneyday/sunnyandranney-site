@@ -38,7 +38,7 @@ import { type Fits, type Focus, type Spill, Preview } from './Preview';
 import { Products } from './Products';
 import { Sale } from './Sale';
 import { Send } from './Send';
-import { RevealPick, Story } from './Story';
+import { RevealPick } from './Story';
 import { Subject } from './Subject';
 
 const blankWall = (): Wall => ({ label: '', headline: '', picks: [], arranged: 'auto' });
@@ -60,8 +60,8 @@ type Fixable = Exclude<Spill['part'], 'layout'>;
 const SPILL_WHERE: Record<Fixable, [string, string]> = {
   offer: ['the sale', 'Shorten it.'],
   wall: ['a product’s name', 'Give it a shorter name on its tile.'],
-  story: ['the story', 'Shorten it, or break it with a space.'],
-  photos: ['the story', 'Shorten it, or break it with a space.'],
+  story: ['the photos', 'Shorten it, or break it with a space.'],
+  photos: ['the photos', 'Shorten it, or break it with a space.'],
   reveal: ['the reveal', 'Those words come from the charity’s site: pick another reveal, or fix them there.'],
   events: ['the events', 'Shorten it in the event.'],
   mission: ['the charity section', 'Those words come from the charity’s site: pick another family, or fix them there.'],
@@ -131,11 +131,11 @@ export default function EmailApp(props: AppProps) {
     const target = e.target as HTMLElement;
     const section = target.closest('.em-section')?.id;
     // Picking the top photo shows the top of the email, where it goes ("offer" is the top: the
-    // preview has no mark for the masthead); the rest of Photos is the story's collage
+    // preview has no mark for the masthead); the rest of Photos is the collage
     const topPhoto = section === 'em-photos' && Boolean(target.closest('label')?.querySelector('input[name="em-hero"]'));
     const part: Focus | null = topPhoto
       ? 'offer'
-      : (({ 'em-sale': 'offer', 'em-products': 'wall', 'em-photos': 'photos', 'em-reveal': 'reveal', 'em-story': 'story', 'em-events': 'events', 'em-charity': 'mission', 'em-lines': 'offer', 'em-send': 'offer' } as Record<string, Focus>)[section ?? ''] ?? null);
+      : (({ 'em-sale': 'offer', 'em-products': 'wall', 'em-photos': 'photos', 'em-reveal': 'reveal', 'em-events': 'events', 'em-charity': 'mission', 'em-lines': 'offer', 'em-send': 'offer' } as Record<string, Focus>)[section ?? ''] ?? null);
     if (part && part !== focus) setFocus(part);
   };
 
@@ -246,7 +246,7 @@ export default function EmailApp(props: AppProps) {
           : null;
 
   // The section that fixes it, for the error list's link
-  const SECTION: Record<Fixable, string> = { offer: 'em-sale', wall: 'em-products', reveal: 'em-reveal', story: 'em-story', photos: 'em-story', events: 'em-events', mission: 'em-charity' };
+  const SECTION: Record<Fixable, string> = { offer: 'em-sale', wall: 'em-products', reveal: 'em-reveal', story: 'em-photos', photos: 'em-photos', events: 'em-events', mission: 'em-charity' };
   const layoutSection = layoutProblem === spillWords && spillAt ? SECTION[spillAt.part] : longNames.size && layoutProblem && !(fold !== null && fold > FIRST_SCREEN) ? 'em-products' : 'em-sale';
 
   // ── Saving ──
@@ -415,12 +415,6 @@ export default function EmailApp(props: AppProps) {
       ? { state: `${reveal.name}’s reveal · ${reveal.short}`, tone: 'ok' as const }
       : { state: 'Pick again', tone: 'bad' as const }
     : { state: 'None this week', tone: 'ok' as const };
-  const storyState =
-    story.headline && story.body
-      ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const }
-      : reveal && !story.headline && !story.body && !story.photos.length
-        ? { state: 'None this week', tone: 'ok' as const }
-        : { state: 'Not written', tone: 'todo' as const };
   // ── Folding: a finished section shows as a line to open, the way Mailchimp's campaign checklist
   // shows each finished part; an unfinished one stays open, and one with a problem can't be folded.
   // Whether a section starts open is settled when the page opens, so finishing one never folds it
@@ -475,10 +469,9 @@ export default function EmailApp(props: AppProps) {
             : '',
     'em-products': n ? `${n} products, ${wall.arranged === 'auto' ? 'arranged for you' : 'in your order'}` : '',
     'em-reveal': reveal ? `${reveal.name}’s reveal, ${reveal.short}` : 'No reveal this week',
-    'em-story': story.headline ? `“${story.headline}”` : 'No story this week',
     'em-photos': story.photos.length
       ? `${layoutFor(story.layout, story.photos.map((id) => ratioOf(photosById.get(id)))).name}, ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}`
-      : 'No photos in the story yet',
+      : 'No photos in the collage',
     'em-events': shownEvents.length ? shownEvents.map((e) => e?.title).filter(Boolean).join(', ') : 'No events this week',
     'em-charity': kid ? `${kid.name}, ${parts.kidPhoto ? 'one of their photos' : 'their finished room'}` : '',
   };
@@ -574,9 +567,8 @@ export default function EmailApp(props: AppProps) {
             </div>
           )}
 
-          {/* In the order Staci decides things (PAGE_SECTIONS in page-email.mjs): the subject line, the
-              sale, the products, the reveal, the story, the photos, the events and the charity. Send last.
-              The reveal and the story are each their own section of the email: one never takes the other's place. */}
+          {/* In Peter's order (PAGE_SECTIONS in page-email.mjs, 2026-11-17): the subject line, the sale, the
+              products, the reveal, the photos, the events and the charity, Send last. No story: it's gone. */}
           <Section n={1} id="em-lines" locked={locked} title="Subject line" state={parts.subject ? 'Written' : 'Not written'} tone={linesTone} summary={summaries['em-lines']} {...folding('em-lines', linesTone)}>
             <Subject parts={parts} setParts={setParts} sale={saleOk ? sale : null} shown={shownParts} />
           </Section>
@@ -593,23 +585,19 @@ export default function EmailApp(props: AppProps) {
             <RevealPick parts={parts} setParts={setParts} shown={shownParts} reveals={props.reveals} />
           </Section>
 
-          <Section n={5} id="em-story" locked={locked} title="The story" state={storyState.state} tone={storyState.tone} summary={summaries['em-story']} {...folding('em-story', storyState.tone)}>
-            <Story parts={parts} setParts={setParts} shown={shownParts} />
-          </Section>
-
-          <Section n={6} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.photos.length} in the story`} tone={photosTone} summary={summaries['em-photos']} {...folding('em-photos', photosTone)}>
+          <Section n={5} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.photos.length} in the collage`} tone={photosTone} summary={summaries['em-photos']} {...folding('em-photos', photosTone)}>
             <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} />
           </Section>
 
-          <Section n={7} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={eventsTone} summary={summaries['em-events']} {...folding('em-events', eventsTone)}>
+          <Section n={6} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={eventsTone} summary={summaries['em-events']} {...folding('em-events', eventsTone)}>
             <Events events={events} setEvents={setEvents} draft={draft} setDraft={setDraft} sendDate={day} sendLabel={sendLabel(day)} today={today} />
           </Section>
 
-          <Section n={8} id="em-charity" locked={locked} title="The charity" state={charityState.state} tone={charityState.tone} summary={summaries['em-charity']} {...folding('em-charity', charityState.tone)}>
+          <Section n={7} id="em-charity" locked={locked} title="The charity" state={charityState.state} tone={charityState.tone} summary={summaries['em-charity']} {...folding('em-charity', charityState.tone)}>
             <Charity parts={parts} setParts={setParts} kids={props.kids} error={partsErrors.kid} />
           </Section>
 
-          <Section n={9} id="em-send" title="Send" state={sendState.state} tone={sendState.tone}>
+          <Section n={8} id="em-send" title="Send" state={sendState.state} tone={sendState.tone}>
             <Send
               send={send}
               label={label}
