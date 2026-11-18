@@ -143,9 +143,11 @@ export function checkAgainTime({ againAt, againDay, sendAt, days, revealStart = 
 export function againAudience({ sent, opened, clicked, engaged, joined, lately, mailed, noMarketing }) {
   const people = new Set();
   const left = { read: 0, cold: 0, lately: 0, mailed: 0, noMarketing: 0 };
+  // Who opened it first, then the rest: so "who opened it" counts every opener still on the list, as
+  // Kit's report does (counted under no marketing first, the Nov 10 email's openers came to 1,520 of 1,685)
   for (const id of sent) {
-    if (noMarketing.has(id)) left.noMarketing++;
-    else if (opened.has(id) || clicked.has(id)) left.read++;
+    if (opened.has(id) || clicked.has(id)) left.read++;
+    else if (noMarketing.has(id)) left.noMarketing++;
     else if (!engaged.has(id) && !joined.has(id)) left.cold++;
     else if (lately.has(id)) left.lately++;
     else if (mailed.has(id)) left.mailed++;

@@ -47,11 +47,11 @@ const [firstStats, againStats] = again?.state === 'sent' && again.kitId ? await 
 const owner = viewFor(admin, Astro.url.hostname.toLowerCase()).owner;
 // The owner's check, read-only: who it would go again to now, worked out as the run does and held to
 // Kit's own report of the email. Nothing is tagged or sent. ?again-check on the address.
-let check: { people: number; left: Record<string, number> } | { error: string } | null = null;
+let check: { people: number; left: Record<string, number>; kit: { onList: number; opened: number; recipients: number; reportOpened: number } } | { error: string } | null = null;
 if (owner && email && Astro.url.searchParams.has('again-check')) {
   try {
-    const { people, left } = await listPeople(kit, env.DB, { emailId: Number(email.id), now: Date.now() });
-    check = { people: people.size, left };
+    const { people, left, kit: found } = await listPeople(kit, env.DB, { emailId: Number(email.id), now: Date.now() });
+    check = { people: people.size, left, kit: found };
   } catch (err) {
     check = { error: err instanceof Error ? err.message : String(err) };
   }
@@ -187,13 +187,17 @@ const data = email ? JSON.stringify({ html: email.html }).replace(/</g, '\\u003c
             {'error' in check ? (
               <p class="again-owner">It wouldn’t go: {check.error}</p>
             ) : (
-              <p>
-                {n(check.people)} {check.people === 1 ? 'person' : 'people'}. Left out:{' '}
-                {Object.entries(LEFT_WORDS)
-                  .map(([k, words]) => `${n(check.left[k] ?? 0)} who ${words}`)
-                  .join('; ')}
-                . Kit’s report backs up the list. Nothing was tagged or sent.
-              </p>
+              <>
+                <p>
+                  {`Kit’s report: ${n(check.kit.recipients)} got it, ${n(check.kit.reportOpened)} opened it. Kit’s filter, asked the same: ${n(check.kit.opened)} opened it, and ${n(check.kit.onList)} got it and are still on the store’s list. They agree, so it would go.`}
+                </p>
+                <p>
+                  {`${n(check.people)} ${check.people === 1 ? 'person' : 'people'} would get it again. Left out: ${Object.entries(LEFT_WORDS)
+                    .filter(([k]) => (check.left[k] ?? 0) > 0)
+                    .map(([k, words]) => `${n(check.left[k])} who ${words}`)
+                    .join('; ')}. Nothing was tagged or sent.`}
+                </p>
+              </>
             )}
           </section>
         )}

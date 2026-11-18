@@ -93,17 +93,17 @@ test('the subject line it goes again with is a new one, and keeps the first one�
 test('it goes only to who didn’t read it, still reads the store’s email, and hasn’t had one lately', () => {
   const S = (...ids) => new Set(ids);
   const { people, left } = againAudience({
-    sent: S('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'),
-    opened: S('a'),
+    sent: S('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'),
+    opened: S('a', 'j'), // 'j' opened it and has asked for no marketing since: counted as opened, as Kit's report counts them
     clicked: S('b'), // a click without an open (images off) is still reading it
     engaged: S('c', 'f', 'g', 'h', 'i', 'zz'),
     joined: S('d'), // new: no history yet, but in
     lately: S('f'),
     mailed: S('g'),
-    noMarketing: S('h'),
+    noMarketing: S('h', 'j'),
   });
   assert.deepEqual([...people].sort(), ['c', 'd', 'i']);
-  assert.deepEqual(left, { read: 2, cold: 1, lately: 1, mailed: 1, noMarketing: 1 }); // 'e' is cold; 'zz' wasn't sent it
+  assert.deepEqual(left, { read: 3, cold: 1, lately: 1, mailed: 1, noMarketing: 1 }); // 'e' is cold; 'zz' wasn't sent it
 });
 
 test('the tag is changed to hold exactly the list', () => {
