@@ -1,0 +1,6 @@
+---
+// The weekly special became part of the weekly email page, with the products and events.
+export const prerender = false;
+const send = Astro.url.searchParams.get('send');
+return Astro.redirect(`/admin/email/${send ? `?send=${encodeURIComponent(send)}` : ''}`, 301);
+---

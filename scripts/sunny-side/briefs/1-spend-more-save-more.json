@@ -1,0 +1,36 @@
+{
+  "hero": {
+    "src": "cf:sunny-ranney-interior",
+    "alt": "The Sunny & Ranney showroom floor"
+  },
+  "wall": "admin",
+  "story": {
+    "label": "Christmas d&#233;cor &amp; gifts",
+    "headline": "We couldn&#8217;t wait any&nbsp;longer.<br>Christmas is here.",
+    "body": "The trees are up and the shelves are stocked. Come see the Christmas d&#233;cor and gifts, in the showroom only.",
+    "cta": [
+      "Plan your visit",
+      "/visit/"
+    ],
+    "photo": {
+      "src": "https://cdn.shopify.com/s/files/1/0930/2117/6092/files/shopping_1.jpg?v=1776021813",
+      "alt": "Hudson castered ottoman in a living room"
+    }
+  },
+  "events": "admin",
+  "mission": {
+    "photo": {
+      "src": "cf:kids/remi-and-nico/1791465769931-RemiNiko-9721.jpg",
+      "alt": "Remi and Nico's family celebrating in their new wheelchair-accessible bathroom on reveal day"
+    },
+    "caption": "Reveal day in Remi and Nico&#8217;s new bathroom.",
+    "story": "Their bathroom door was only two feet wide, too narrow to wheel the sisters through. Now they have a bathroom built around their needs, at no cost to their&nbsp;family.",
+    "cta": "See their reveal",
+    "url": "https://sunshineonaranneyday.com/kids/remi-and-nico/",
+    "impact": "live"
+  },
+  "subject": "🎄 Christmas Is In Store! Save Up to {upto} + Holiday Fun!",
+  "preheader": "{offer} Plus Christmas décor and kids' crafts every Saturday.",
+  "sale": "admin",
+  "send_date": "2026-11-17"
+}

@@ -16,6 +16,7 @@ declare namespace Cloudflare {
     CF_ACCESS_AUD?: string;
     ADMIN_MANAGER_EMAILS?: string;
     ADMIN_KIOSK_EMAILS?: string;
+    ADMIN_KIOSK_SERVICE_TOKENS?: string;
     ADMIN_OWNER_EMAILS?: string;
     ADMIN_DEV_EMAIL?: string;
     GUSTO_ENV?: string;
@@ -24,6 +25,25 @@ declare namespace Cloudflare {
     GUSTO_MCP_CLIENT_ID?: string;
     GUSTO_MCP_CLIENT_SECRET?: string;
     GUSTO_TOKEN_KEY?: string;
+    /** The Medusa backend the buying and warehouse pages call, and its secret admin key. */
+    MEDUSA_BACKEND_URL?: string;
+    MEDUSA_ADMIN_KEY?: string;
+    /** Photos uploaded for the weekly email (src/lib/sunny-side/photo-store.mjs). */
+    PHOTOS?: R2Bucket;
+    /** Which Kit email template the weekly email goes on; the first "Starting point" when unset. */
+    KIT_TEMPLATE_ID?: string;
+    /** A stand-in Kit for local tests. Never set in production. */
+    KIT_API_BASE?: string;
+    /** The charity's own database (soard-db), read for its kids: the email's charity section. Only ever read. */
+    SOARD_DB?: D1Database;
+    /** The site's own files, for reading the prerendered catalog from a server route. */
+    ASSETS?: { fetch(input: Request | string | URL): Promise<Response> };
+    /** sent.dm, which texts staff their schedule. */
+    SENT_DM_API_KEY?: string;
+    /** A stand-in sent.dm for local tests. Never set in production. */
+    SENT_DM_API_BASE?: string;
+    /** "1" sends with sent.dm's sandbox flag: checked, never delivered. */
+    SENT_DM_SANDBOX?: string;
   }
 }
 
