@@ -9,6 +9,7 @@ test('the emails written in Kit’s own editor show their pictures on the sent p
     'https://functions-js.kit.com/icons?color=%23000000&platform=instagram&style=solid',
     'https://cdn.convertkit.com/assets/images/kit-badge-light.png',
     'https://cdn.kit.com/assets/images/kit-badge-light.png', // where the badge's address sends it
+    'https://cdn.convertkit.com/assets/layout-placeholder-v2.png', // behind a photo that doesn't fill its cell (Nov 3)
   ]) {
     assert.ok(imageAllowed(url), url);
   }
