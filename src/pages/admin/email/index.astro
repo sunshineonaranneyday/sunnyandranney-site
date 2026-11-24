@@ -20,6 +20,7 @@ import { listPeople, recentTests } from '@/lib/sunny-side/test-store.mjs';
 import { listReports } from '@/lib/sunny-side/layout-store.mjs';
 import { viewFor } from '@/lib/admin/nav.mjs';
 import { localDate } from '@/lib/time-clock/hours.mjs';
+import { readStoreHours } from '@/lib/schedule/store';
 
 const admin = Astro.locals.admin;
 if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
@@ -71,7 +72,7 @@ async function revealsNow() {
   }
 }
 
-const [past, events, testList, library, impact, kids, reveals, usual, subscribers] = await Promise.all([
+const [past, events, testList, library, impact, kids, reveals, usual, subscribers, hours] = await Promise.all([
   pastWeeks(db, send, 12),
   eventsFrom(db, today),
   listPeople(db),
@@ -81,6 +82,8 @@ const [past, events, testList, library, impact, kids, reveals, usual, subscriber
   revealsNow(),
   fromKit('usual time', () => usualTime(kit!)),
   fromKit('subscriber count', () => subscriberCount(kit!)),
+  // The store's hours as Google has them (the hours-sync worker keeps them in D1), as the email sent reads them
+  readStoreHours(db),
 ]);
 const parts = record?.parts ?? blankParts();
 // The library, plus any older photo this email still uses
@@ -126,6 +129,7 @@ const props = {
   usualTime: usual,
   subscribers: Number.isFinite(subscribers) ? subscribers : null,
   impact,
+  hours,
   local: import.meta.env.DEV,
   owner,
   layoutReports,

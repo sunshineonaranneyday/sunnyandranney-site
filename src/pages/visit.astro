@@ -1,6 +1,7 @@
 ---
 import Base from '@/layouts/Base.astro';
 import { getContactStatic, getHoursStatic, formatHoursShort, getUpcomingHolidays, getTodayHoliday } from '@/lib/settings';
+import { closedLine } from '@/lib/store-hours.mjs';
 
 const [contact, hours] = await Promise.all([getContactStatic(), getHoursStatic()]);
 const todayHoliday = hours ? getTodayHoliday(hours) : null;
@@ -14,6 +15,9 @@ const phone = contact?.phone || '678.888.5140';
 const email = contact?.email || 'info@sunnyandranney.com';
 const phoneDigits = phone.replace(/\D/g, '');
 const hoursLine = hours ? formatHoursShort(hours) : 'Tue–Thu 10am–5pm · Fri–Sat 10am–6pm';
+// The days it's closed every week, from the same hours: "Closed Sunday & Monday" was typed in, and
+// sat under "Sun 11am–2pm" once Google's hours opened those days (Nov 2026)
+const closedDays = hours ? closedLine(hours.days) : null;
 
 const title = 'Visit Our Roswell GA Showroom | Sunny & Ranney';
 const description = `Visit Sunny & Ranney at ${address}, ${city}, ${state} ${zip}. Hours: ${hoursLine}. Free parking in Historic Roswell's Canton Street district. Call ${phone}.`;
@@ -96,7 +100,7 @@ const placeSchema = {
               ))}
             </div>
           )}
-          <p>{hoursLine}<br />Closed Sunday &amp; Monday</p>
+          <p>{hoursLine}{closedDays && <><br />{closedDays}</>}</p>
 
           <h3>Parking &amp; Access</h3>
           <p>

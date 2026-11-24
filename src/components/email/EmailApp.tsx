@@ -194,7 +194,7 @@ export default function EmailApp(props: AppProps) {
   const wallReady = Boolean(catalog) && wall.picks.length >= PICKS[0] && wall.picks.length <= PICKS[1];
   // The same email the Kit draft is made from (page-email.mjs), so Kit gets what the page shows
   const { brief, sections } = useMemo(
-    () => pageEmail({ sale, wall, parts, photos: photosById, kids: props.kids, reveals: props.reveals, catalog, events: shownEvents, impact: props.impact, send: day, site: SITE }),
+    () => pageEmail({ sale, wall, parts, photos: photosById, kids: props.kids, reveals: props.reveals, catalog, events: shownEvents, impact: props.impact, hours: props.hours, send: day, site: SITE }),
     [sale, wall, parts, photosById, catalog, shownEvents, day],
   );
 
