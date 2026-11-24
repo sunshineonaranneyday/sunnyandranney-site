@@ -115,6 +115,8 @@ export interface AppProps {
   subscribers: number | null;
   /** The charity's numbers, read from its site when the page loaded, or null if it didn't answer. */
   impact: { rooms: string; children: string } | null;
+  /** The store's hours as Google has them (settings:hours, synced each morning), for the visit band (store-hours.mjs). */
+  hours: { days: Array<{ day: string; open: string; close: string; closed: boolean }>; holidays: Array<{ date: string; label: string; open: string; close: string; closed: boolean }> } | null;
   /** True on a developer's machine, whose uploads aren't on the live site. */
   local: boolean;
   /** The signed-in login is the owner's, the one shown problems in the email's own layout. */

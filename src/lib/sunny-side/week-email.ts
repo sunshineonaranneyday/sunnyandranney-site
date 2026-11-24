@@ -3,9 +3,11 @@
  * ===========================================================================
  * One function builds it both times, from what's saved: the same pageEmail the page previews, with
  * the shop's catalog as the site published it, the charity's kids from its own database, the
- * events still ahead, and the charity's numbers read live. So a test is the email that goes out.
+ * events still ahead, the charity's numbers read live, and the store's hours as Google has them
+ * (synced each morning into settings:hours). So a test is the email that goes out.
  */
 import type { APIContext } from 'astro';
+import { readStoreHours } from '@/lib/schedule/store';
 import { SITE, lines, plain, render } from './email.mjs';
 import { eventsFrom } from './event-store.mjs';
 import { toBriefEvent } from './events.mjs';
@@ -101,7 +103,8 @@ export async function weekEmail(context: APIContext, send: string, today: string
     return { ok: false, problems: [`Couldn’t read the charity’s numbers from its site (${err instanceof Error ? err.message : err}), so the email would show old ones. Try again in a minute.`], status: 502 };
   }
   const events = (await eventsFrom(db, today)).map((r) => toBriefEvent(r.event, day, SITE)).filter(Boolean);
-  const { brief, sections } = pageEmail({ sale, wall: week.wall, parts, photos, kids, reveals: reveals ?? [], catalog, events, impact, send: day, site: SITE });
+  const hours = await readStoreHours(db);
+  const { brief, sections } = pageEmail({ sale, wall: week.wall, parts, photos, kids, reveals: reveals ?? [], catalog, events, impact, hours, send: day, site: SITE });
   // Kit takes the subject and preview line as plain text, so they go as characters, not HTML
   const { subject, preheader } = lines(brief);
   return { ok: true, week, html: render(brief, sections), subject: plain(subject), preheader: plain(preheader), leftOut };

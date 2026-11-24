@@ -7,17 +7,21 @@
  * with its live numbers, the visit band and the footer. No Node or browser APIs.
  */
 
+import { emailHours } from '../store-hours.mjs';
 import { SECTIONS, lines } from './email.mjs';
 import { briefParts } from './parts.mjs';
 import { PICKS, previewWall } from './wall.mjs';
 
 /**
- * @param {{ sale: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], reveals?: any[], catalog: Map<string, any> | null, events: any[], impact: { rooms: string, children: string } | null, send: string, site: string }} week
- *   sale as the email takes it (toSale/draftSale); events already brief events; photos the library by id.
+ * @param {{ sale: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], reveals?: any[], catalog: Map<string, any> | null, events: any[], impact: { rooms: string, children: string } | null, hours?: import('../store-hours.mjs').StoreHours | null, send: string, site: string }} week
+ *   sale as the email takes it (toSale/draftSale); events already brief events; photos the library by id;
+ *   hours the store's as Google has them (settings:hours, store-hours.mjs).
  */
-export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catalog, events, impact, send, site }) {
+export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catalog, events, impact, hours = null, send, site }) {
   /** @type {Record<string, any>} */
   const brief = { send_date: send, sale, ...briefParts(parts, { sale, photos, kids, reveals }) };
+  const shownHours = emailHours(hours, send);
+  if (shownHours) brief.hours = shownHours;
   // A subject that promises more than the sale can't be drawn; the page says why beside the field
   try {
     lines(brief);

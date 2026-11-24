@@ -1140,12 +1140,27 @@ export class Email {
     );
   }
 
+  /**
+   * The store's hours as Google has them (store-hours.mjs), read when the email is built: the usual
+   * week, then in bold the days of the email's week that aren't usual (a holiday, a short day). An
+   * email built with no hours (a stress-test brief) leaves them out rather than guess.
+   */
+  hours() {
+    const h = this.b.hours;
+    if (!h?.week?.length) return '';
+    const line = (l) => noWidow(escape(l).replace(/\u2013/g, '&#8211;').replace(/ &amp; /g, '&nbsp;&amp;&nbsp;'));
+    return (
+      Email.text(h.week.map(line).join('<br>'), { size: 16, lh: 24 }) +
+      (h.special?.length ? Email.text(h.special.map(line).join('<br>'), { size: 16, lh: 24, weight: 700, cls: 'hours-special' }) : '')
+    );
+  }
+
   visit() {
     const left =
       Email.label('Visit the showroom') +
       Email.h2('109A Oak Street', { mb: 4 }) +
       Email.text('Roswell, GA', { size: 16, lh: 24, weight: 700, mb: S1 }) +
-      Email.text('Tue&#8211;Sat, 10am&#8211;5pm<br>Closed Sun&nbsp;&amp;&nbsp;Mon', { size: 16, lh: 24 }) +
+      this.hours() +
       Email.text(
         `<a href="tel:+16788885140" style="display:inline-block;padding:10px 0;color:${CHARCOAL};` +
           `text-decoration:underline;text-underline-offset:3px;">678.888.5140</a>`,
