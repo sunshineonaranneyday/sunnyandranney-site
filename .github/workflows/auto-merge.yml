@@ -1,0 +1,37 @@
+# A pull request marked "Ready for review" merges by itself once "Tests" passes.
+#
+# Agents open their pull requests as drafts, and a draft never merges. Marking one
+# "Ready for review" is the OK: this turns on GitHub's auto-merge for it, and GitHub
+# squashes it into main once the checks main requires have passed. The ruleset "Tests
+# pass before merging into main" requires "Tests" (checks.yml); the Cloudflare Pages
+# preview isn't required, since it always fails without the store's Shopify keys.
+# If Tests fails, nothing merges; a new push that passes merges it then.
+#
+# Only on "Ready for review", not on a pull request opened ready, so nothing merges
+# without that click. Only pull requests from this repository's own branches: one from
+# a fork gets a read-only token here and never merges by itself. To stop one after
+# the click, use "Disable auto-merge" on the pull request, or turn it back into a draft.
+
+name: Auto-merge
+
+on:
+  pull_request:
+    types: [ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Merge when Tests pass
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Turn on auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: gh pr merge "$PR" --repo "$REPO" --auto --squash
