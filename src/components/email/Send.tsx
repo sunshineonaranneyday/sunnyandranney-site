@@ -86,6 +86,8 @@ interface Props {
   /** The sale's last day and when a reveal the email invites people to starts, if any: it can't go again after either. */
   saleEnds: string | null;
   revealStart: string | null;
+  /** An extra email (special.mjs isExtraDate): it goes on its own day, once, and never again to the people who don't open it. */
+  extra?: boolean;
 }
 
 /**
@@ -171,7 +173,7 @@ export function Send(props: Props) {
 
   // Going again, a few days later, to the people who don't open it (again.mjs). On unless turned off.
   const againAt = { day, time, revealStart: props.revealStart };
-  const againIn = againDays({ send, ...againAt, saleEnds: props.saleEnds });
+  const againIn = props.extra ? [] : againDays({ send, ...againAt, saleEnds: props.saleEnds });
   const [againWanted, setAgainWanted] = useState(true);
   const againOn = againWanted && againIn.length > 0;
   const [pickedAgainDay, setAgainDay] = useState<string | null>(null);
@@ -569,7 +571,7 @@ export function Send(props: Props) {
                           <span>
                             <strong>{d === today ? 'Today' : wd}</strong>
                             <small>{md}</small>
-                            <em>{d === send ? 'Usual' : '\u00a0'}</em>
+                            <em>{d === send && !props.extra ? 'Usual' : '\u00a0'}</em>
                           </span>
                         </label>
                       );
@@ -606,6 +608,7 @@ export function Send(props: Props) {
                   )}
                 </fieldset>
                 <p class="em-hint">To {count(subscribers)}.</p>
+                {!props.extra && (
                 <div class={`em-again${againOn ? ' is-on' : ''}`}>
                   <label class="em-again-switch">
                     <input
@@ -692,9 +695,10 @@ export function Send(props: Props) {
                     </div>
                   )}
                 </div>
+                )}
               </div>
             ) : (
-              <p class="em-hint">This email’s week is over, so it can’t be scheduled.</p>
+              <p class="em-hint">{props.extra ? 'This email’s day is over, so it can’t be scheduled.' : 'This email’s week is over, so it can’t be scheduled.'}</p>
             )}
             <div class="em-send-row">
               <button type="button" class="btn btn-primary" onClick={() => void openSchedule()} disabled={!ready || !open.length || Boolean(busy) || saving}>

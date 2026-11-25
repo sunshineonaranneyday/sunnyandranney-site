@@ -43,6 +43,8 @@ const EMAIL_ROUTES = [
   // "Don't send it again": whoever can schedule the email can turn off its going again (again.mjs)
   '/api/admin/email/again/',
   '/api/admin/email/event/',
+  // Starting an extra email on a day of its own, besides the weekly one (week-store.mjs createExtra)
+  '/api/admin/email/extra/',
   // The preview's report of a problem in the email's own layout, which only the owner is shown (and may clear)
   '/api/admin/email/layout/',
   '/api/admin/email/photos/',

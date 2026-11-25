@@ -4,9 +4,9 @@ import { againDays, againView, checkAgainSubject, checkAgainTime } from '@/lib/s
 import { dropAgain, getAgain, setAgain } from '@/lib/sunny-side/again-store.mjs';
 import { listUpcomingReveals } from '@/lib/sunny-side/kids.mjs';
 import { broadcastUrl, cancel, dropStrays, kitClient, schedule, statusOf, storeSegmentId, templateFor } from '@/lib/sunny-side/kit.mjs';
-import { blankParts } from '@/lib/sunny-side/parts.mjs';
-import { check, draftSale, isSendDate, isSendDay, sendLabel } from '@/lib/sunny-side/special.mjs';
-import { getWeek, otherWeek, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
+import { blankParts, isOff } from '@/lib/sunny-side/parts.mjs';
+import { check, draftSale, isExtraDate, isSendDay, sendLabel } from '@/lib/sunny-side/special.mjs';
+import { getWeek, setKit, workRefusal } from '@/lib/sunny-side/week-store.mjs';
 import { weekEmail } from '@/lib/sunny-side/week-email';
 import { localDate, localInputToUtc } from '@/lib/time-clock/hours.mjs';
 
@@ -15,13 +15,13 @@ export const prerender = false;
 /** At least this far ahead, so there's time to cancel and Kit has time to queue it. */
 const LEAD_MS = 10 * 60 * 1000;
 
-/** The send date from a request, or a response saying why it can't be sent or cancelled: only the email being worked on can (weekToWorkOn). */
+/** The send date from a request, or a response saying why it can't be sent or cancelled: only the weekly email being worked on (weekToWorkOn) or an extra still to go can (workRefusal). */
 async function sendOf(db: D1Database, body: Record<string, unknown> | null): Promise<string | Response> {
   const send = body?.send;
-  if (!isSendDate(send)) return json({ error: 'Invalid request' }, 400);
-  const { send: work } = await weekToWorkOn(db, localDate(new Date().toISOString()));
-  const refused = otherWeek(send as string, work);
-  return refused ? json({ error: refused }, 409) : (send as string);
+  if (typeof send !== 'string') return json({ error: 'Invalid request' }, 400);
+  const { refused } = await workRefusal(db, send, localDate(new Date().toISOString()));
+  if (refused) return json({ error: refused }, refused === 'Invalid request' ? 400 : 409);
+  return send;
 }
 
 /** When and how the email goes again to who didn't open it (again.mjs), checked; or why not; or null when it doesn't. */
@@ -33,11 +33,13 @@ async function againOf(
   const want = body?.again;
   if (want == null || want === false) return null;
   if (typeof want !== 'object') return { error: 'Invalid request', field: 'again' };
+  // An extra email goes once: going again is the weekly email's (again.mjs)
+  if (isExtraDate(send)) return { error: 'An extra email doesn’t go again. Turn off “Send it again”.', field: 'again' };
   const a = want as Record<string, unknown>;
   const week = await getWeek(db, send);
-  const special = week?.special ?? null;
-  const sale = special && !Object.keys(check(special, day)).length ? draftSale(special) : null;
   const parts = week?.parts ?? blankParts();
+  const special = isOff(parts, 'sale') ? null : (week?.special ?? null);
+  const sale = special && !Object.keys(check(special, day)).length ? draftSale(special) : null;
   let revealStart: string | null = null;
   if (parts.reveal) {
     try {
@@ -77,7 +79,7 @@ export const PUT: APIRoute = async (context) => {
   if (send instanceof Response) return send;
   const today = localDate(new Date().toISOString());
   const day = typeof body?.day === 'string' ? body.day : send;
-  if (!isSendDay(send, day) || day < today) return json({ error: `Pick a day from today to the end of the ${sendLabel(send)} email’s week.` }, 400);
+  if (!isSendDay(send, day) || day < today) return json({ error: isExtraDate(send) ? `The ${sendLabel(send)} email goes on its own day.` : `Pick a day from today to the end of the ${sendLabel(send)} email’s week.` }, 400);
   const time = typeof body?.time === 'string' && /^\d{2}:\d{2}$/.test(body.time) ? body.time : '';
   const sendAt = time ? localInputToUtc(`${day}T${time}`) : null;
   if (!sendAt) return json({ error: 'Pick a time for it to go.' }, 400);
