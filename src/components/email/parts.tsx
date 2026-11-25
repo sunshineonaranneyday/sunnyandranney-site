@@ -97,13 +97,19 @@ export function Section({
   open = true,
   summary,
   onToggle,
+  on = true,
+  onSwitch,
   children,
 }: {
   n: number;
   id: string;
   title: string;
   state: string;
-  tone: 'ok' | 'todo' | 'bad';
+  tone: 'ok' | 'todo' | 'bad' | 'off';
+  /** In the email, or turned off (parts.mjs SWITCHES). Only with `onSwitch`. */
+  on?: boolean;
+  /** Turns the section on or off in the email; without it the section always goes. */
+  onSwitch?: (on: boolean) => void;
   /** Scheduled to send: shown, but nothing in it can change until the send is cancelled. */
   locked?: boolean;
   open?: boolean;
@@ -114,7 +120,7 @@ export function Section({
 }) {
   const folded = Boolean(onToggle) && !open;
   return (
-    <section class={`em-section card${locked ? ' is-locked' : ''}${folded ? ' is-folded' : ''}${onToggle ? ' is-foldable' : ''}`} aria-labelledby={`${id}-title`} id={id} {...(locked ? { inert: true } : {})}>
+    <section class={`em-section card${locked ? ' is-locked' : ''}${folded ? ' is-folded' : ''}${onToggle ? ' is-foldable' : ''}${on ? '' : ' is-off'}`} aria-labelledby={`${id}-title`} id={id} {...(locked ? { inert: true } : {})}>
       <header class="em-section-head">
         <span class="em-step" aria-hidden="true">
           {n}
@@ -128,7 +134,14 @@ export function Section({
             title
           )}
         </h2>
-        <span class={`badge ${tone === 'ok' ? 'badge-approved' : tone === 'bad' ? 'badge-alert' : 'badge-pending'}`}>{state}</span>
+        <span class={`badge ${tone === 'ok' ? 'badge-approved' : tone === 'bad' ? 'badge-alert' : tone === 'off' ? 'badge-off' : 'badge-pending'}`}>{state}</span>
+        {onSwitch && (
+          // A switch, not a fold: it says whether the email has this section at all
+          <label class="em-switch" title={on ? 'In the email. Turn it off to send without it.' : 'Not in the email. Turn it on to add it back.'}>
+            <input type="checkbox" role="switch" checked={on} aria-label={`${title}: in the email`} onChange={(e) => onSwitch((e.target as HTMLInputElement).checked)} />
+            <span aria-hidden="true">{on ? 'On' : 'Off'}</span>
+          </label>
+        )}
         {onToggle && <span class="em-section-chevron" aria-hidden="true" />}
         {folded && summary && (
           <p class="em-section-summary" id={`${id}-summary`}>

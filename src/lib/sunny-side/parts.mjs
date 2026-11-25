@@ -19,6 +19,28 @@ export const PART_LIMITS = { subject: 80, preheader: 110, label: 40, headline: 7
 export const COLLAGE_MAX = 5;
 export const PHOTO_ID = /^[a-z0-9]{12,40}$/;
 
+/**
+ * The sections an email can go without (Peter, 2026-11-25: "id also like the abiliyt to turn off
+ * sections"), by the page's name for each, and the email's sections (email.mjs SECTIONS) each one
+ * takes out: the sale, the products, the photos (the top photo and the collage), the events and the
+ * charity. The masthead, the visit row and the footer, with its unsubscribe link, always go. A
+ * section that's off keeps what's set in it, so turning it back on brings it back, and nothing in
+ * it has to be finished for the email to save or go.
+ */
+export const SWITCHES = { sale: ['offer'], products: ['wall'], photos: ['hero', 'story'], events: ['events'], charity: ['mission'] };
+
+/** True when the email has the section `key` (SWITCHES) turned off. */
+export const isOff = (p, key) => Array.isArray(p?.off) && p.off.includes(key);
+
+/** The email's sections (email.mjs SECTIONS) the parts turn off. */
+export const sectionsOff = (p) => (Array.isArray(p?.off) ? p.off : []).flatMap((k) => SWITCHES[k] ?? []);
+
+/**
+ * The sale as the subject line is checked against when the sale is off: no discount, so {offer} and
+ * {upto} have nothing to say and no percent is one it gives (email.mjs offerClaims).
+ */
+export const NO_SALE = Object.freeze({ kind: 'none' });
+
 /** The store's wide shot, until the week has its own top photo. */
 export const DEFAULT_HERO = { src: 'cf:sunny-ranney-interior', alt: 'The Sunny & Ranney showroom floor' };
 export const STORY_DEFAULTS = { label: 'This week in the showroom', cta: 'Plan your visit', link: '/visit/' };
@@ -54,6 +76,8 @@ export function cleanParts(p) {
     kid: typeof p?.kid === 'string' && KID_SLUG.test(p.kid) ? p.kid : '',
     // One of that family's photos ("cf:" id), or '' for their finished room
     kidPhoto: typeof p?.kidPhoto === 'string' && KID_PHOTO.test(p.kidPhoto) ? p.kidPhoto : '',
+    // The sections turned off (SWITCHES), in their own order
+    off: Object.keys(SWITCHES).filter((k) => Array.isArray(p?.off) && p.off.includes(k)),
   };
 }
 
@@ -101,14 +125,15 @@ export function checkParts(p, { sale = null, photos = null, kids = null, reveals
     e.reveal = reveals.length ? 'That reveal isn’t coming up anymore. Pick another, or no reveal.' : 'The charity’s reveals didn’t load. Reload the page, or pick no reveal.';
   }
   if (s.photos.length > COLLAGE_MAX) e['story.photos'] = `The collage holds ${COLLAGE_MAX} photos at most. Take ${s.photos.length - COLLAGE_MAX} out.`;
-  if (photos) {
+  // A section that's off goes without its photos and its family, so nothing in it holds the email up
+  if (photos && !isOff(p, 'photos')) {
     const used = [p.hero, ...s.photos];
     const gone = used.filter((id) => id && !photos.has(id));
     if (gone.length) e.photos = 'A photo this email uses isn’t in the library anymore. Pick another.';
     const noAlt = used.filter((id) => id && photos.get(id) && !photos.get(id).alt);
     if (noAlt.length) e.photos = `${noAlt.length === 1 ? 'A photo' : `${noAlt.length} photos`} in the email need${noAlt.length === 1 ? 's' : ''} a few words saying what’s in ${noAlt.length === 1 ? 'it' : 'them'}, for people who can’t see images.`;
   }
-  if (kids) {
+  if (kids && !isOff(p, 'charity')) {
     if (!kids.length) e.kid = 'The charity’s kids didn’t load, so the charity section can’t be drawn. Reload the page to try again.';
     else if (p.kid && !kids.some((k) => k.slug === p.kid)) e.kid = 'That family isn’t on the charity’s site anymore. Pick another.';
   }

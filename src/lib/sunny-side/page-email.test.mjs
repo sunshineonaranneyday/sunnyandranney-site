@@ -6,7 +6,7 @@ import { NO_MARKETING_TAG, STORE_SEGMENT, STORE_TAG, audienceOf, broadcastUrl, c
 import { KID_PHOTOS, cfIdOf, kidFor, missionOf, photosDate, photosOf, revealedKids, roomsPhrase, tilePhotoFor } from './kids.mjs';
 import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
-import { DEFAULT_HERO, arrangeCollage, blankParts, briefParts, checkParts, cleanParts, linesOf } from './parts.mjs';
+import { DEFAULT_HERO, NO_SALE, arrangeCollage, blankParts, briefParts, checkParts, cleanParts, linesOf } from './parts.mjs';
 import { addPhoto, isJpeg, listPhotos, newPhotoId, photosByIds, setAlt } from './photo-store.mjs';
 import { check, clean, draftSale, toSale } from './special.mjs';
 import { addPerson, listPeople, logTest, recentTests, removePerson, testsSince } from './test-store.mjs';
@@ -191,6 +191,30 @@ test('it can go only when it’s finished, and says what’s left, each with the
     { text: 'Pick 2 more products.', section: 'em-products' },
   ]);
   assert.deepEqual(kitProblems({ ...ready, kids: [] }), [{ text: 'The charity’s kids didn’t load, so the charity section can’t be drawn. Reload the page to try again.', section: 'em-charity' }]);
+});
+
+test('a section turned off leaves the email, and nothing in it has to be finished for it to go', () => {
+  const off = (keys, extra = {}) => story(2, { off: keys, ...extra });
+  // The sale off: no gold band, its photo goes to the shop, and the subject can't promise a discount
+  const noSale = pageEmail({ sale, wall: wallOf(4), parts: off(['sale'], { subject: 'New this week' }), photos, kids, catalog, events: [], impact, send: SEND, site: SITE });
+  assert.deepEqual(noSale.sections, ['masthead', 'hero', 'wall', 'story', 'mission', 'visit', 'footer']);
+  assert.equal(noSale.brief.sale, null);
+  const html = render(noSale.brief, noSale.sections);
+  assert.doesNotMatch(html, /offer-button/);
+  assert.match(html, /href="https:\/\/sunnyandranney\.com\/shop\/\?[^"]*utm_content=hero-photo"/);
+  // Photos off takes the top photo and the collage; products, events and the charity each take their own
+  const lean = pageEmail({ sale, wall: wallOf(4), parts: off(['photos', 'products', 'charity', 'events']), photos, kids, catalog, events: [{ title: 'x' }], impact, send: SEND, site: SITE });
+  assert.deepEqual(lean.sections, ['masthead', 'offer', 'visit', 'footer']);
+  // Nothing in a section that's off holds the email up: no sale set, two products, a photo with no words
+  const ready = { special: null, sale: null, wall: wallOf(2), parts: off(['sale', 'products', 'photos'], { subject: 'Hello' }), photos: new Map([[ids[0], { ...photos.get(ids[0]), alt: '' }]]), kids, catalog, send: SEND, check, checkWall, checkParts };
+  assert.deepEqual(kitProblems(ready), []);
+  // A subject that promises the sale that's off is caught by its field
+  assert.deepEqual(kitProblems({ ...ready, parts: off(['sale', 'products', 'photos'], { subject: '20% off everything' }) }), [{ text: 'Fix the subject line.', section: 'em-lines' }]);
+  assert.match(checkParts(cleanParts({ subject: 'Save {upto}', off: ['sale'] }), { sale: NO_SALE }).subject, /has no sale/);
+  // Everything off is nothing to send
+  assert.deepEqual(kitProblems({ ...ready, parts: off(['sale', 'products', 'photos', 'events', 'charity'], { subject: 'Hello' }) }), [{ text: 'Every section is off. Turn at least one back on.', section: 'em-sale' }]);
+  // Only the sections there are switches for are kept
+  assert.deepEqual(cleanParts({ off: ['charity', 'footer', 'sale', 'sale'] }).off, ['sale', 'charity']);
 });
 
 /** A stand-in Kit: answers from `routes` ("METHOD /path"), and keeps every call. */
