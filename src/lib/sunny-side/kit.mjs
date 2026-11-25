@@ -84,7 +84,10 @@ export async function readyTester(kit, { email, name }) {
  * hand-sent emails went to everyone with it (Nov 10, 2026: 3,135 people, the tag's whole count).
  */
 export const STORE_TAG = 'Sunny & Ranney';
-/** A tag on 424 active subscribers on Nov 17, 2026, 274 of them on the store tag. They're left out (Peter 2026-11-17). */
+/**
+ * A tag on 424 active subscribers on Nov 17, 2026, 274 of them on the store tag. They're left out (Peter 2026-11-17),
+ * until they sign up on the site: its form takes the tag off (signUp).
+ */
 export const NO_MARKETING_TAG = 'Shopify: no marketing';
 /**
  * Who the weekly email goes to: a segment in Kit, made Nov 17, 2026 as everyone with STORE_TAG
@@ -477,6 +480,26 @@ export async function removeTag(kit, tagId, id) {
     // Already off it, or no longer in Kit
     if (/** @type {{ status?: number }} */ (err).status !== 404) throw err;
   }
+}
+
+/**
+ * Someone signing up on the site's form (api/subscribe.ts): a Kit subscriber (made if new) with the
+ * store's tag, and off NO_MARKETING_TAG. Signing up here is them asking for the store's emails, so
+ * it outweighs an earlier "no" to marketing at Shopify's checkout. Before Nov 25, 2026 the form only
+ * added the tag, and a Shopify customer who had said no there and then signed up here stayed out of
+ * the weekly email (STORE_SEGMENT) with no sign of it. Someone who unsubscribed in Kit stays
+ * unsubscribed: Kit doesn't sign them back up.
+ */
+export async function signUp(kit, email) {
+  const [{ subscriber }, store, noMarketing] = await Promise.all([
+    kit.call('/subscribers', { method: 'POST', body: { email_address: email, state: 'active' } }),
+    tagNamed(kit, STORE_TAG),
+    tagNamed(kit, NO_MARKETING_TAG),
+  ]);
+  if (!subscriber?.id) throw new Error('Kit made no subscriber.');
+  await kit.call(`/tags/${store}/subscribers/${subscriber.id}`, { method: 'POST', body: {} });
+  await removeTag(kit, noMarketing, subscriber.id);
+  return { id: Number(subscriber.id), state: subscriber.state };
 }
 
 /**

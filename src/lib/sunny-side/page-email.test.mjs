@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Miniflare } from 'miniflare';
 import { Email, lines, plain, render, usePhotoOrigin } from './email.mjs';
-import { NO_MARKETING_TAG, STORE_SEGMENT, STORE_TAG, audienceOf, broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, statusOf, storeSegmentId, subscriberCount, templateFor, usualTime } from './kit.mjs';
+import { NO_MARKETING_TAG, STORE_SEGMENT, STORE_TAG, audienceOf, broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, signUp, statusOf, storeSegmentId, subscriberCount, templateFor, usualTime } from './kit.mjs';
 import { KID_PHOTOS, cfIdOf, kidFor, missionOf, photosDate, photosOf, revealedKids, roomsPhrase, tilePhotoFor } from './kids.mjs';
 import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
@@ -239,6 +239,38 @@ test('nothing goes to Kit without the store’s sender: Kit would send it as the
   await assert.rejects(schedule(kit, { ...msg, from: '', sendAt: '2026-11-17T15:00:00.000Z', audience: { type: 'segment', ids: [1] } }), /KIT_SENDER/);
   await assert.rejects(sendTest(kit, { ...msg, from: undefined, tagIds: [1] }), /KIT_SENDER/);
   assert.equal(calls.length, 0);
+});
+
+/** Kit for the site's signup form: the store's tag is 25380314, the no-marketing tag 25389847. */
+const SIGNUP = {
+  'POST /subscribers': (b) => ({ subscriber: { id: 7, state: 'active', email_address: b.email_address } }),
+  'POST /tags': (b) => ({ tag: { id: b.name === STORE_TAG ? 25380314 : b.name === NO_MARKETING_TAG ? 25389847 : 1, name: b.name } }),
+  'POST /tags/25380314/subscribers/7': { subscriber: { id: 7 } },
+  'DELETE /tags/25389847/subscribers/7': null,
+};
+
+test('signing up on the site puts them on the store’s tag and takes them off “Shopify: no marketing”, so they get the weekly email', async () => {
+  const { kit, calls } = fakeKit(SIGNUP);
+  assert.deepEqual(await signUp(kit, 'a@x.com'), { id: 7, state: 'active' });
+  assert.equal(calls.find((c) => c.key === 'POST /subscribers').body.email_address, 'a@x.com');
+  assert.deepEqual(calls.filter((c) => c.key === 'POST /tags').map((c) => c.body.name).sort(), [NO_MARKETING_TAG, STORE_TAG].sort());
+  assert.deepEqual(calls.slice(3).map((c) => c.key), ['POST /tags/25380314/subscribers/7', 'DELETE /tags/25389847/subscribers/7']);
+});
+
+test('signing up works for someone who never had the no-marketing tag', async () => {
+  const { 'DELETE /tags/25389847/subscribers/7': _, ...notOnIt } = SIGNUP; // Kit answers 404
+  const { kit, calls } = fakeKit(notOnIt);
+  assert.deepEqual(await signUp(kit, 'a@x.com'), { id: 7, state: 'active' });
+  assert.equal(calls.at(-1).key, 'DELETE /tags/25389847/subscribers/7');
+});
+
+test('a signup Kit didn’t finish fails, so the form says to try again', async () => {
+  const { 'POST /tags/25380314/subscribers/7': _, ...noTagging } = SIGNUP;
+  await assert.rejects(signUp(fakeKit(noTagging).kit, 'a@x.com'), /Kit said no \(404\)/);
+  // Kit down when the no-marketing tag comes off: they'd be left out, so it isn't a signup
+  const down = { ...SIGNUP, 'DELETE /tags/25389847/subscribers/7': () => { throw new Error('down'); } };
+  await assert.rejects(signUp(fakeKit(down).kit, 'a@x.com'), /Kit didn’t answer/);
+  await assert.rejects(signUp(fakeKit({ ...SIGNUP, 'POST /subscribers': { subscriber: null } }).kit, 'a@x.com'), /no subscriber/);
 });
 
 test('someone who unsubscribed from the store’s emails isn’t signed back up for a test', async () => {
