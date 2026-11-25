@@ -1,29 +1,11 @@
 import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { checkRateLimit } from '@/lib/db';
-import { STORE_TAG } from '@/lib/sunny-side/kit.mjs';
+import { kitClient, signUp } from '@/lib/sunny-side/kit.mjs';
 
 export const prerender = false;
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
-const KIT_API = 'https://api.kit.com/v4';
-// The store's signup tag in Kit: the admin's weekly email goes to everyone with it, less those
-// tagged "Shopify: no marketing" (STORE_SEGMENT in kit.mjs).
-const KIT_TAG = STORE_TAG;
-
-/** One Kit v4 call. KIT_API_KEY is a secret set in the Cloudflare dashboard. */
-function kit(path: string, body: unknown) {
-  return fetch(`${KIT_API}${path}`, {
-    method: 'POST',
-    signal: AbortSignal.timeout(15000),
-    headers: {
-      'X-Kit-Api-Key': env.KIT_API_KEY!,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-}
 
 export const POST: APIRoute = async ({ request, clientAddress }) => {
   // Rate limit: 5 signups per IP per hour
@@ -58,33 +40,17 @@ export const POST: APIRoute = async ({ request, clientAddress }) => {
   }
 
   try {
-    // Create the subscriber and look up the tag (both answer 200 when they
-    // already exist), then tag them.
-    const [created, tag] = await Promise.all([
-      kit('/subscribers', { email_address: email, state: 'active' }),
-      kit('/tags', { name: KIT_TAG }),
-    ]);
-    const failed = !created.ok ? created : !tag.ok ? tag : null;
-    const tagId = failed ? null : ((await tag.json()) as { tag?: { id?: number } }).tag?.id;
-    const tagged = failed ?? (tagId
-      ? await kit(`/tags/${tagId}/subscribers`, { email_address: email })
-      : new Response('Kit returned no tag id', { status: 502 }));
-
-    if (!tagged.ok) {
-      console.error('Kit API error:', tagged.status, await tagged.text());
-      return new Response(JSON.stringify({ error: 'Failed to subscribe. Please try again.' }), {
-        status: 502,
-        headers: JSON_HEADERS,
-      });
-    }
-
+    // Into Kit with the store's tag, and off "Shopify: no marketing", so they get the weekly
+    // email (signUp in kit.mjs). KIT_API_KEY is a secret set in the Cloudflare dashboard.
+    const get: typeof fetch = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(15000) });
+    await signUp(kitClient({ key: env.KIT_API_KEY, base: env.KIT_API_BASE || undefined, get }), email);
     return new Response(JSON.stringify({ success: true }), {
       headers: JSON_HEADERS,
     });
   } catch (err: any) {
-    console.error('Subscribe error:', err);
+    console.error('Subscribe error:', err?.message ?? err);
     return new Response(JSON.stringify({ error: 'Failed to subscribe. Please try again.' }), {
-      status: 500,
+      status: 502,
       headers: JSON_HEADERS,
     });
   }
