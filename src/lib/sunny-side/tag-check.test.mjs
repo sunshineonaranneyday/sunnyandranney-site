@@ -80,13 +80,13 @@ test('nothing is asked for: a run does nothing and calls Kit for nothing', async
   await mf.dispose();
 });
 
-test('a fix lists everyone on the no-marketing tag with Shopify’s answer, then takes it off just those Shopify says said yes', async () => {
+test('a fix lists everyone on the no-marketing tag with Shopify’s answer, then takes it off all but those who unsubscribed in Shopify', async () => {
   const { DB, mf } = await freshDb();
   await loadShopify(DB);
   const kit = fakeKit(PEOPLE);
   const id = await askCheck(DB, { mode: 'fix', by: 'peter', now: '2026-11-25T17:00:00Z' });
   const first = await runTagCheck({ db: DB, kit, now: () => '2026-11-25T17:02:00Z' });
-  assert.deepEqual(first.did, [`tag check ${id}: 6 on the tag, 3 of them subscribed in Shopify`]);
+  assert.deepEqual(first.did, [`tag check ${id}: 6 on the tag, 1 of them unsubscribed in Shopify`]);
   assert.ok(!kit.calls.some((c) => c.startsWith('DELETE')), 'the first run only reads');
   const listed = await people(DB);
   assert.deepEqual(listed.map((p) => [p.kit_id, p.email, p.shopify_state, p.action]), [
@@ -94,20 +94,21 @@ test('a fix lists everyone on the no-marketing tag with Shopify’s answer, then
     [12, 'yes@example.com', 'SUBSCRIBED', 'untag'],
     [13, 'gone@example.com', 'SUBSCRIBED', 'untag'],
     [14, 'no@example.com', 'UNSUBSCRIBED', 'keep'],
-    [15, 'never@example.com', 'NOT_SUBSCRIBED', 'keep'],
-    [16, 'stranger@example.com', null, 'keep'],
+    // Never asked (at the register), or not in Shopify at all: the tag comes off
+    [15, 'never@example.com', 'NOT_SUBSCRIBED', 'untag'],
+    [16, 'stranger@example.com', null, 'untag'],
   ]);
   assert.equal(listed[0].tagged_at, '2026-11-16T16:40:00Z');
   assert.equal(listed[0].store_tagged_at, '2026-11-03T10:00:00Z');
   assert.equal(listed[1].store_tagged_at, null, 'not on the store’s list');
   assert.equal(listed[0].shopify_state_at, '2025-09-18T18:33:05Z');
 
-  // Two a run, as Kit allows
-  const second = await runTagCheck({ db: DB, kit, now: () => '2026-11-25T17:04:00Z', budget: 2 });
-  assert.deepEqual(second.did, [`tag check ${id}: tag taken off 2, 1 to go`]);
-  const third = await runTagCheck({ db: DB, kit, now: () => '2026-11-25T17:06:00Z', budget: 2 });
-  assert.deepEqual(third.did, [`tag check ${id}: tag taken off 1, 0 to go`]);
-  assert.deepEqual([...kit.tags.get(2).keys()].sort(), [14, 15, 16], 'only those Shopify didn’t say yes for keep the tag');
+  // Three a run, as Kit allows
+  const second = await runTagCheck({ db: DB, kit, now: () => '2026-11-25T17:04:00Z', budget: 3 });
+  assert.deepEqual(second.did, [`tag check ${id}: tag taken off 3, 2 to go`]);
+  const third = await runTagCheck({ db: DB, kit, now: () => '2026-11-25T17:06:00Z', budget: 3 });
+  assert.deepEqual(third.did, [`tag check ${id}: tag taken off 2, 0 to go`]);
+  assert.deepEqual([...kit.tags.get(2).keys()], [14], 'only the one who unsubscribed in Shopify keeps the tag');
   assert.equal(kit.tags.get(1).size, 5, 'the store’s list is left alone');
   const done = await DB.prepare('SELECT * FROM kit_tag_checks WHERE id = ?').bind(id).first();
   assert.equal(done.done_at, '2026-11-25T17:06:00Z');
@@ -153,8 +154,8 @@ test('Kit failing partway is noted, and the next run picks up where it stopped',
   // Already off the tag (someone did it in Kit) counts as done
   kit.tags.get(2).delete(12);
   const next = await runTagCheck({ db: DB, kit });
-  assert.deepEqual(next.did, [`tag check ${id}: tag taken off 3, 0 to go`]);
-  assert.deepEqual([...kit.tags.get(2).keys()].sort(), [14, 15, 16]);
+  assert.deepEqual(next.did, [`tag check ${id}: tag taken off 5, 0 to go`]);
+  assert.deepEqual([...kit.tags.get(2).keys()], [14]);
   const check = await DB.prepare('SELECT * FROM kit_tag_checks WHERE id = ?').bind(id).first();
   assert.ok(check.done_at);
   assert.equal(check.error, null);

@@ -4,9 +4,11 @@
  * The weekly email leaves out everyone with NO_MARKETING_TAG (STORE_SEGMENT in kit.mjs). On
  * Nov 25, 2026 a customer Shopify had as subscribed to the store's emails since 2025 turned up with
  * that tag, so the tag isn't always Shopify's answer. A check reads everyone on the tag in Kit, puts
- * each next to Shopify's own answer, and in "fix" mode takes the tag off the ones Shopify says said
- * yes. Everyone it read is kept with what it found and did: who was on the tag, since when, whether
- * they're on the store's list, and what Shopify says.
+ * each next to Shopify's own answer, and in "fix" mode takes the tag off everyone but those who
+ * unsubscribed in Shopify (KEEP): the store has to honor that, and the rest, customers never asked
+ * at the register among them, get the weekly email (Peter, Nov 25, 2026). Everyone it read is kept
+ * with what it found and did: who was on the tag, since when, whether they're on the store's list,
+ * and what Shopify says.
  *
  * Shopify's answers are a copy in D1 (shopify_email_consent), read from Shopify's admin and loaded
  * by hand: the site's own Shopify access doesn't cover customers. A check is asked for by adding a
@@ -20,6 +22,8 @@ import { removeTag, storeTags } from './kit.mjs';
 
 /** Tags taken off a run. */
 export const BUDGET = 40;
+/** Shopify's answers that keep the tag: unsubscribed, or their data erased at their request. */
+export const KEEP = new Set(['UNSUBSCRIBED', 'REDACTED']);
 
 const SCHEMA = [
   // Shopify's answer for each customer's email: SUBSCRIBED, NOT_SUBSCRIBED, UNSUBSCRIBED, PENDING...
@@ -90,7 +94,7 @@ export async function askCheck(db, { mode, by, now = new Date().toISOString() })
 /**
  * One step of the oldest unfinished check, or null when there's none. Its first step reads the tag
  * and the store's list from Kit and keeps everyone on the tag with Shopify's answer; a report is
- * then done. A fix then takes the tag off, BUDGET a run, everyone Shopify says is subscribed, and
+ * then done. A fix then takes the tag off, BUDGET a run, everyone Shopify's answer doesn't KEEP, and
  * is done when none are left. A step that fails is noted on the check and tried again next run.
  */
 export async function runTagCheck({ db, kit, now = () => new Date().toISOString(), budget = BUDGET }) {
@@ -122,14 +126,14 @@ async function list(db, kit, check, at) {
   );
   const rows = tagged.map((p) => {
     const s = shopify.get(p.email);
-    const action = s?.state === 'SUBSCRIBED' ? 'untag' : 'keep';
+    const action = KEEP.has(s?.state) ? 'keep' : 'untag';
     return insert.bind(check.id, p.id, p.email, p.state, p.createdAt, p.taggedAt, storeAt.has(p.id) ? storeAt.get(p.id) || 'yes' : null, s?.state ?? null, s?.state_at ?? null, action);
   });
   for (let i = 0; i < rows.length; i += 50) await db.batch(rows.slice(i, i + 50));
   const done = check.mode === 'report' ? at : null;
   await db.prepare('UPDATE kit_tag_checks SET tag_id = ?, listed_at = ?, done_at = ?, error = NULL, error_at = NULL WHERE id = ? AND listed_at IS NULL').bind(noMarketing, at, done, check.id).run();
-  const toUntag = tagged.filter((p) => shopify.get(p.email)?.state === 'SUBSCRIBED').length;
-  return { check: check.id, did: [`tag check ${check.id}: ${tagged.length} on the tag, ${toUntag} of them subscribed in Shopify`] };
+  const kept = tagged.filter((p) => KEEP.has(shopify.get(p.email)?.state)).length;
+  return { check: check.id, did: [`tag check ${check.id}: ${tagged.length} on the tag, ${kept} of them unsubscribed in Shopify`] };
 }
 
 async function untag(db, kit, check, at, budget) {
