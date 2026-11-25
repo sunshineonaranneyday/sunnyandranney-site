@@ -12,6 +12,10 @@ export interface Special {
   tiers: { spend: number | null; percent: number | null }[];
   percent: number | null;
   ends: string;
+  /** A sale by the hour's name, the big line over its percents. */
+  name: string;
+  /** A sale by the hour's rows: a day, its hours ("HH:MM", both '' for all day) and its percent. */
+  windows: { day: string; from: string; to: string; percent: number | null }[];
 }
 
 /** The sale as typed: numbers stay text until they're read, so "1,0" isn't fought while typing. */
@@ -20,6 +24,8 @@ export interface SaleForm {
   tiers: { spend: string; percent: string }[];
   percent: string;
   ends: string;
+  name: string;
+  windows: { day: string; from: string; to: string; percent: string }[];
 }
 
 export interface Pick {
@@ -88,10 +94,25 @@ export interface SalePresets {
   ends: string;
 }
 
-export interface AppProps {
-  /** The one email being worked on (weekToWorkOn): this week's until it goes out, then next week's. */
+/** One of the emails still to go: the weekly one being worked on, and any extras (special.mjs isExtraDate). */
+export interface EmailTab {
   send: string;
   label: string;
+  extra: boolean;
+  href: string;
+  scheduled: boolean;
+}
+
+export interface AppProps {
+  /** The email being worked on: the weekly one (weekToWorkOn: this week's until it goes out, then next week's), or an extra. */
+  send: string;
+  label: string;
+  /** True for an extra email: it goes on its own day, once (special.mjs isExtraDate). */
+  extra: boolean;
+  /** Every email still to go, in date order, to switch between. */
+  emails: EmailTab[];
+  /** The last day an extra email can be started for (EXTRA_WITHIN_DAYS from today). */
+  extraMax: string;
   today: string;
   record: { special: Special | null; wall: Wall | null; updatedAt: string; updatedBy: string } | null;
   presets: SalePresets;
@@ -150,7 +171,11 @@ export interface Parts {
   kid: string;
   /** One of that family's photos ("cf:" id), or '' for their finished room. */
   kidPhoto: string;
+  /** The sections turned off (parts.mjs SWITCHES). */
+  off: Switch[];
 }
+/** A section of the email that can be turned off (parts.mjs SWITCHES). */
+export type Switch = 'sale' | 'products' | 'photos' | 'events' | 'charity';
 export interface KidPhoto {
   src: string;
   alt: string;
@@ -249,12 +274,14 @@ const twoTiers = () => [
 ];
 
 export function saleFormOf(s: Special | null): SaleForm {
-  if (!s) return { kind: '', tiers: twoTiers(), percent: '', ends: '' };
+  if (!s) return { kind: '', tiers: twoTiers(), percent: '', ends: '', name: '', windows: [] };
   return {
     kind: s.kind,
     tiers: s.tiers?.length ? s.tiers.map((t) => ({ spend: money(t.spend), percent: num(t.percent) })) : twoTiers(),
     percent: num(s.percent ?? null),
     ends: s.ends ?? '',
+    name: s.name ?? '',
+    windows: (s.windows ?? []).map((w) => ({ day: w.day, from: w.from, to: w.to, percent: num(w.percent) })),
   };
 }
 
@@ -268,6 +295,7 @@ export function saleSnapshot(f: SaleForm): string {
   if (isDiscount(s.kind)) keep.ends = s.ends;
   if (s.kind === 'tiers') keep.tiers = s.tiers;
   if (s.kind === 'percent') keep.percent = s.percent;
+  if (s.kind === 'times') Object.assign(keep, { name: s.name, windows: s.windows });
   return JSON.stringify(keep);
 }
 

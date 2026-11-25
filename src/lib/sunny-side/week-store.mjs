@@ -12,7 +12,7 @@
  */
 
 import { cleanParts } from './parts.mjs';
-import { clean, emailToWorkOn, sendLabel, thisWeeksSend } from './special.mjs';
+import { clean, emailToWorkOn, isExtraDate, isSendDate, sendLabel, thisWeeksSend } from './special.mjs';
 import { cleanWall } from './wall.mjs';
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS email_weeks (
@@ -93,6 +93,50 @@ export function otherWeek(send, work) {
   return send < work
     ? `The ${sendLabel(send)} email has gone out, so it can’t change. Reload to work on the ${sendLabel(work)} email.`
     : `Only the ${sendLabel(work)} email can be worked on until it goes out. Reload to see it.`;
+}
+
+// ── Extra emails: more than one a week, now and then (special.mjs isExtraDate) ──
+
+/** The extra emails still to go, soonest first: from today on, and not gone out yet. @returns {Promise<Week[]>} */
+export async function extrasAhead(db, today, now = Date.now()) {
+  await ensureTable(db);
+  const { results } = await db.prepare('SELECT * FROM email_weeks WHERE send_date >= ? ORDER BY send_date').bind(today).all();
+  return (results || []).filter((r) => isExtraDate(r.send_date)).map(fromRow).filter((w) => !wentOut(w, now));
+}
+
+/**
+ * Starts an extra email on its day, with the products, photos, reveal and charity of the last email
+ * that had products (the one just sent, as a rule), so it isn't built from nothing. Its subject line
+ * and sale are its own, so they start empty. Refused when there's already an email that day.
+ * @param {any} db @param {{ send: string, by: string, now: string }} extra
+ */
+export async function createExtra(db, { send, by, now }) {
+  await ensureTable(db);
+  if (!isExtraDate(send)) throw new Error(`Not an extra email's day: ${send}`);
+  const r = await db.prepare('SELECT * FROM email_weeks WHERE wall IS NOT NULL AND send_date <= ? ORDER BY send_date DESC LIMIT 1').bind(send).first();
+  const last = r ? fromRow(r) : null;
+  const parts = last?.parts ? { ...last.parts, subject: '', preheader: '' } : null;
+  return putWeek(db, { send, special: null, wall: last?.wall ?? null, parts, by, now, since: null });
+}
+
+/**
+ * Why the email for `send` can't be changed, tested or sent now, or null, with its saved week. A
+ * weekly email: only the one being worked on (weekToWorkOn). An extra: one that's saved, whose day
+ * hasn't passed, and that hasn't gone out.
+ * @returns {Promise<{ refused: string | null, week: Week | null }>}
+ */
+export async function workRefusal(db, send, today, now = Date.now()) {
+  if (isSendDate(send)) {
+    const { send: work, week } = await weekToWorkOn(db, today, now);
+    return { refused: otherWeek(send, work), week: send === work ? week : null };
+  }
+  if (!isExtraDate(send)) return { refused: 'Invalid request', week: null };
+  const week = await getWeek(db, send);
+  const label = sendLabel(send);
+  if (!week) return { refused: `The ${label} email was deleted. Reload to see the emails still to go.`, week: null };
+  if (wentOut(week, now)) return { refused: `The ${label} email has gone out, so it can’t change. It’s in Sent emails.`, week };
+  if (send < today) return { refused: `The ${label} email’s day has passed.`, week };
+  return { refused: null, week };
 }
 
 /**
