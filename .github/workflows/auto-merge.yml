@@ -1,22 +1,20 @@
-# A pull request marked "Ready for review" merges by itself once "Tests" passes.
+# A pull request from this repository's own branches merges by itself once "Tests" passes.
 #
-# Agents open their pull requests as drafts, and a draft never merges. Marking one
-# "Ready for review" is the OK: this turns on GitHub's auto-merge for it, and GitHub
-# squashes it into main once the checks main requires have passed. The ruleset "Tests
-# pass before merging into main" requires "Tests" (checks.yml); the Cloudflare Pages
-# preview isn't required, since it always fails without the store's Shopify keys.
-# If Tests fails, nothing merges; a new push that passes merges it then.
+# Agents open their pull requests as drafts. This marks each one ready and turns on GitHub's
+# auto-merge for it, and GitHub squashes it into main once the checks main requires have passed:
+# the ruleset "Tests pass before merging into main" requires "Tests" (checks.yml); the Cloudflare
+# Pages preview isn't required, since it always fails without the store's Shopify keys. If Tests
+# fails, nothing merges; a new push that passes merges it then. No "Ready for review" click for
+# this repo (Peter, Nov 25, 2026).
 #
-# Only on "Ready for review", not on a pull request opened ready, so nothing merges
-# without that click. Only pull requests from this repository's own branches: one from
-# a fork gets a read-only token here and never merges by itself. To stop one after
-# the click, use "Disable auto-merge" on the pull request, or turn it back into a draft.
+# To keep one from merging, give it the label "hold" before it passes (or close it). A pull request
+# from a fork gets a read-only token here and never merges by itself.
 
 name: Auto-merge
 
 on:
   pull_request:
-    types: [ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, unlabeled]
 
 permissions:
   contents: write
@@ -25,13 +23,16 @@ permissions:
 jobs:
   auto-merge:
     name: Merge when Tests pass
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'hold')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Turn on auto-merge
+      - name: Mark it ready and turn on auto-merge
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: gh pr merge "$PR" --repo "$REPO" --auto --squash
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          if [ "$DRAFT" = "true" ]; then gh pr ready "$PR" --repo "$REPO"; fi
+          gh pr merge "$PR" --repo "$REPO" --auto --squash
