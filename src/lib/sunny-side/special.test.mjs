@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Email, amount, escape, lead, lines, noWidow, offerClaims, offerLine, render } from './email.mjs';
-import { STORE_TIERS, USUAL_PERCENT, blank, check, clean, defaults, draftSale, emailToWorkOn, forKind, isSendDate, isSendDay, nextSend, previewBrief, sendDays, sendLabel, summary, termsLine, thisWeeksSend, toSale, typeset, usualEnds } from './special.mjs';
+import { STORE_TIERS, USUAL_PERCENT, blank, check, clean, defaults, draftSale, emailNeeds, emailToWorkOn, forKind, hoursOf, isEmailDate, isExtraDate, isSendDate, isSendDay, nextSend, previewBrief, sendDays, sendLabel, summary, termsLine, thisWeeksSend, toSale, typeset, usualEnds } from './special.mjs';
 import { WORKWEEK_START_DAY } from '../time-clock/hours.mjs';
 import { impactFromPage } from './impact.mjs';
 
@@ -106,8 +106,8 @@ test('clean reads numbers the way people type them and drops anything unknown', 
   assert.deepEqual(s.tiers, [{ spend: 1000, percent: 20 }, { spend: null, percent: null }]);
   assert.equal('hack' in s, false);
   assert.equal(clean({ kind: 'nope' }).kind, '');
-  // Only the deal, the headline and the last day are Staci's: anything an old special saved besides is dropped
-  assert.deepEqual(Object.keys(clean({ kind: 'percent', percent: 20, ...TERMS, ...OLD_EXTRAS })).sort(), ['ends', 'kind', 'percent', 'tiers']);
+  // Only the deal, the last day and a sale by the hour's name and rows are Staci's: anything an old special saved besides is dropped
+  assert.deepEqual(Object.keys(clean({ kind: 'percent', percent: 20, ...TERMS, ...OLD_EXTRAS })).sort(), ['ends', 'kind', 'name', 'percent', 'tiers', 'windows']);
 });
 
 test('a good tiered special has nothing wrong with it', () => {
@@ -277,7 +277,10 @@ test('an email can go any day of its week, Sunday to Saturday like the store’s
   for (const d of days) assert.ok(sendDays(thisWeeksSend(d)).includes(d), d);
   assert.equal(isSendDay('2026-11-17', '2026-11-21'), true);
   assert.equal(isSendDay('2026-11-17', '2026-11-22'), false);
-  assert.equal(isSendDay('2026-11-18', '2026-11-18'), false, 'only a Tuesday names an email');
+  // Any other day names an extra email, which goes on that day only (isExtraDate)
+  assert.equal(isSendDay('2026-11-18', '2026-11-18'), true, 'an extra email goes on its own day');
+  assert.equal(isSendDay('2026-11-18', '2026-11-19'), false, 'and only then');
+  assert.deepEqual(sendDays('2026-11-27'), ['2026-11-27']);
 });
 
 test('the email to work on is this week’s until it has gone out, then next week’s', () => {
@@ -355,4 +358,89 @@ test('the ready-made spend-more sale starts on the store’s own amounts, a sale
   assert.deepEqual(STORE_TIERS, [{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }, { spend: 1000, percent: 20 }]);
   const sale = clean({ kind: 'tiers', tiers: STORE_TIERS.map((t) => ({ ...t })), ends: '2026-11-22' });
   assert.deepEqual(check(sale, '2026-11-17'), {});
+});
+
+// ─── A sale by the hour (Black Friday, Nov 27, 2026) ─────────────────
+const BLACK_FRIDAY = {
+  kind: 'times',
+  name: 'Black Friday weekend',
+  windows: [
+    { day: '2026-11-27', from: '10:00', to: '13:00', percent: '30' },
+    { day: '2026-11-27', from: '13:00', to: '17:00', percent: '25%' },
+    { day: '2026-11-28', from: '', to: '', percent: 25 },
+  ],
+};
+
+test('a sale by the hour reads its rows, ends on its last day, and goes out in the tiers’ row', () => {
+  const s = clean(BLACK_FRIDAY);
+  assert.equal(s.ends, '2026-11-28', 'it ends on its last row’s day: there’s no end date to type');
+  assert.deepEqual(s.windows[1], { day: '2026-11-27', from: '13:00', to: '17:00', percent: 25 });
+  assert.deepEqual(check(s, '2026-11-26'), {}, 'an email the day before can carry it');
+  assert.deepEqual(forKind(s), { kind: 'times', name: 'Black Friday weekend', windows: s.windows, ends: '2026-11-28' });
+  assert.equal(summary(s), '30% Fri 10am–1pm · 25% Fri 1–5pm · 25% Sat all day');
+  const sale = toSale(s);
+  assert.deepEqual(sale.windows, [[30, 'Fri', '10am&#8211;1pm'], [25, 'Fri', '1&#8211;5pm'], [25, 'Sat', 'all day']]);
+  assert.equal(sale.headline, 'Black Friday weekend');
+  assert.equal(sale.details, 'In the showroom and online. Ends Saturday, Nov 28.');
+  // What the subject line can say: {offer} and {upto} from its best percent, and only percents it gives
+  assert.equal(offerLine(sale), 'Up to 30% off Friday and Saturday.');
+  assert.equal(lines({ subject: 'Black Friday: {upto} off until 1pm', preheader: '{offer}', sale }).subject, 'Black Friday: 30% off until 1pm');
+  assert.deepEqual(offerClaims('25% off all day Saturday', sale, 'subject'), []);
+  assert.deepEqual(offerClaims('40% off', sale, 'subject'), ['The subject says 40%, but the sale gives 30%, 25%.']);
+  assert.deepEqual(offerClaims('Up to 25% off', sale, 'subject'), ['The subject says up to 25%, but the most the sale gives is 30%.']);
+  const html = render({ ...previewBrief(sale, '2026-11-26'), subject: 'Black Friday' }, ['masthead', 'hero', 'offer', 'footer']);
+  for (const bit of ['Black Friday&nbsp;weekend', '>30%<', 'off&nbsp;Fri<br>10am&#8211;1pm', 'off&nbsp;Sat<br>all day', 'Ends Saturday, Nov&nbsp;28.']) {
+    assert.ok(html.includes(bit), bit);
+  }
+});
+
+test('a sale by the hour says what’s wrong row by row, in words Staci can act on', () => {
+  const s = (o) => clean({ ...BLACK_FRIDAY, ...o });
+  assert.match(check(s({ name: '' }), '2026-11-26').name, /Name the sale/);
+  assert.match(check(s({ name: 'x'.repeat(41) }), '2026-11-26').name, /keep it to 40/);
+  assert.match(check(s({ windows: BLACK_FRIDAY.windows.slice(0, 1) }), '2026-11-26').windows, /at least 2/);
+  assert.match(check(s({}), '2026-11-28')['windows.0.day'], /before the email goes out/);
+  const rows = (...w) => check(s({ windows: w }), '2026-11-26');
+  const fri = (from, to, percent = 30) => ({ day: '2026-11-27', from, to, percent });
+  assert.match(rows(fri('13:00', '10:00'), fri('13:00', '17:00'))['windows.0.hours'], /end after it starts/);
+  assert.match(rows(fri('10:00', ''), fri('13:00', '17:00'))['windows.0.hours'], /when it ends/);
+  assert.match(rows(fri('10:00', '13:00'), fri('12:00', '17:00'))['windows.1.hours'], /starts before the one above it ends \(1pm\)/);
+  assert.match(rows(fri('', ''), fri('13:00', '17:00'))['windows.1.day'], /runs all day/);
+  assert.match(rows(fri('10:00', '13:00'), fri('', ''))['windows.1.hours'], /give this one its hours/);
+  assert.match(rows({ day: '2026-11-28', from: '', to: '', percent: 25 }, fri('10:00', '13:00'))['windows.1.day'], /in order/);
+  assert.match(rows(fri('10:00', '13:00', 95), fri('13:00', '17:00', null))['windows.0.percent'], /from 1 to 90/);
+  // Four across, a small phone has room for whole hours only (verify.mjs, edge-by-the-hour-4)
+  const sat = (from, to) => ({ day: '2026-11-28', from, to, percent: 25 });
+  assert.deepEqual(rows(fri('10:00', '12:00'), fri('12:00', '17:00'), sat('10:00', '13:00'), sat('13:00', '17:00')), {});
+  assert.match(rows(fri('10:00', '12:30'), fri('12:30', '17:00'), sat('10:00', '13:00'), sat('13:00', '17:00'))['windows.0.hours'], /whole hours/);
+  assert.deepEqual(rows(fri('10:00', '12:30'), fri('12:30', '17:00'), sat('10:00', '13:00')), {}, 'three across have room');
+  assert.match(rows(fri('10:00', '13:00'), fri('13:00', '17:00', null))['windows.1.percent'], /Add the percent/);
+  // While it's typed, the preview fills what's missing instead of breaking
+  assert.deepEqual(draftSale(clean({ kind: 'times', windows: [{ day: '2026-11-27', from: '10:00', to: '13:00', percent: '' }] })).windows, [['?', 'Fri', '10am&#8211;1pm'], ['?', '?', 'all day']]);
+});
+
+test('hours read the way the store says them', () => {
+  assert.equal(hoursOf('10:00', '13:00'), '10am–1pm');
+  assert.equal(hoursOf('13:00', '17:00'), '1–5pm');
+  assert.equal(hoursOf('09:30', '11:00'), '9:30–11am');
+  assert.equal(hoursOf('11:00', '12:00'), '11am–12pm');
+  assert.equal(hoursOf('', ''), 'all day');
+});
+
+// ─── More than one email a week ──────────────────────────────────────
+test('an extra email has any day but a Tuesday, which is the weekly email’s', () => {
+  assert.equal(isExtraDate('2026-11-27'), true);
+  assert.equal(isExtraDate('2026-12-01'), false, 'a Tuesday is the weekly email’s');
+  assert.equal(isExtraDate('2026-02-30'), false);
+  assert.equal(isEmailDate('2026-12-01'), true);
+  assert.equal(isEmailDate('2026-11-27'), true);
+  assert.equal(isEmailDate('soon'), false);
+});
+
+test('a section turned off isn’t something the email still needs', () => {
+  assert.deepEqual(emailNeeds(null), ['the sale', 'the products']);
+  assert.deepEqual(emailNeeds({ parts: { off: ['sale'] } }), ['the products']);
+  // A row straight from the database keeps its parts as JSON
+  assert.deepEqual(emailNeeds({ parts: JSON.stringify({ off: ['sale', 'products'] }) }), []);
+  assert.deepEqual(emailNeeds({ parts: '{not json' }), ['the sale', 'the products']);
 });

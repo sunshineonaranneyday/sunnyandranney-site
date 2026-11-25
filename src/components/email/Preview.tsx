@@ -12,7 +12,8 @@ export interface Spill {
 
 /** What the preview measures at a small phone's and a phone's width, by the rules verify.mjs holds the email to. */
 export interface Fit {
-  buttonAt: number;
+  /** Where the sale button's foot is, or null in an email without the sale. */
+  buttonAt: number | null;
   spill: boolean;
   /** What's too wide, so the page can say what and where, never just "something". */
   spills: Spill[];
@@ -76,8 +77,9 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
   // laid the email out at 305 (Peter's Chrome, Nov 16, 2026). A phone has none.
   doc.documentElement.style.overflow = 'hidden';
   await doc.fonts?.ready;
+  // An email with its sale turned off has no button, and is still measured for what spills
   const button = doc.querySelector('a[href*="utm_content=offer-button"]');
-  if (!button) return null;
+  if (!doc.body?.childElementCount) return null;
   // Each line of text wider than its column, with its widest word (what to shorten) and the part it's in:
   // the band it sits in says (data-part, from email.mjs). Guessing from the page's structure missed the
   // product tiles (a band below the products' heading) and every event after the first, so Staci was
@@ -120,7 +122,7 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
     .filter((t) => t.getBoundingClientRect().height > 2 * 20 + 1)
     .map((t) => t.closest('a')?.getAttribute('href')?.match(/\/shop\/([^/?]+)/)?.[1] ?? '')
     .filter(Boolean);
-  return { buttonAt: Math.round(button.getBoundingClientRect().bottom + win.scrollY), spill, spills, longNames };
+  return { buttonAt: button ? Math.round(button.getBoundingClientRect().bottom + win.scrollY) : null, spill, spills, longNames };
 }
 
 /** The part of the email Staci is working on, which the preview keeps in view. */
