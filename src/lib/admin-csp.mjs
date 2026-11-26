@@ -7,9 +7,11 @@
  * - the domain's image resizing, which sends those files' PNGs as JPEGs (email.mjs, RESIZE)
  * - Kit, for the emails written in Kit's own editor, as they went out (/admin/email/sent/<id>/):
  *   their photos (embed.filekitcdn.com), the social icons Kit draws (functions-js.kit.com/icons)
- *   and its "Built with Kit" badge, which cdn.convertkit.com sends on to cdn.kit.com (a 301, and a
- *   redirect is held to this list too). Without these, the Nov 3 and Nov 10, 2026 emails showed every
- *   picture broken. Only these paths: nothing else of Kit's loads.
+ *   and its own images: the "Built with Kit" badge, and the grey placeholder its layouts set behind a
+ *   photo, which shows where the photo doesn't fill its cell (the Nov 3 email). cdn.convertkit.com
+ *   sends these on to cdn.kit.com (a 301, and a redirect is held to this list too). Without these,
+ *   the Nov 3 and Nov 10, 2026 emails showed every picture broken. Only these paths: nothing else of
+ *   Kit's loads.
  */
 export const IMG_SOURCES = [
   "'self'",
@@ -19,8 +21,8 @@ export const IMG_SOURCES = [
   'https://shop.sunnyandranney.com/cdn-cgi/image/',
   'https://embed.filekitcdn.com/',
   'https://functions-js.kit.com/icons',
-  'https://cdn.convertkit.com/assets/images/',
-  'https://cdn.kit.com/assets/images/',
+  'https://cdn.convertkit.com/assets/',
+  'https://cdn.kit.com/assets/',
 ];
 
 export const ADMIN_CSP = [
