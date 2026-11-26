@@ -186,8 +186,12 @@ policy, so the admin's Access application never lets them in. The app accepts
 that application's token only on that address (`CF_ACCESS_EMAIL_AUD`,
 `audienceFor` in `src/lib/admin-identity.mjs`), serves
 only `/admin/email/` and `/api/admin/email/` there, and refuses an
-`ADMIN_EMAIL_EMAILS` login anywhere else (`inScope` in `src/lib/admin-host.mjs`,
-checked in the middleware before any page runs). `src/lib/email-login.test.mjs`
+`ADMIN_EMAIL_EMAILS` login anywhere else (`frontDoor` and `inScope` in
+`src/lib/admin-host.mjs`, checked in the middleware before any page runs). Two
+parts of the email stay with managers: the tester list (a test makes each person
+on it a Kit subscriber, and the real send goes to every subscriber) and the sent
+emails at `/admin/email/sent/` (the store's Kit account is the charity's too, so
+they include the charity's emails). `src/lib/email-login.test.mjs`
 walks every page and call under `src/pages` against those rules, with real
 signed tokens. To add a
 helper, put their email in both that policy and `ADMIN_EMAIL_EMAILS`; to remove

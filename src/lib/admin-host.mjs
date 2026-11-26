@@ -15,11 +15,41 @@ export const ADMIN_HOST = 'admin.sunnyandranney.com';
 export const EMAIL_HOST = 'email.sunnyandranney.com';
 const STORE_HOSTS = new Set(['sunnyandranney.com', 'www.sunnyandranney.com']);
 const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/i;
-const EMAIL_PATH = /^\/(api\/)?admin\/email(\/|$)/i;
+// The weekly email's own page and its calls. Not /admin/email/sent/: the store's Kit account is
+// the charity's too, so the sent emails include the charity's.
+const EMAIL_PATH = /^\/(admin\/email\/?$|api\/admin\/email(\/|$))/i;
 const EMAIL_HOME = `https://${EMAIL_HOST}/admin/email/`;
 
 /** The weekly email's page, or one of the calls it makes. */
 export const isEmailPath = (path) => EMAIL_PATH.test(path);
+
+/**
+ * The path as the front door checks it: decoded, and with repeated slashes made one, since
+ * Astro finds /admin/staff/ for "//admin/staff/" (it drops a leading slash before matching).
+ * @param {string} pathname
+ */
+export function frontDoorPath(pathname) {
+  let path = pathname;
+  try {
+    path = decodeURIComponent(pathname);
+  } catch {
+    // Not valid percent-encoding: check it as it came.
+  }
+  return path.replace(/\/{2,}/g, '/');
+}
+
+/**
+ * What the front door does before it asks who's there: 'refuse' anything but the weekly email on
+ * the email address; let 'public' pages through (they aren't the admin); or 'sign-in' for the admin,
+ * where who's asking is checked next, then inScope.
+ * @param {string} host lower case
+ * @param {string} path from frontDoorPath
+ * @returns {'refuse' | 'public' | 'sign-in'}
+ */
+export function frontDoor(host, path) {
+  if (host === EMAIL_HOST && !isEmailPath(path)) return 'refuse';
+  return ADMIN_PATH.test(path) ? 'sign-in' : 'public';
+}
 
 /**
  * Whether a signed-in person may reach this path at all, decided in the
@@ -47,14 +77,16 @@ export function inScope(who, host, path) {
 export function adminHostRedirect(url, method) {
   if (method !== 'GET' && method !== 'HEAD') return null;
   const host = url.hostname.toLowerCase();
-  const isAdminPath = ADMIN_PATH.test(url.pathname);
+  // As the front door sees it, so "//admin/staff/" goes where "/admin/staff/" does
+  const path = frontDoorPath(url.pathname);
+  const isAdminPath = ADMIN_PATH.test(path);
   if (host === EMAIL_HOST) {
-    if (isEmailPath(url.pathname)) return null;
-    return url.pathname.toLowerCase().startsWith('/api/') ? null : EMAIL_HOME;
+    if (isEmailPath(path)) return null;
+    return path.toLowerCase().startsWith('/api/') ? null : EMAIL_HOME;
   }
   if (host === ADMIN_HOST) return isAdminPath ? null : `https://${ADMIN_HOST}/admin/`;
-  if (STORE_HOSTS.has(host) && isAdminPath && !url.pathname.toLowerCase().startsWith('/api/')) {
-    return `https://${ADMIN_HOST}${url.pathname}${url.search}`;
+  if (STORE_HOSTS.has(host) && isAdminPath && !path.toLowerCase().startsWith('/api/')) {
+    return `https://${ADMIN_HOST}${url.pathname.replace(/\/{2,}/g, '/')}${url.search}`;
   }
   return null;
 }

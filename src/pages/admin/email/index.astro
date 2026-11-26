@@ -1,6 +1,7 @@
 ---
 export const prerender = false;
 
+import { viewFor } from '@/lib/admin/nav.mjs';
 import EmailApp from '@/components/email/EmailApp';
 import type { AppProps } from '@/components/email/model';
 import '@/components/email/email.css';
@@ -19,6 +20,8 @@ import { localDate } from '@/lib/time-clock/hours.mjs';
 
 const admin = Astro.locals.admin;
 if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
+// Who the page is drawn for: on the email address, everyone gets the email-only view.
+const view = viewFor(admin, Astro.url.hostname.toLowerCase());
 
 // One email at a time: this week's until it has gone out, then next week's (weekToWorkOn). This
 // week's stays until its Saturday, so one that missed its Tuesday can still go out (sendDays). The
@@ -92,7 +95,9 @@ const props = {
   last,
   events,
   // Who checks each email: the store's list, kept in D1, with whoever is signed in first
-  test: { people: testPeople(testList, admin.email), me: admin.email.toLowerCase() },
+  test: { people: testPeople(testList, admin.email), me: admin.email.toLowerCase(), managesList: view.role === 'manager' },
+  // The sent emails include the charity's (one Kit account), so they're for managers
+  sentLink: view.role === 'manager',
   parts,
   photos,
   kitSend,

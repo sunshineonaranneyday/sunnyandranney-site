@@ -14,6 +14,9 @@ test('the admin address opens on the admin and serves nothing else', () => {
 test('an admin page asked for on a store address moves to the admin address', () => {
   assert.equal(at('https://sunnyandranney.com/admin/hours/?week=2026-11-01'), 'https://admin.sunnyandranney.com/admin/hours/?week=2026-11-01');
   assert.equal(at('https://www.sunnyandranney.com/ADMIN'), 'https://admin.sunnyandranney.com/ADMIN');
+  // Doubled slashes go the same way: Astro would find /admin/staff/ for them
+  assert.equal(at('https://sunnyandranney.com//admin/staff/'), 'https://admin.sunnyandranney.com/admin/staff/');
+  assert.equal(at('https://sunnyandranney.com/admin//hours/?w=1'), 'https://admin.sunnyandranney.com/admin/hours/?w=1');
 });
 
 test('the store itself, API calls, posts and other addresses are left alone', () => {

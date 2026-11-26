@@ -1,10 +1,9 @@
 import { defineMiddleware } from 'astro:middleware';
 import { authenticate } from '@/lib/admin-auth';
-import { EMAIL_HOST, adminHostRedirect, inScope, isEmailPath } from '@/lib/admin-host.mjs';
+import { adminHostRedirect, frontDoor, frontDoorPath, inScope } from '@/lib/admin-host.mjs';
 
-// Case-insensitive so a route can't be reached around this check by changing
-// the case of the URL. Handlers also call requireRole, as a second gate.
-const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/i;
+// Admin paths are matched case-insensitively and with repeated slashes made one (frontDoorPath), so
+// a route can't be reached around this check by changing the URL's case. Handlers also check the role.
 
 const SECURITY_HEADERS: Record<string, string> = {
   'Cache-Control': 'no-store',
@@ -18,14 +17,6 @@ const SECURITY_HEADERS: Record<string, string> = {
     // from the domain's image resizing, which sends those files' PNGs as JPEGs (email.mjs, RESIZE).
     "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ/ https://cdn.shopify.com/s/files/1/0930/2117/6092/ https://shop.sunnyandranney.com/cdn-cgi/image/; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
 };
-
-function decodedPath(pathname: string): string {
-  try {
-    return decodeURIComponent(pathname);
-  } catch {
-    return pathname;
-  }
-}
 
 function deny(isApi: boolean, status: number, message: string): Response {
   const headers = new Headers(SECURITY_HEADERS);
@@ -43,13 +34,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (elsewhere) return context.redirect(elsewhere, 302);
   }
 
-  const path = decodedPath(context.url.pathname);
+  const path = frontDoorPath(context.url.pathname);
   const isApi = path.toLowerCase().startsWith('/api/');
   const host = context.url.hostname.toLowerCase();
   if (context.isPrerendered) return next();
   // The email address serves the weekly email and nothing else: not the store's own calls either.
-  if (host === EMAIL_HOST && !isEmailPath(path)) return deny(isApi, 403, 'Not authorized');
-  if (!ADMIN_PATH.test(path)) return next();
+  const door = frontDoor(host, path);
+  if (door === 'refuse') return deny(isApi, 403, 'Not authorized');
+  if (door === 'public') return next();
 
   const identity = await authenticate(context.request, context.locals.runtime?.env ?? {});
   if (!identity) return deny(isApi, 403, 'Not authorized');

@@ -1,7 +1,7 @@
 // The email-only login: someone who helps with the weekly email and must reach nothing else.
 // Two locks hold it, and these tests walk every page and call under src/pages against both:
-//  1. The front door (middleware.ts, with inScope from admin-host.mjs) refuses anything but the
-//     weekly email to that login, and refuses everything else on the email address, before a page runs.
+//  1. The front door (middleware.ts, with frontDoor and inScope from admin-host.mjs) refuses anything
+//     but the weekly email to that login, and everything else on the email address, before a page runs.
 //  2. Every other admin page and call checks the role itself, and none lets that login in.
 // A third lock is Cloudflare's: the email address has its own Access application, and the admin's
 // address never accepts its sign-ins (admin-auth.ts picks the audience by address).
@@ -9,12 +9,15 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 import { verifyAccessJwt } from './access-jwt.mjs';
-import { ADMIN_HOST, EMAIL_HOST, adminHostRedirect, inScope, isEmailPath } from './admin-host.mjs';
+import { ADMIN_HOST, EMAIL_HOST, adminHostRedirect, frontDoor, frontDoorPath, inScope, isEmailPath } from './admin-host.mjs';
 import { audienceFor, identityFrom } from './admin-identity.mjs';
 import { allLinks, navFor, viewFor } from './admin/nav.mjs';
 
 const PAGES = new URL('../pages/', import.meta.url);
 const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/i;
+
+/** Every kind of file Astro makes a page or endpoint from. */
+const PAGE_FILE = /\.(astro|ts|js|mjs|md|mdx|html)$/;
 
 /** A file name as the part of the path it serves: [id] is x, [...rest] is a/b. */
 const segment = (name) => name.replace(/\[\.\.\.[^\]]*\]/g, 'a/b').replace(/\[[^\]]*\]/g, 'x');
@@ -23,8 +26,8 @@ const segment = (name) => name.replace(/\[\.\.\.[^\]]*\]/g, 'a/b').replace(/\[[^
 function routes(dir = PAGES, base = '/') {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     if (entry.isDirectory()) return routes(new URL(`${entry.name}/`, dir), `${base}${segment(entry.name)}/`);
-    if (!/\.(astro|ts)$/.test(entry.name) || entry.name.endsWith('.d.ts')) return [];
-    const name = segment(entry.name.replace(/\.(astro|ts)$/, ''));
+    if (!PAGE_FILE.test(entry.name) || entry.name.endsWith('.d.ts')) return [];
+    const name = segment(entry.name.replace(PAGE_FILE, ''));
     const source = readFileSync(new URL(entry.name, dir), 'utf8');
     return [{ file: `src/pages${base}${entry.name}`, path: name === 'index' ? base : `${base}${name}/`, source }];
   });
@@ -38,8 +41,6 @@ const HOSTS = [ADMIN_HOST, EMAIL_HOST, 'sunnyandranney-site.pages.dev', 'sunnyan
 /** What the email-only login may use. A new page or call here is one more thing it can do: add it on purpose. */
 const EMAIL_ROUTES = [
   '/admin/email/',
-  '/admin/email/sent/',
-  '/admin/email/sent/x/',
   '/api/admin/email/event/',
   '/api/admin/email/photos/',
   '/api/admin/email/send/',
@@ -48,9 +49,18 @@ const EMAIL_ROUTES = [
   '/api/admin/email/week/',
 ];
 
+/**
+ * Inside the email, still managers' only: a test makes each person on the tester list a Kit
+ * subscriber, who then gets every weekly email, so only managers change that list.
+ */
+const MANAGERS_ONLY = ['/api/admin/email/test-people/'];
+
+/** The store's Kit account is the charity's too, so the sent emails are the charity's as well: not the helper's. */
+const NOT_THE_HELPERS = ['/admin/email/sent/', '/admin/email/sent/x/'];
+
 test('the walk finds the whole admin, so nothing below is passed by finding nothing', () => {
   assert.ok(ADMIN.length >= 45, `only ${ADMIN.length} admin pages and calls found`);
-  for (const path of ['/admin/payroll/', '/admin/hours/', '/admin/staff/x/', '/api/admin/gusto/send/', '/api/admin/medusa/a/b/', '/api/admin/people/']) {
+  for (const path of ['/admin/payroll/', '/admin/hours/', '/admin/staff/x/', '/api/admin/gusto/send/', '/api/admin/medusa/a/b/', '/api/admin/people/', ...NOT_THE_HELPERS]) {
     assert.ok(ADMIN.some((r) => r.path === path), `${path} wasn't found`);
   }
 });
@@ -79,13 +89,43 @@ test('the email address refuses the store’s own server code too (cart, chat, s
   for (const r of outside) assert.equal(isEmailPath(r.path), false, `${r.path} would run on the email address`);
 });
 
-test('the front door checks before any page runs', () => {
+test('the front door: the email address refuses everything but the email; the admin asks who’s there', () => {
+  for (const r of SERVER) {
+    const path = frontDoorPath(r.path);
+    assert.equal(frontDoor(EMAIL_HOST, path), isEmailPath(path) ? 'sign-in' : 'refuse', `${r.path} at the email address`);
+    for (const host of HOSTS.filter((h) => h !== EMAIL_HOST)) assert.equal(frontDoor(host, path), ADMIN_PATH.test(r.path) ? 'sign-in' : 'public', `${r.path} at ${host}`);
+  }
+});
+
+test('doubled slashes and encoded ones can’t walk around the front door', () => {
+  // Astro finds /admin/staff/ for "//admin/staff/", so the front door must see it as the admin too.
+  for (const raw of ['//admin/staff/', '///admin/payroll/', '/admin//payroll/', '//api/admin/people/', '/%2Fadmin/staff/', '/admin%2F%2Fhours/']) {
+    const path = frontDoorPath(new URL(`https://sunnyandranney.com${raw}`).pathname);
+    assert.equal(frontDoor('sunnyandranney.com', path), 'sign-in', `${raw} → ${path}`);
+    assert.equal(frontDoor(EMAIL_HOST, path), 'refuse', `${raw} at the email address`);
+    assert.equal(inScope({ role: 'email' }, ADMIN_HOST, path), false, `${raw} for the email login`);
+  }
+  assert.equal(frontDoorPath('//admin/email/'), '/admin/email/');
+  assert.equal(frontDoorPath('/admin/%E0%A4%A/'), '/admin/%E0%A4%A/', 'bad encoding is checked as it came');
+});
+
+test('the middleware runs these checks, in this order, before any page', () => {
   const mw = readFileSync(new URL('../middleware.ts', import.meta.url), 'utf8');
-  const hostCheck = mw.indexOf('host === EMAIL_HOST && !isEmailPath(path)');
-  const scope = mw.indexOf('if (!inScope(identity, host, path)) return deny(');
-  const handOff = mw.indexOf('context.locals.admin = identity');
-  assert.ok(hostCheck > 0 && hostCheck < mw.indexOf('if (!ADMIN_PATH.test(path)) return next();'), 'the email address is closed before non-admin paths are let through');
-  assert.ok(scope > 0 && scope < handOff, 'the scope is checked before the page gets the sign-in');
+  const at = (text) => {
+    const i = mw.indexOf(text);
+    assert.ok(i > 0, `middleware.ts no longer has: ${text}`);
+    return i;
+  };
+  const order = [
+    at('const path = frontDoorPath(context.url.pathname);'),
+    at('const door = frontDoor(host, path);'),
+    at("if (door === 'refuse') return deny("),
+    at("if (door === 'public') return next();"),
+    at('const identity = await authenticate('),
+    at('if (!inScope(identity, host, path)) return deny('),
+    at('context.locals.admin = identity'),
+  ];
+  assert.deepEqual(order, [...order].sort((a, b) => a - b));
 });
 
 test('every other admin page and call checks the role itself, and none lets the email login in', () => {
@@ -97,7 +137,8 @@ test('every other admin page and call checks the role itself, and none lets the 
       const checks = (r.source.match(/require(Role|Owner)\(/g) ?? []).length;
       assert.ok(handlers > 0 && checks >= handlers, `${r.file}: ${handlers} handlers, ${checks} role checks`);
     } else {
-      assert.match(r.source, /role !== 'manager'|require(Role|Owner)\(|if \(!Astro\.locals\.admin\?\.owner\)/, `${r.file} has no role check of its own`);
+      // A role (or owner) test that returns before the page draws: "if (!admin)" alone isn't one.
+      assert.match(r.source, /^if \([^)]*\b(role|owner)\b[^)]*\) return (new Response\(|Astro\.redirect\()/m, `${r.file} has no role check of its own`);
     }
     for (const line of r.source.split('\n')) {
       if (/role|require(Role|Owner)/.test(line)) assert.doesNotMatch(line, /'email'/, `${r.file} lets the email login in: ${line.trim()}`);
@@ -106,9 +147,25 @@ test('every other admin page and call checks the role itself, and none lets the 
 });
 
 test('the weekly email’s own page and calls let the email login in, and say so', () => {
-  for (const r of ADMIN.filter((x) => EMAIL_ROUTES.includes(x.path))) {
+  for (const r of ADMIN.filter((x) => EMAIL_ROUTES.includes(x.path) && !MANAGERS_ONLY.includes(x.path))) {
     assert.match(r.source, /'manager', 'email'|role !== 'email'/, `${r.file} doesn't let the email login in`);
   }
+});
+
+test('the tester list stays managers’ only, and the email page hides its controls and the sent emails from the helper', () => {
+  for (const r of ADMIN.filter((x) => MANAGERS_ONLY.includes(x.path))) {
+    const handlers = (r.source.match(/^export (const|async function) (GET|POST|PUT|PATCH|DELETE|ALL)\b/gm) ?? []).length;
+    assert.equal((r.source.match(/requireRole\(context\.locals, 'manager'\)/g) ?? []).length, handlers, `${r.file}: every handler managers only`);
+  }
+  const page = readFileSync(new URL('../pages/admin/email/index.astro', import.meta.url), 'utf8');
+  assert.match(page, /const view = viewFor\(admin, Astro\.url\.hostname\.toLowerCase\(\)\);/);
+  assert.match(page, /managesList: view\.role === 'manager'/);
+  assert.match(page, /sentLink: view\.role === 'manager'/);
+  const send = readFileSync(new URL('../components/email/Send.tsx', import.meta.url), 'utf8');
+  assert.match(send, /!p\.you && props\.managesList &&/, 'the remove buttons');
+  assert.match(send, /!props\.managesList \? null : showAdd/, 'the add form');
+  const app = readFileSync(new URL('../components/email/EmailApp.tsx', import.meta.url), 'utf8');
+  assert.match(app, /props\.sentLink && <a href="\/admin\/email\/sent\/">/);
 });
 
 test('a path that climbs out of the email is cleaned up before it’s checked', () => {
@@ -116,7 +173,7 @@ test('a path that climbs out of the email is cleaned up before it’s checked', 
     const { pathname } = new URL(`https://${EMAIL_HOST}${sneaky}`);
     assert.equal(isEmailPath(pathname), false, `${sneaky} became ${pathname}`);
   }
-  for (const near of ['/admin/emails/', '/admin/email-old/', '/admin/emailer', '/api/admin/emailing/']) assert.equal(isEmailPath(near), false, near);
+  for (const near of ['/admin/emails/', '/admin/email-old/', '/admin/emailer', '/api/admin/emailing/', '/admin/email/sent/', '/admin/email/sent/123/']) assert.equal(isEmailPath(near), false, near);
   assert.equal(isEmailPath('/ADMIN/EMAIL/'), true);
   assert.equal(isEmailPath('/admin/email'), true);
 });
@@ -129,6 +186,7 @@ test('the email address opens on the weekly email, from anywhere else', () => {
   assert.equal(at(`https://${EMAIL_HOST}/admin/payroll/`), home);
   assert.equal(at(`https://${EMAIL_HOST}/shop/`), home);
   assert.equal(at(`https://${EMAIL_HOST}/admin/email/?send=2026-11-24`), null);
+  assert.equal(at(`https://${EMAIL_HOST}/admin/email/sent/`), home);
   // Calls and posts aren't moved: the front door refuses them.
   assert.equal(at(`https://${EMAIL_HOST}/api/admin/people/`), null);
   assert.equal(at(`https://${EMAIL_HOST}/admin/payroll/`, 'POST'), null);

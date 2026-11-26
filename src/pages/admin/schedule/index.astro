@@ -8,7 +8,8 @@ import { loadWeek } from '@/lib/schedule/store';
 import { isIsoDate, localDate, workweekStart } from '@/lib/time-clock/hours.mjs';
 
 const admin = Astro.locals.admin;
-if (!admin) return new Response('Not authorized', { status: 403 });
+// Managers, and the store tablet read-only: it lists everyone on staff and their shifts.
+if (admin?.role !== 'manager' && admin?.role !== 'kiosk') return new Response('Not authorized', { status: 403 });
 
 const db = Astro.locals.runtime.env.DB;
 const requested = Astro.url.searchParams.get('week');

@@ -60,6 +60,8 @@ interface Props {
   saveFirst: () => Promise<boolean>;
   me: string;
   people: TestPerson[];
+  /** May add or take people off the list (managers). */
+  managesList: boolean;
   tests: TestSent[];
   onTest: (t: TestSent) => void;
   kitSend: KitSend | null;
@@ -214,7 +216,7 @@ export function Send(props: Props) {
                 <span class="em-test-name">{p.you ? 'You' : p.name}</span>
                 <span class="em-test-email">{breakable(p.email)}</span>
               </label>
-              {!p.you && (
+              {!p.you && props.managesList && (
                 <button type="button" class="btn btn-ghost btn-icon em-remove" aria-label={`Take ${p.name} off the list`} onClick={() => void remove(p)}>
                   <X />
                 </button>
@@ -222,7 +224,7 @@ export function Send(props: Props) {
             </li>
           ))}
         </ul>
-        {showAdd ? (
+        {!props.managesList ? null : showAdd ? (
           <form class="em-test-add" onSubmit={add} noValidate>
             <div class="em-test-add-row">
               <input aria-label="Their name" placeholder="Name" autocomplete="off" value={adding.name} maxLength={40} onInput={(e) => setAdding({ ...adding, name: (e.target as HTMLInputElement).value })} />
