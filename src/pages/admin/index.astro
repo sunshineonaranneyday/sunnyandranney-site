@@ -5,8 +5,8 @@ import AdminBase from '@/layouts/AdminBase.astro';
 import { loadToday } from '@/lib/admin/today.mjs';
 import { initials, svg, tone } from '@/lib/admin-ui';
 import { STORE_TIME_ZONE, workweekStart, localDate, utcToLocalInput } from '@/lib/time-clock/hours.mjs';
-import { nextSend, sendLabel } from '@/lib/sunny-side/special.mjs';
-import { getSpecial } from '@/lib/sunny-side/special-store.mjs';
+import { emailNeeds, emailToWorkOn, sendLabel, thisWeeksSend } from '@/lib/sunny-side/special.mjs';
+import { getWeek, wentOut } from '@/lib/sunny-side/week-store.mjs';
 import { waitingCount } from '@/lib/store-notify/requests-store.mjs';
 
 const admin = Astro.locals.admin;
@@ -16,20 +16,35 @@ if (admin.role !== 'manager') return Astro.redirect('/admin/clock/', 302);
 const now = new Date().toISOString();
 const t = await loadToday(Astro.locals.runtime.env.DB, { now, myEmail: admin.email });
 
-// The coming Tuesday email needs its special. If the check itself fails, Today still loads without it.
-const emailSend = nextSend(localDate(now));
-const specialMissing = await getSpecial(Astro.locals.runtime.env.DB, emailSend).then(
-  (s) => s === null,
-  () => false,
-);
+// The email to work on (the same one the email page opens on) needs its sale and its products.
+// If the check itself fails, Today still loads without it.
+const todayDate = localDate(now);
+const db = Astro.locals.runtime.env.DB;
+const thisWeek = thisWeeksSend(todayDate);
+const { emailSend, emailMissing } = await (async () => {
+  const first = await getWeek(db, thisWeek);
+  const send = emailToWorkOn(todayDate, () => wentOut(first));
+  const w = send === thisWeek ? first : await getWeek(db, send);
+  return { emailSend: send, emailMissing: emailNeeds(w) };
+})().catch(() => ({ emailSend: thisWeek, emailMissing: [] as string[] }));
+const specialMissing = emailMissing.length > 0;
+// The website check (sync-products' sweep): in-stock pieces missing from sunnyandranney.com
+// for over two hours, or the check itself failing or not running. Today loads without it.
+interface Coverage { checkedAt?: string; late?: Array<{ handle: string; title: string; since: string }>; error?: string | null }
+const coverageRow = await Astro.locals.runtime.env.DB.prepare(`SELECT value FROM settings WHERE key = 'settings:website_coverage'`).first<{ value: string }>().catch(() => null);
+const websiteCheck: Coverage | null = (() => { try { return coverageRow?.value ? JSON.parse(coverageRow.value) : null; } catch { return null; } })();
+const websiteLate = websiteCheck?.late ?? [];
+const websiteStale = websiteCheck?.checkedAt ? Date.parse(now) - Date.parse(websiteCheck.checkedAt) > 36 * 3_600_000 : false;
+const websiteProblem = websiteLate.length > 0 || Boolean(websiteCheck?.error) || websiteStale;
 // Shoppers waiting on a special-order answer. If the table isn't there yet, Today loads without it.
 const requests = await waitingCount(Astro.locals.runtime.env.DB).catch(() => ({ count: 0, oldest: null as string | null, due: null as string | null }));
 // Urgency goes by the answer-by day the shopper was given, as on the Special orders page.
 const storeToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
 const requestDue = !requests.due ? 'soon' : requests.due < storeToday ? 'late' : requests.due === storeToday ? 'today' : 'soon';
 const dueDay = requests.due ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' }).format(new Date(`${requests.due}T12:00:00Z`)) : null;
-const emailDays = Math.round((Date.parse(emailSend) - Date.parse(localDate(now))) / 86400000);
-const emailWhen = emailDays === 0 ? 'It goes out today' : emailDays === 1 ? 'It goes out tomorrow' : `It goes out in ${emailDays} days`;
+const emailDays = Math.round((Date.parse(emailSend) - Date.parse(todayDate)) / 86400000);
+const emailWhen =
+  emailDays < 0 ? 'Its Tuesday has passed, but it can still go out by Saturday' : emailDays === 0 ? 'It usually goes out today' : emailDays === 1 ? 'It usually goes out tomorrow' : `It usually goes out in ${emailDays} days`;
 
 const dayFmt = new Intl.DateTimeFormat('en-US', { timeZone: STORE_TIME_ZONE, weekday: 'long', month: 'long', day: 'numeric' });
 const shortDay = new Intl.DateTimeFormat('en-US', { timeZone: STORE_TIME_ZONE, weekday: 'short', month: 'short', day: 'numeric' });
@@ -49,7 +64,7 @@ const hoursLink = (item: { id: string; clockInAt: string }) => `/admin/hours/?we
 const readyMinutes = t.ready.reduce((sum: number, item: { minutes: number }) => sum + item.minutes, 0);
 const readyPeople = [...new Set(t.ready.map((item: { name: string }) => item.name))] as string[];
 const overtime = t.week.filter((p: { overtimeRisk: boolean }) => p.overtimeRisk);
-const attention = t.missedClockOuts.length + t.ready.length + t.needsLook.length + t.lateOrMissing.length + overtime.length + (specialMissing ? 1 : 0) + (requests.count ? 1 : 0);
+const attention = t.missedClockOuts.length + t.ready.length + t.needsLook.length + t.lateOrMissing.length + overtime.length + (specialMissing ? 1 : 0) + (websiteProblem ? 1 : 0) + (requests.count ? 1 : 0);
 const weekScale = Math.max(40 * 60, ...t.week.map((p: { projectedMinutes: number }) => p.projectedMinutes));
 const pct = (minutes: number) => `${Math.min(100, (minutes / weekScale) * 100).toFixed(2)}%`;
 const fortyAt = pct(40 * 60);
@@ -199,15 +214,34 @@ interface Missed {
         </article>
       )}
 
+      {websiteProblem && (
+        <article class="task task-urgent" id="website-task">
+          <span class="task-icon" aria-hidden="true"><Fragment set:html={svg('tag', 20)} /></span>
+          <div class="task-body">
+            {websiteLate.length > 0 ? (
+              <>
+                <h3>{websiteLate.length === 1 ? 'A piece in stock isn’t on the website' : `${websiteLate.length} pieces in stock aren’t on the website`}</h3>
+                <p>{websiteLate.slice(0, 3).map((m, i) => <>{i > 0 && ', '}<a href={`https://admin.shopify.com/store/sunnyandranney/products?query=${encodeURIComponent(m.handle)}`} target="_blank" rel="noopener">{m.title}</a></>)}{websiteLate.length > 3 ? ` and ${websiteLate.length - 3} more. ` : '. '}The website puts Active pieces on by itself; one that stays off needs a look in Shopify.</p>
+              </>
+            ) : (
+              <>
+                <h3>The website check {websiteStale ? 'hasn’t run since ' + new Date(websiteCheck!.checkedAt!).toLocaleDateString('en-US', { weekday: 'long' }) : 'failed'}</h3>
+                <p>{websiteCheck?.error ?? 'It runs with every catalog sync and once a night.'} Pieces may be missing from the website without anyone knowing.</p>
+              </>
+            )}
+          </div>
+        </article>
+      )}
+
       {specialMissing && (
         <article class:list={['task', emailDays === 0 ? 'task-urgent' : 'task-warn']} id="special-task">
           <span class="task-icon" aria-hidden="true"><Fragment set:html={svg('tag', 20)} /></span>
           <div class="task-body">
-            <h3>The {sendLabel(emailSend)} email has no special yet</h3>
-            <p>{emailWhen}. Pick the sale or a headline, and see it in the email as you type.</p>
+            <h3>The {sendLabel(emailSend)} email needs {emailMissing.join(' and ')}</h3>
+            <p>{emailWhen}. Set them, and see the email as you go.</p>
           </div>
           <div class="task-actions">
-            <a class="btn btn-dark btn-small" href="/admin/special/">Set the special</a>
+            <a class="btn btn-dark btn-small" href="/admin/email/">Set up the email</a>
           </div>
         </article>
       )}

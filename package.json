@@ -14,8 +14,9 @@
     "deploy:deploy-coordinator": "wrangler deploy --config workers/deploy-coordinator/wrangler.toml",
     "deploy:shop-redirect": "wrangler deploy --config workers/shop-redirect/wrangler.toml",
     "deploy:sales-tax": "wrangler deploy --config workers/sales-tax/wrangler.toml",
-    "sync-redirects": "node scripts/sync-shopify-redirects.mjs",
-    "deploy:store-notify": "wrangler deploy --config workers/store-notify/wrangler.toml"
+    "deploy:email-again": "wrangler deploy --config workers/email-again/wrangler.toml",
+    "deploy:store-notify": "wrangler deploy --config workers/store-notify/wrangler.toml",
+    "sync-redirects": "node scripts/sync-shopify-redirects.mjs"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^12.0.0",

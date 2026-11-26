@@ -31,10 +31,10 @@ while any wait.
 npm run deploy:store-notify
 ```
 
-The table comes from `migrations/0013_special_order_requests.sql`. The live
+The table comes from `migrations/0014_special_order_requests.sql`. The live
 database's migration list is out of step with what's applied, so run the file on
 its own (it's safe to run twice):
 
 ```sh
-npx wrangler d1 execute sunnyandranney-db --remote --file migrations/0013_special_order_requests.sql
+npx wrangler d1 execute sunnyandranney-db --remote --file migrations/0014_special_order_requests.sql
 ```

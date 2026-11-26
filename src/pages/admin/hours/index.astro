@@ -429,9 +429,11 @@ const isThisWeek = weekStart === currentWeek;
     .shift-table tr:last-child { border-bottom: 0; padding-bottom: 0; }
     .shift-table td { padding: 0; border: 0; }
     .row-problem td:first-child::before { display: none; }
-    .page-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
-    .page-actions .btn-group, .page-actions [data-approve-many] { grid-column: 1 / -1; }
-    .page-actions > .btn { padding-inline: 0.5rem; }
+    /* The week and Approve all take a line each; Add shift and Gusto share one when both fit (from
+       about 351px), and each takes its own on a narrower phone instead of pushing past the edge. */
+    .page-actions { display: flex; flex-wrap: wrap; width: 100%; }
+    .page-actions > .btn { flex: 1 1 auto; padding-inline: 0.5rem; }
+    .page-actions > .btn-group, .page-actions > [data-approve-many] { flex: 1 1 100%; }
     .row-problem .day { color: var(--red); }
     .c-day { grid-column: 1 / 4; }
     .c-status { grid-column: 4; grid-row: 1; text-align: right; }

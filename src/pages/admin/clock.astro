@@ -6,7 +6,9 @@ import { STORE_TIME_ZONE } from '@/lib/time-clock/hours.mjs';
 import { listStaff, openShiftsByStaff } from '@/lib/time-clock/store';
 import { initials, svg, tone } from '@/lib/admin-ui';
 
-if (!Astro.locals.admin) return new Response('Not authorized', { status: 403 });
+// Managers and the store tablet: it lists every person on staff and who's clocked in.
+const role = Astro.locals.admin?.role;
+if (role !== 'manager' && role !== 'kiosk') return new Response('Not authorized', { status: 403 });
 
 const db = Astro.locals.runtime.env.DB;
 const [staff, openShifts] = await Promise.all([listStaff(db, true), openShiftsByStaff(db)]);

@@ -1,10 +1,12 @@
-// Builds the weekly email from its brief: node scripts/sunny-side/build.mjs [--local] [brief.json ...]
+// Builds the weekly email from its brief: node scripts/sunny-side/build.mjs [--local] [--tests] [brief.json ...]
 // With no briefs named, every brief in briefs/ goes to out/ and every stress test in tests/ to out/tests/,
-// which verify.mjs then holds to the standard. The email itself is src/lib/sunny-side/email.mjs, the
+// which verify.mjs then holds to the standard. --tests builds the stress tests alone: they need nothing
+// but this repo (no admin database, no store pages), so the pull request check builds them. The email itself is src/lib/sunny-side/email.mjs, the
 // same code the admin uses to preview the week's special.
 //
-// A brief whose "sale" is "admin" takes the special Staci saved at /admin/special/ for its send date,
-// read from the store's D1 database with wrangler (--local reads the local dev database instead).
+// A brief whose "sale", "wall" or "events" is "admin" takes what Staci set at /admin/email/: the
+// special and the products she saved for its send date, and the store's events with dates still
+// ahead, read from the store's D1 database with wrangler (--local reads the local dev database).
 // A brief whose mission "impact" is "live" takes the charity's impact numbers from its own site,
 // where its records keep them current.
 // Every photo-wall product is read from its own page on sunnyandranney.com (name, price, photo) and
@@ -15,37 +17,77 @@ import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync } from 'nod
 import { basename, join, relative } from 'node:path';
 import { lines, render } from '../../src/lib/sunny-side/email.mjs';
 import { check, clean, isSendDate, sendLabel, toSale } from '../../src/lib/sunny-side/special.mjs';
+import { checkWall, cleanWall, toWall } from '../../src/lib/sunny-side/wall.mjs';
+import { checkEvent, cleanEvent, toBriefEvent } from '../../src/lib/sunny-side/events.mjs';
 import { IMPACT_PAGE, impactFromPage } from '../../src/lib/sunny-side/impact.mjs';
 import { NAME_MAX, displayName, handleOf, isProductPage, photoFor, productFromPage, quantitiesFromShop } from '../../src/lib/sunny-side/product.mjs';
+import { SITE } from '../../src/lib/sunny-side/email.mjs';
 
 const HERE = new URL('.', import.meta.url).pathname;
 const ROOT = join(HERE, '..', '..');
 const args = process.argv.slice(2);
 const local = args.includes('--local');
-const briefs = args.filter((a) => a !== '--local');
+const testsOnly = args.includes('--tests');
+const briefs = args.filter((a) => a !== '--local' && a !== '--tests');
+
+const ADMIN = 'admin.sunnyandranney.com/admin/email/';
+
+/** Rows from the store's D1 database, or null when the table hasn't been made yet (nothing saved). */
+function query(sql) {
+  try {
+    const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'sunnyandranney-db', local ? '--local' : '--remote', '--json', '--command', sql], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return JSON.parse(out)[0]?.results ?? [];
+  } catch (err) {
+    // A table only exists once something is first saved in it
+    if (/no such table/i.test(String(err.stdout) + String(err.stderr))) return null;
+    throw new Error(`Couldn't read the admin's database with wrangler: ${String(err.stderr || err.message).trim()}`);
+  }
+}
+
+/** What Staci saved for a send date: { special, wall }, each null until she saves it. */
+const weeks = new Map();
+function weekFromAdmin(send) {
+  if (!isSendDate(send)) throw new Error(`send_date ${send} isn't a Tuesday, so the admin has nothing for it.`);
+  if (!weeks.has(send)) {
+    const row = query(`SELECT special, wall FROM email_weeks WHERE send_date = '${send}'`)?.[0];
+    weeks.set(send, { special: row?.special ? JSON.parse(row.special) : null, wall: row?.wall ? JSON.parse(row.wall) : null });
+  }
+  return weeks.get(send);
+}
 
 /** The special Staci saved for a send date, as the email's offer. */
 function specialFromAdmin(send) {
-  if (!isSendDate(send)) throw new Error(`send_date ${send} isn't a Tuesday, so the admin has no special for it.`);
-  const missing = `No special is saved for the ${sendLabel(send)} email yet. Staci sets it at admin.sunnyandranney.com/admin/special/.`;
-  let out;
-  try {
-    out = execFileSync(
-      'npx',
-      ['wrangler', 'd1', 'execute', 'sunnyandranney-db', local ? '--local' : '--remote', '--json', '--command', `SELECT special FROM email_specials WHERE send_date = '${send}'`],
-      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-  } catch (err) {
-    // The table only exists once a first special is saved
-    if (/no such table/i.test(String(err.stdout) + String(err.stderr))) throw new Error(missing);
-    throw new Error(`Couldn't read the admin's database with wrangler: ${String(err.stderr || err.message).trim()}`);
-  }
-  const rows = JSON.parse(out)[0]?.results ?? [];
-  if (!rows.length) throw new Error(missing);
-  const special = clean(JSON.parse(rows[0].special));
+  const saved = weekFromAdmin(send).special;
+  if (!saved) throw new Error(`No special is saved for the ${sendLabel(send)} email yet. Staci sets it at ${ADMIN}.`);
+  const special = clean(saved);
   const problems = Object.values(check(special, send));
   if (problems.length) throw new Error(`The ${sendLabel(send)} special needs fixing in the admin: ${problems.join(' ')}`);
   return toSale(special);
+}
+
+/** The products Staci picked for a send date, as the email's photo wall. The store check comes after, as for any wall. */
+function wallFromAdmin(send) {
+  const saved = weekFromAdmin(send).wall;
+  if (!saved) throw new Error(`No products are picked for the ${sendLabel(send)} email yet. Staci picks them at ${ADMIN}.`);
+  const wall = cleanWall(saved);
+  const problems = Object.values(checkWall(wall, { send }));
+  if (problems.length) throw new Error(`The ${sendLabel(send)} products need fixing in the admin: ${problems.join(' ')}`);
+  return toWall(wall, SITE);
+}
+
+/** The store's events with dates on or after the send date, soonest first, as the email takes them. */
+function eventsFromAdmin(send) {
+  const rows = query(`SELECT event FROM store_events WHERE last_date >= '${send}' ORDER BY first_date, id`) ?? [];
+  return rows.map((r) => {
+    const ev = cleanEvent(JSON.parse(r.event));
+    const problems = Object.values(checkEvent(ev));
+    if (problems.length) throw new Error(`The event "${ev.title}" needs fixing in the admin: ${problems.join(' ')}`);
+    return toBriefEvent(ev, send, SITE);
+  }).filter(Boolean);
 }
 
 let impact = null;
@@ -107,10 +149,15 @@ async function productsFromStore(photos, { fixed }) {
       else if (qty <= 0 || !p.inStock) problems.push(`${name} is out of stock (${qty} in the shop). Pick another product.`);
       if (!ph.name && name.length > NAME_MAX) problems.push(`"${name}" is too long for a tile (${name.length} characters, ${NAME_MAX} at most). Give it a short "name".`);
       const src = ph.src || photoFor(p.images);
-      if (!src) problems.push(`${name} has only PNG photos, which are too heavy for email. Give it a "src" photo.`);
+      if (!src) problems.push(`${name} has no photo. Give it a "src" photo.`);
       return { ...ph, name, price: p.price, src };
     }),
   );
+  const seen = new Set();
+  for (const { name } of filled) {
+    if (name && seen.has(name.toLowerCase())) problems.push(`Two products would both say "${name}". Give one a name that tells them apart.`);
+    seen.add(name?.toLowerCase());
+  }
   if (problems.length) throw new Error(`The photo wall needs fixing:\n- ${problems.join('\n- ')}`);
   return filled;
 }
@@ -122,6 +169,8 @@ async function build(path, out) {
   rmSync(join(out, `${name}.html`), { force: true });
   const brief = JSON.parse(readFileSync(path, 'utf8'));
   if (brief.sale === 'admin') brief.sale = specialFromAdmin(brief.send_date);
+  if (brief.wall === 'admin') brief.wall = wallFromAdmin(brief.send_date);
+  if (brief.events === 'admin') brief.events = eventsFromAdmin(brief.send_date);
   if (brief.mission?.impact === 'live') brief.mission.impact = await liveImpact();
   const fixed = !relative(join(HERE, 'tests'), path).startsWith('..');
   if (brief.wall?.photos) brief.wall.photos = await productsFromStore(brief.wall.photos, { fixed });
@@ -131,7 +180,7 @@ async function build(path, out) {
 }
 
 // Every brief is tried, so one waiting on the admin doesn't hold up the rest; any that fail are
-// listed at the end and the build exits 1. With no briefs named, emails whose brief is gone go too.
+// listed at the end and the build exits 1.
 const failed = [];
 async function attempt(path, out) {
   try {
@@ -140,17 +189,27 @@ async function attempt(path, out) {
     failed.push(`${relative(HERE, path)}: ${err.message}`);
   }
 }
-if (briefs.length) {
-  for (const path of briefs) await attempt(path, join(HERE, 'out'));
-} else {
-  for (const [folder, out] of [['briefs', join(HERE, 'out')], ['tests', join(HERE, 'out', 'tests')]]) {
-    const files = readdirSync(join(HERE, folder)).filter((f) => f.endsWith('.json')).sort();
-    const current = new Set(files.map((f) => `${basename(f, '.json')}.html`));
-    mkdirSync(out, { recursive: true });
-    for (const old of readdirSync(out).filter((f) => f.endsWith('.html') && !current.has(f))) rmSync(join(out, old));
-    for (const file of files) await attempt(join(HERE, folder, file), out);
-  }
+// What this run builds, and where: the briefs named, or every brief in briefs/ (not with --tests) and
+// every stress test in tests/
+const jobs = briefs.length
+  ? briefs.map((path) => [path, join(HERE, 'out')])
+  : [['briefs', join(HERE, 'out')], ['tests', join(HERE, 'out', 'tests')]]
+      .filter(([folder]) => !testsOnly || folder === 'tests')
+      .flatMap(([folder, out]) =>
+        readdirSync(join(HERE, folder))
+          .filter((f) => f.endsWith('.json'))
+          .sort()
+          .map((f) => [join(HERE, folder, f), out]),
+      );
+// verify.mjs checks every email in out/ and out/tests/, so only this run's are left there. With
+// --tests or briefs named, the others were from an older build, older code, and could fail or pass
+// on HTML this change never touched; an email whose brief is gone goes too.
+const keep = new Set(jobs.map(([path, out]) => join(out, `${basename(path, '.json')}.html`)));
+for (const dir of [join(HERE, 'out'), join(HERE, 'out', 'tests')]) {
+  mkdirSync(dir, { recursive: true });
+  for (const f of readdirSync(dir).filter((f) => f.endsWith('.html'))) if (!keep.has(join(dir, f))) rmSync(join(dir, f));
 }
+for (const [path, out] of jobs) await attempt(path, out);
 if (failed.length) {
   console.error(`\nNot built:\n${failed.map((f) => `- ${f}`).join('\n')}`);
   process.exit(1);
