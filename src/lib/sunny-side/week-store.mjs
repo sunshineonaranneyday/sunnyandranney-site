@@ -12,7 +12,7 @@
  */
 
 import { cleanParts } from './parts.mjs';
-import { clean, emailToWorkOn, sendLabel, thisWeeksSend } from './special.mjs';
+import { clean, emailToWorkOn, isExtraDate, isSendDate, sendLabel, thisWeeksSend } from './special.mjs';
 import { cleanWall } from './wall.mjs';
 
 const SCHEMA = `CREATE TABLE IF NOT EXISTS email_weeks (
@@ -95,6 +95,50 @@ export function otherWeek(send, work) {
     : `Only the ${sendLabel(work)} email can be worked on until it goes out. Reload to see it.`;
 }
 
+// ── Extra emails: more than one a week, now and then (special.mjs isExtraDate) ──
+
+/** The extra emails still to go, soonest first: from today on, and not gone out yet. @returns {Promise<Week[]>} */
+export async function extrasAhead(db, today, now = Date.now()) {
+  await ensureTable(db);
+  const { results } = await db.prepare('SELECT * FROM email_weeks WHERE send_date >= ? ORDER BY send_date').bind(today).all();
+  return (results || []).filter((r) => isExtraDate(r.send_date)).map(fromRow).filter((w) => !wentOut(w, now));
+}
+
+/**
+ * Starts an extra email on its day, with the products, photos, reveal and charity of the last email
+ * that had products (the one just sent, as a rule), so it isn't built from nothing. Its subject line
+ * and sale are its own, so they start empty. Refused when there's already an email that day.
+ * @param {any} db @param {{ send: string, by: string, now: string }} extra
+ */
+export async function createExtra(db, { send, by, now }) {
+  await ensureTable(db);
+  if (!isExtraDate(send)) throw new Error(`Not an extra email's day: ${send}`);
+  const r = await db.prepare('SELECT * FROM email_weeks WHERE wall IS NOT NULL AND send_date <= ? ORDER BY send_date DESC LIMIT 1').bind(send).first();
+  const last = r ? fromRow(r) : null;
+  const parts = last?.parts ? { ...last.parts, subject: '', preheader: '' } : null;
+  return putWeek(db, { send, special: null, wall: last?.wall ?? null, parts, by, now, since: null });
+}
+
+/**
+ * Why the email for `send` can't be changed, tested or sent now, or null, with its saved week. A
+ * weekly email: only the one being worked on (weekToWorkOn). An extra: one that's saved, whose day
+ * hasn't passed, and that hasn't gone out.
+ * @returns {Promise<{ refused: string | null, week: Week | null }>}
+ */
+export async function workRefusal(db, send, today, now = Date.now()) {
+  if (isSendDate(send)) {
+    const { send: work, week } = await weekToWorkOn(db, today, now);
+    return { refused: otherWeek(send, work), week: send === work ? week : null };
+  }
+  if (!isExtraDate(send)) return { refused: 'Invalid request', week: null };
+  const week = await getWeek(db, send);
+  const label = sendLabel(send);
+  if (!week) return { refused: `The ${label} email was deleted. Reload to see the emails still to go.`, week: null };
+  if (wentOut(week, now)) return { refused: `The ${label} email has gone out, so it can’t change. It’s in Sent emails.`, week };
+  if (send < today) return { refused: `The ${label} email’s day has passed.`, week };
+  return { refused: null, week };
+}
+
 /**
  * Why a week can't change while it's scheduled, or null. Kit sends the email it was given, so a change
  * now would leave the page showing one email while another goes out. The page locks itself; this
@@ -102,6 +146,18 @@ export function otherWeek(send, work) {
  * @param {Week | null | undefined} w
  */
 export const scheduledRefusal = (w) => (w?.kit ? 'This email is scheduled in Kit, so it can’t change. Cancel the send first, then change it and schedule it again.' : null);
+
+/**
+ * True when an email scheduled or sent through Kit uses the photo (its top photo or the story's
+ * collage). Kit's copy of that email asks the site for the photo every time someone opens it, so its
+ * file has to stay, even once the photo is out of the library. `id` is a photo id (PHOTO_ID: letters
+ * and digits only, so nothing in it is a LIKE wildcard).
+ */
+export async function photoInKitEmail(db, id) {
+  await ensureTable(db);
+  if (!/^[a-z0-9]+$/.test(id)) throw new Error(`Not a photo id: ${id}`);
+  return Boolean(await db.prepare('SELECT 1 FROM email_weeks WHERE kit_id IS NOT NULL AND parts LIKE ? LIMIT 1').bind(`%"${id}"%`).first());
+}
 
 /** The most recent weeks with a special before a send date, newest first: the specials Staci can start from. @returns {Promise<Week[]>} */
 export async function pastWeeks(db, before, limit = 12) {

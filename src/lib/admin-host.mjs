@@ -15,9 +15,7 @@ export const ADMIN_HOST = 'admin.sunnyandranney.com';
 export const EMAIL_HOST = 'email.sunnyandranney.com';
 const STORE_HOSTS = new Set(['sunnyandranney.com', 'www.sunnyandranney.com']);
 const ADMIN_PATH = /^\/(api\/)?admin(\/|$)/i;
-// The weekly email's own page and its calls. Not /admin/email/sent/: the store's Kit account is
-// the charity's too, so the sent emails include the charity's.
-const EMAIL_PATH = /^\/(admin\/email\/?$|api\/admin\/email(\/|$))/i;
+const EMAIL_PATH = /^\/(api\/)?admin\/email(\/|$)/i;
 const EMAIL_HOME = `https://${EMAIL_HOST}/admin/email/`;
 
 /** The weekly email's page, or one of the calls it makes. */

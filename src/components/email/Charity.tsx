@@ -1,7 +1,8 @@
 /** @jsxImportSource preact */
+import { useState } from 'preact/hooks';
 import { Email } from '@/lib/sunny-side/email.mjs';
-import { kidFor } from '@/lib/sunny-side/kids.mjs';
-import { type Kid, type Parts, fieldId } from './model';
+import { kidFor, kidPhotoFor, tilePhotoFor } from '@/lib/sunny-side/kids.mjs';
+import { type Kid, type KidPhoto, type Parts, fieldId } from './model';
 import { FieldError } from './parts';
 
 const day = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
@@ -10,45 +11,111 @@ const month = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric'
 const when = (k: Kid) => {
   if (!k.revealedOn) return '';
   const d = new Date(`${k.revealedOn}T12:00:00Z`);
-  return k.dated === 'recorded' ? `revealed ${day.format(d)}` : month.format(d);
+  return k.dated === 'recorded' ? `Revealed ${day.format(d)}` : month.format(d);
 };
 
+/** How many families and photos show before "Show all": two rows of each at desktop. */
+const FAMILIES = 6;
+const PHOTOS = 8;
+
 /**
- * The charity's section: one family's makeover, in the charity's own words and photo, picked from
- * its kids. It starts on the most recent reveal; nobody at the store writes any of it.
+ * The charity's section: one family's makeover, in the charity's own words and photos. She taps a
+ * family, then a photo of theirs; it starts on the most recent reveal and its finished room, and
+ * nobody at the store writes any of it. Families and photos are pictures to tap, not a list of
+ * names (Peter, 2026-11-16: the 19-name dropdown wasn't good enough). Each photo shows the way the
+ * email crops it, so what she picks is what goes out.
  */
 export function Charity({ parts, setParts, kids, error }: { parts: Parts; setParts: (change: (p: Parts) => Parts) => void; kids: Kid[]; error?: string }) {
   const kid = kidFor(parts.kid, kids) as Kid | null;
+  const at = kid ? kids.indexOf(kid) : 0;
+  const photo = kid ? (kidPhotoFor(parts.kidPhoto, kid) as KidPhoto) : null;
+  const photoAt = kid && photo ? kid.photos.findIndex((p) => p.src === photo.src) : 0;
+  const [allFamilies, setAllFamilies] = useState(at >= FAMILIES);
+  const [allPhotos, setAllPhotos] = useState(photoAt >= PHOTOS);
   const id = fieldId('kid');
   if (!kids.length) return <FieldError id={`${id}-error`} message={error || 'The charity’s kids didn’t load. Reload the page to try again.'} />;
+
+  const pickFamily = (k: Kid) => {
+    setParts((p) => ({ ...p, kid: k.slug, kidPhoto: '' }));
+    setAllPhotos(false);
+  };
+  // Picking a photo keeps that family, even if a newer reveal comes along before the email goes
+  const pickPhoto = (k: Kid, src: string) => setParts((p) => ({ ...p, kid: k.slug, kidPhoto: src === k.photo.src ? '' : src }));
+
+  const families = allFamilies ? kids : kids.slice(0, FAMILIES);
+  const photos = kid ? (allPhotos ? kid.photos : kid.photos.slice(0, PHOTOS)) : [];
+
   return (
     <div class="em-charity">
-      <div class="field">
-        <label for={id}>Family</label>
-        <select id={id} value={parts.kid} onChange={(e) => setParts((p) => ({ ...p, kid: (e.target as HTMLSelectElement).value }))} {...(error ? { 'aria-invalid': true, 'aria-describedby': `${id}-error` } : {})}>
-          <option value="">Most recent reveal: {kids[0].name}</option>
-          {kids.map((k) => (
-            <option value={k.slug}>
-              {k.name}
-              {k.revealedOn ? ` · ${when(k)}` : ''}
-            </option>
-          ))}
-        </select>
+      <fieldset class="em-pick" id={id} {...(error ? { "aria-describedby": `${id}-error` } : {})}>
+        <legend>Family</legend>
         <FieldError id={`${id}-error`} message={error} />
-      </div>
-      {kid && (
-        <figure class="em-kid" key={kid.slug}>
-          <img src={Email.photo(kid.photo.src, 560, 316)} alt="" width={280} height={158} />
-          <figcaption>
-            <span class="em-kid-caption">{kid.caption}</span>
-            <span class="em-kid-story">{kid.story}</span>
-            <a href={kid.page} target="_blank" rel="noopener" class="em-kid-link">
-              Their page on the charity’s site →
-            </a>
-          </figcaption>
-        </figure>
+        <ul class="em-families">
+          {families.map((k, i) => (
+            <li key={k.slug}>
+              <button type="button" class="em-family" aria-pressed={k === kid} onClick={() => pickFamily(k)}>
+                <span class="em-family-photo">
+                  <img src={Email.photo((tilePhotoFor(k, kid, parts.kidPhoto) as KidPhoto).src, 400, 200)} alt="" width={200} height={100} loading="lazy" decoding="async" />
+                  {k === kid && <Check />}
+                </span>
+                <span class="em-family-name">{k.name}</span>
+                <span class="em-family-when">{i === 0 ? `Most recent · ${when(k)}` : when(k)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {kids.length > FAMILIES && (
+          <button type="button" class="btn btn-small em-pick-more" aria-expanded={allFamilies} onClick={() => setAllFamilies(!allFamilies)}>
+            {allFamilies ? 'Show fewer' : `Show all ${kids.length} families`}
+          </button>
+        )}
+      </fieldset>
+
+      {kid && photo && (
+        <fieldset class="em-pick" key={kid.slug}>
+          <legend>Photo</legend>
+          <p class="em-hint em-pick-hint">{kid.photo.after ? 'It starts on their finished room. Tap another photo to use it.' : 'Tap a photo to use it.'}</p>
+          <ul class="em-kid-pics">
+            {photos.map((p, i) => (
+              <li key={p.src}>
+                <button type="button" class="em-kid-pic" aria-pressed={p.src === photo.src} aria-label={`Photo ${i + 1} of ${kid.photos.length}${p.after ? ', the finished room' : ''}`} onClick={() => pickPhoto(kid, p.src)}>
+                  <img src={Email.photo(p.src, 320, 160)} alt="" width={160} height={80} loading="lazy" decoding="async" />
+                  {p.src === photo.src && <Check />}
+                </button>
+              </li>
+            ))}
+          </ul>
+          {kid.photos.length > PHOTOS && (
+            <button type="button" class="btn btn-small em-pick-more" aria-expanded={allPhotos} onClick={() => setAllPhotos(!allPhotos)}>
+              {allPhotos ? 'Show fewer' : `Show all ${kid.photos.length} photos`}
+            </button>
+          )}
+        </fieldset>
       )}
-      <p class="em-hint">The photo and words come from the charity’s site, as they appear there.</p>
+
+      {kid && (
+        <div class="em-kid-words">
+          <p>
+            <strong>{kid.caption}</strong> {kid.story}
+          </p>
+          <p class="em-hint">
+            Their words, from the charity’s site.{' '}
+            <a class="em-tap-link" href={kid.page} target="_blank" rel="noopener">
+              Their page&nbsp;→
+            </a>
+          </p>
+        </div>
+      )}
     </div>
+  );
+}
+
+export function Check() {
+  return (
+    <span class="em-pick-check" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    </span>
   );
 }

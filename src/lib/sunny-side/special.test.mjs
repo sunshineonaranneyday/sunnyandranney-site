@@ -1,26 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Email, amount, escape, lines, noWidow, offerClaims, offerLine, render } from './email.mjs';
-import {
-  blank,
-  check,
-  clean,
-  defaults,
-  draftSale,
-  forKind,
-  isSendDate,
-  emailToWorkOn,
-  isSendDay,
-  nextSend,
-  previewBrief,
-  sendDays,
-  sendLabel,
-  summary,
-  termsLine,
-  toSale,
-  thisWeeksSend,
-  typeset,
-} from './special.mjs';
+import { Email, amount, escape, lead, lines, noWidow, offerClaims, offerLine, render } from './email.mjs';
+import { STORE_TIERS, USUAL_PERCENT, blank, check, clean, defaults, draftSale, emailNeeds, emailToWorkOn, forKind, hoursOf, isEmailDate, isExtraDate, isSendDate, isSendDay, nextSend, previewBrief, sendDays, sendLabel, summary, termsLine, thisWeeksSend, toSale, typeset, usualEnds } from './special.mjs';
 import { WORKWEEK_START_DAY } from '../time-clock/hours.mjs';
 import { impactFromPage } from './impact.mjs';
 
@@ -121,12 +102,12 @@ test('past event dates drop out, and the next one is "this" or "up next"', () =>
 // ─── What Staci types ────────────────────────────────────────────────
 test('clean reads numbers the way people type them and drops anything unknown', () => {
   const s = clean({ kind: 'tiers', headline: '  Big   sale ', tiers: [{ spend: '$1,000', percent: '20%' }, { spend: 'abc', percent: 2.5 }], hack: 1 });
-  assert.equal(s.headline, 'Big sale');
+  assert.equal('headline' in s, false, 'there’s no headline to write: the store’s words go over the deal');
   assert.deepEqual(s.tiers, [{ spend: 1000, percent: 20 }, { spend: null, percent: null }]);
   assert.equal('hack' in s, false);
   assert.equal(clean({ kind: 'nope' }).kind, '');
-  // Only the deal, the headline and the last day are Staci's: anything an old special saved besides is dropped
-  assert.deepEqual(Object.keys(clean({ kind: 'percent', percent: 20, ...TERMS, ...OLD_EXTRAS })).sort(), ['ends', 'headline', 'kind', 'percent', 'tiers']);
+  // Only the deal, the last day and a sale by the hour's name and rows are Staci's: anything an old special saved besides is dropped
+  assert.deepEqual(Object.keys(clean({ kind: 'percent', percent: 20, ...TERMS, ...OLD_EXTRAS })).sort(), ['ends', 'kind', 'name', 'percent', 'tiers', 'windows']);
 });
 
 test('a good tiered special has nothing wrong with it', () => {
@@ -151,11 +132,9 @@ test('each kind asks only for what it needs', () => {
   assert.deepEqual(check(percent(), SEND), {});
   // Nothing else is asked of any kind, so nothing else can be wrong
   for (const s of [percent(OLD_EXTRAS), tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }], OLD_EXTRAS), clean({ kind: 'headline', headline: 'Hi', ...OLD_EXTRAS })]) assert.deepEqual(check(s, SEND), {});
-  assert.match(check(clean({ kind: 'headline' }), SEND).headline, /Add the headline/);
-  // A headline week has no discount, so it has no terms to give
-  assert.deepEqual(check(clean({ kind: 'headline', headline: 'Hi' }), SEND), {});
-  assert.match(check(clean({}), SEND).kind, /Pick what kind/);
-  assert.match(check(clean({ kind: 'headline', headline: 'x'.repeat(71) }), SEND).headline, /70 characters at most. This one is 71/);
+  // A week with no sale needs nothing: no discount, no terms, nothing to write
+  assert.deepEqual(check(clean({ kind: 'headline' }), SEND), {});
+  assert.match(check(clean({}), SEND).kind, /Pick this week’s sale/);
 });
 
 test('the words around the deal are always the store’s, whatever an old special saved', () => {
@@ -192,8 +171,11 @@ test('an end date has to fall after the email goes out, and not too far after', 
 test('the offer gets the store’s defaults, curly quotes and safe HTML', () => {
   const sale = toSale(percent());
   assert.deepEqual(sale, { kind: 'percent', name: 'Storewide sale', cta: 'Shop the sale', url: '/shop/', percent: 20, what: 'everything.', details: 'In the showroom and online. Ends Sunday, Nov 29.' });
+  // The big line is the store's for each kind, whatever an old special saved
   const h = toSale(clean({ kind: 'headline', headline: `Kids' crafts & "Santa Paws" <3` }));
-  assert.equal(h.headline, 'Kids&#8217; crafts &amp; &#8220;Santa Paws&#8221; &lt;3');
+  assert.equal(h.headline, 'New in the showroom this week.');
+  assert.equal(toSale(tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }], { headline: 'Typed once' })).headline, 'Spend more, save more.');
+  assert.equal(toSale(tiers([{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }])).name, 'This week’s sale');
   assert.equal(h.details, undefined, 'a week with no sale has no fine print');
   assert.equal(h.url, '/shop/?collection=new-arrivals');
   assert.equal(h.cta, 'See what’s new');
@@ -242,14 +224,14 @@ test('the fine print is the terms, and only the terms', () => {
 test('saving keeps only the kind’s own fields', () => {
   const s = clean({ ...blank('percent'), percent: 20, headline: 'left over from tiers' });
   assert.deepEqual(Object.keys(forKind(s)).sort(), ['ends', 'kind', 'percent']);
-  assert.deepEqual(Object.keys(forKind(clean({ ...blank('tiers'), headline: 'Hi', percent: 20 }))).sort(), ['ends', 'headline', 'kind', 'tiers']);
-  assert.deepEqual(Object.keys(forKind(clean({ ...blank('headline'), headline: 'Hi', ends: '2026-11-22' }))).sort(), ['headline', 'kind']);
+  assert.deepEqual(Object.keys(forKind(clean({ ...blank('tiers'), headline: 'Hi', percent: 20 }))).sort(), ['ends', 'kind', 'tiers']);
+  assert.deepEqual(Object.keys(forKind(clean({ ...blank('headline'), headline: 'Hi', ends: '2026-11-22' }))).sort(), ['kind']);
 });
 
 test('the preview draws an unfinished special without breaking', () => {
   const sale = draftSale(clean(blank('tiers')));
   assert.deepEqual(sale.tiers, [['?', '?'], ['?', '?']]);
-  assert.equal(sale.headline, 'Your headline');
+  assert.equal(sale.headline, 'Spend more, save more.');
   const html = render(previewBrief(sale, SEND), ['masthead', 'hero', 'offer']);
   assert.match(html, /\?% off|>\?%</);
   assert.equal((html.match(/<h1/g) || []).length, 1);
@@ -259,6 +241,16 @@ test('the preview draws an unfinished special without breaking', () => {
 test('summary reads each kind in one line', () => {
   assert.equal(summary(tiers([{ spend: 250, percent: 10 }, { spend: 1000, percent: 20 }])), '10% off $250+ · 20% off $1,000+');
   assert.equal(summary(percent()), '20% off everything');
+  assert.equal(summary(clean({ kind: 'headline' })), 'No sale this week');
+});
+
+test('the ready-made sales come filled in: the usual 20% off, ending the week’s Sunday', () => {
+  assert.equal(USUAL_PERCENT, 20, '148 of 190 orders Oct 20 – Nov 16, 2026 were 20% off at the register');
+  assert.equal(usualEnds('2026-11-17'), '2026-11-22', 'a Tuesday email: its Sunday');
+  assert.equal(usualEnds('2026-11-21'), '2026-11-22', 'sent on the Saturday: the next day');
+  assert.equal(usualEnds('2026-11-22'), '2026-11-22', 'sent on a Sunday: that day');
+  // Filled in as the cards fill them, they're ready as they are
+  assert.deepEqual(check(clean({ kind: 'percent', percent: USUAL_PERCENT, ends: usualEnds('2026-11-17') }), '2026-11-17'), {});
 });
 
 test('the email goes out on Tuesdays', () => {
@@ -285,7 +277,10 @@ test('an email can go any day of its week, Sunday to Saturday like the store’s
   for (const d of days) assert.ok(sendDays(thisWeeksSend(d)).includes(d), d);
   assert.equal(isSendDay('2026-11-17', '2026-11-21'), true);
   assert.equal(isSendDay('2026-11-17', '2026-11-22'), false);
-  assert.equal(isSendDay('2026-11-18', '2026-11-18'), false, 'only a Tuesday names an email');
+  // Any other day names an extra email, which goes on that day only (isExtraDate)
+  assert.equal(isSendDay('2026-11-18', '2026-11-18'), true, 'an extra email goes on its own day');
+  assert.equal(isSendDay('2026-11-18', '2026-11-19'), false, 'and only then');
+  assert.deepEqual(sendDays('2026-11-27'), ['2026-11-27']);
 });
 
 test('the email to work on is this week’s until it has gone out, then next week’s', () => {
@@ -304,21 +299,148 @@ test('impact numbers come from the charity page, and anything unexpected stops t
   assert.throws(() => impactFromPage('<p>295+ Room Makeovers</p><p>300+ Room Makeovers</p><p>208+ Children Served</p>'), /found 295\+, 300\+/);
 });
 
-test('the charity section shows its live numbers, and leaves the strip out without them', () => {
+test('the charity section is one short band: the headline, the photo picked, a few lines with Read more, and its numbers', () => {
   const brief = {
     send_date: SEND,
-    mission: { photo: { src: 'cf:x.jpg', alt: 'A family' }, caption: 'Ages 14 and 12.', story: 'Story.', cta: 'See their reveal', url: 'https://sunshineonaranneyday.com/kids/x/', impact: { rooms: '295+', children: '208+' } },
+    mission: {
+      photo: { src: 'cf:x.jpg', alt: 'A family' },
+      name: 'Remi &amp; Nico',
+      caption: 'Remi &amp; Nico&#8217;s new accessible bathroom.',
+      // The charity's summary as its site has it (Nov 17, 2026): two sentences, 209 letters
+      story: 'Remi and Nico, sisters with rare genetic conditions, rely fully on their parents for daily care. Thanks to Helen and Jimmy Carlos, SOARD created a girly wheelchair-accessible bathroom fully customized to them.',
+      url: 'https://sunshineonaranneyday.com/kids/x/',
+      impact: { rooms: '295+', children: '208+' },
+    },
   };
   const html = new Email(brief).mission();
-  // The logo on its own Warm Gray tile (readable when dark mode darkens the band), in a row whose
-  // padding is short by the tile's margin so the lettering stays on the column
-  assert.match(html, /class="soard ptl pxl"[^>]*padding:34px 26px 0px;/);
-  assert.match(html, /soard-logo-warm-tile\/public" width="132" height="121"/);
-  assert.match(html, /class="px pb soard"[^>]*padding:18px 32px 40px;/);
-  assert.match(html, />295\+</);
-  assert.match(html, />208\+</);
-  assert.match(html, /\$0</);
+  // One Dark Deep band (Peter, 2026-11-17: "blend in the numbers with the section ... shorten this section")
+  assert.equal((html.match(/data-part="mission"/g) || []).length, 1);
+  assert.doesNotMatch(html, /#FEFCF5|Every purchase builds|dream&nbsp;room/);
+  // Centered like the charity's own emails: its logo, the yellow label, "See where your money goes."
+  assert.match(html, /brand-logo-dark-bg-tagline-display\/trim=88;91;120;92,w=192,format=png" width="96" height="90"/);
   assert.match(html, /utm_content=charity-logo/);
+  assert.match(html, />100% of our profits<\/p><h2 [^>]*text-align:center;[^>]*>See where your <em [^>]*color:#FFDA24;">money&nbsp;goes<\/em>\.<\/h2>/);
+  // On the column: 536 wide on a computer (and Outlook's size), up to 560 where the style block is gone
+  assert.match(html, /w=1120,h=560,[^"]*" width="536" height="268" alt="A family" style="display:block;width:100%;max-width:560px;/);
+  // The caption, the first sentence only, then Read more to their page
+  assert.match(html, /<strong [^>]*>Remi &amp; Nico&#8217;s new accessible bathroom\.<\/strong> Remi and Nico, sisters with rare genetic conditions, rely fully on their parents for daily&nbsp;care\.<\/p>/);
+  assert.doesNotMatch(html, /Helen and Jimmy/);
+  assert.match(html, /utm_content=mission-link"[^>]*padding:10px 0;[^>]*>Read more about Remi &amp; Nico&nbsp;&#8594;<\/a>/);
+  assert.match(new Email({ ...brief, mission: { ...brief.mission, name: '' } }).mission(), />Read more about them&nbsp;&#8594;</);
+  assert.doesNotMatch(html, /mission-button|bgcolor="#FFDA24"/, 'no yellow button in the charity section');
+  // The numbers in the same band, under a muted rule, a third of the column each even on the smallest phone,
+  // at 32px there while each has three digits at most
+  assert.match(html, /border-top:1px solid #5A5B61;">[^]*>295\+<[^]*>208\+<[^]*>\$0</);
+  assert.equal((html.match(/<div class="stat" style="display:inline-block;vertical-align:top;width:33\.333%;/g) || []).length, 3);
+  assert.equal((html.match(/class="soard-stat soard-serif" style="[^"]*font-size:32px;line-height:36px;/g) || []).length, 3);
   const none = new Email({ ...brief, mission: { ...brief.mission, impact: undefined } }).mission();
-  assert.doesNotMatch(none, /Room makeovers/);
+  assert.doesNotMatch(none, /Room makeovers|#5A5B61/);
+});
+
+test('a family’s words are cut to their first sentences that fit, and one long sentence at a word', () => {
+  // All 18 of the charity's summaries run 180–220 letters (Nov 17, 2026); these are three of them
+  assert.equal(lead('Isla was diagnosed with a cancerous kidney tumor at just three years old. Now six and full of energy, SOARD built Isla a special Barbie-themed therapy room in partnership with Make-A-Wish Georgia.'), 'Isla was diagnosed with a cancerous kidney tumor at just three years old.');
+  assert.equal(
+    lead('Desmond received a life-changing home makeover from SOARD, with support from the Myfifident Foundation—creating a safe, imaginative bedroom and an accessible bathroom that fosters independence and comfort.'),
+    'Desmond received a life-changing home makeover from SOARD, with support from the Myfifident Foundation—creating a safe, imaginative bedroom&#8230;',
+  );
+  // Short enough whole, it stays whole; an abbreviation isn't a sentence's end
+  assert.equal(lead('Dylan has MECP2 Duplication Syndrome. SOARD is building a therapy room so he can learn and grow.'), 'Dylan has MECP2 Duplication Syndrome. SOARD is building a therapy room so he can learn and grow.');
+  assert.equal(lead('Amari met Dr. Lee in 2020, after the crash, and the two have worked on his walking every week since, through two surgeries and a long recovery. He loves it.'), 'Amari met Dr. Lee in 2020, after the crash, and the two have worked on his walking every week since, through two surgeries and a long&#8230;');
+  // Typeset words count as one letter each, and a cut never lands inside one
+  const typeset = 'Their bathroom door was only two feet wide, too narrow to wheel the sisters through. Now they have a bathroom built around their needs, at no cost to their&nbsp;family.';
+  assert.equal(lead(typeset), 'Their bathroom door was only two feet wide, too narrow to wheel the sisters through.');
+  assert.ok(!/&[#\w]*$/.test(lead('x'.repeat(10) + ' &#8220;' + 'y '.repeat(80))));
+});
+
+test('the ready-made spend-more sale starts on the store’s own amounts, a sale ready to go', () => {
+  // The Nov 3, 2026 email: Spend $250 → Save 10%, $500 → 15%, $1,000 → 20%
+  assert.deepEqual(STORE_TIERS, [{ spend: 250, percent: 10 }, { spend: 500, percent: 15 }, { spend: 1000, percent: 20 }]);
+  const sale = clean({ kind: 'tiers', tiers: STORE_TIERS.map((t) => ({ ...t })), ends: '2026-11-22' });
+  assert.deepEqual(check(sale, '2026-11-17'), {});
+});
+
+// ─── A sale by the hour (Black Friday, Nov 27, 2026) ─────────────────
+const BLACK_FRIDAY = {
+  kind: 'times',
+  name: 'Black Friday weekend',
+  windows: [
+    { day: '2026-11-27', from: '10:00', to: '13:00', percent: '30' },
+    { day: '2026-11-27', from: '13:00', to: '17:00', percent: '25%' },
+    { day: '2026-11-28', from: '', to: '', percent: 25 },
+  ],
+};
+
+test('a sale by the hour reads its rows, ends on its last day, and goes out in the tiers’ row', () => {
+  const s = clean(BLACK_FRIDAY);
+  assert.equal(s.ends, '2026-11-28', 'it ends on its last row’s day: there’s no end date to type');
+  assert.deepEqual(s.windows[1], { day: '2026-11-27', from: '13:00', to: '17:00', percent: 25 });
+  assert.deepEqual(check(s, '2026-11-26'), {}, 'an email the day before can carry it');
+  assert.deepEqual(forKind(s), { kind: 'times', name: 'Black Friday weekend', windows: s.windows, ends: '2026-11-28' });
+  assert.equal(summary(s), '30% Fri 10am–1pm · 25% Fri 1–5pm · 25% Sat all day');
+  const sale = toSale(s);
+  assert.deepEqual(sale.windows, [[30, 'Fri', '10am&#8211;1pm'], [25, 'Fri', '1&#8211;5pm'], [25, 'Sat', 'all day']]);
+  assert.equal(sale.headline, 'Black Friday weekend');
+  assert.equal(sale.details, 'In the showroom and online. Ends Saturday, Nov 28.');
+  // What the subject line can say: {offer} and {upto} from its best percent, and only percents it gives
+  assert.equal(offerLine(sale), 'Up to 30% off Friday and Saturday.');
+  assert.equal(lines({ subject: 'Black Friday: {upto} off until 1pm', preheader: '{offer}', sale }).subject, 'Black Friday: 30% off until 1pm');
+  assert.deepEqual(offerClaims('25% off all day Saturday', sale, 'subject'), []);
+  assert.deepEqual(offerClaims('40% off', sale, 'subject'), ['The subject says 40%, but the sale gives 30%, 25%.']);
+  assert.deepEqual(offerClaims('Up to 25% off', sale, 'subject'), ['The subject says up to 25%, but the most the sale gives is 30%.']);
+  const html = render({ ...previewBrief(sale, '2026-11-26'), subject: 'Black Friday' }, ['masthead', 'hero', 'offer', 'footer']);
+  for (const bit of ['Black Friday&nbsp;weekend', '>30%<', 'off&nbsp;Fri<br>10am&#8211;1pm', 'off&nbsp;Sat<br>all day', 'Ends Saturday, Nov&nbsp;28.']) {
+    assert.ok(html.includes(bit), bit);
+  }
+});
+
+test('a sale by the hour says what’s wrong row by row, in words Staci can act on', () => {
+  const s = (o) => clean({ ...BLACK_FRIDAY, ...o });
+  assert.match(check(s({ name: '' }), '2026-11-26').name, /Name the sale/);
+  assert.match(check(s({ name: 'x'.repeat(41) }), '2026-11-26').name, /keep it to 40/);
+  assert.match(check(s({ windows: BLACK_FRIDAY.windows.slice(0, 1) }), '2026-11-26').windows, /at least 2/);
+  assert.match(check(s({}), '2026-11-28')['windows.0.day'], /before the email goes out/);
+  const rows = (...w) => check(s({ windows: w }), '2026-11-26');
+  const fri = (from, to, percent = 30) => ({ day: '2026-11-27', from, to, percent });
+  assert.match(rows(fri('13:00', '10:00'), fri('13:00', '17:00'))['windows.0.hours'], /end after it starts/);
+  assert.match(rows(fri('10:00', ''), fri('13:00', '17:00'))['windows.0.hours'], /when it ends/);
+  assert.match(rows(fri('10:00', '13:00'), fri('12:00', '17:00'))['windows.1.hours'], /starts before the one above it ends \(1pm\)/);
+  assert.match(rows(fri('', ''), fri('13:00', '17:00'))['windows.1.day'], /runs all day/);
+  assert.match(rows(fri('10:00', '13:00'), fri('', ''))['windows.1.hours'], /give this one its hours/);
+  assert.match(rows({ day: '2026-11-28', from: '', to: '', percent: 25 }, fri('10:00', '13:00'))['windows.1.day'], /in order/);
+  assert.match(rows(fri('10:00', '13:00', 95), fri('13:00', '17:00', null))['windows.0.percent'], /from 1 to 90/);
+  // Four across, a small phone has room for whole hours only (verify.mjs, edge-by-the-hour-4)
+  const sat = (from, to) => ({ day: '2026-11-28', from, to, percent: 25 });
+  assert.deepEqual(rows(fri('10:00', '12:00'), fri('12:00', '17:00'), sat('10:00', '13:00'), sat('13:00', '17:00')), {});
+  assert.match(rows(fri('10:00', '12:30'), fri('12:30', '17:00'), sat('10:00', '13:00'), sat('13:00', '17:00'))['windows.0.hours'], /whole hours/);
+  assert.deepEqual(rows(fri('10:00', '12:30'), fri('12:30', '17:00'), sat('10:00', '13:00')), {}, 'three across have room');
+  assert.match(rows(fri('10:00', '13:00'), fri('13:00', '17:00', null))['windows.1.percent'], /Add the percent/);
+  // While it's typed, the preview fills what's missing instead of breaking
+  assert.deepEqual(draftSale(clean({ kind: 'times', windows: [{ day: '2026-11-27', from: '10:00', to: '13:00', percent: '' }] })).windows, [['?', 'Fri', '10am&#8211;1pm'], ['?', '?', 'all day']]);
+});
+
+test('hours read the way the store says them', () => {
+  assert.equal(hoursOf('10:00', '13:00'), '10am–1pm');
+  assert.equal(hoursOf('13:00', '17:00'), '1–5pm');
+  assert.equal(hoursOf('09:30', '11:00'), '9:30–11am');
+  assert.equal(hoursOf('11:00', '12:00'), '11am–12pm');
+  assert.equal(hoursOf('', ''), 'all day');
+});
+
+// ─── More than one email a week ──────────────────────────────────────
+test('an extra email has any day but a Tuesday, which is the weekly email’s', () => {
+  assert.equal(isExtraDate('2026-11-27'), true);
+  assert.equal(isExtraDate('2026-12-01'), false, 'a Tuesday is the weekly email’s');
+  assert.equal(isExtraDate('2026-02-30'), false);
+  assert.equal(isEmailDate('2026-12-01'), true);
+  assert.equal(isEmailDate('2026-11-27'), true);
+  assert.equal(isEmailDate('soon'), false);
+});
+
+test('a section turned off isn’t something the email still needs', () => {
+  assert.deepEqual(emailNeeds(null), ['the sale', 'the products']);
+  assert.deepEqual(emailNeeds({ parts: { off: ['sale'] } }), ['the products']);
+  // A row straight from the database keeps its parts as JSON
+  assert.deepEqual(emailNeeds({ parts: JSON.stringify({ off: ['sale', 'products'] }) }), []);
+  assert.deepEqual(emailNeeds({ parts: '{not json' }), ['the sale', 'the products']);
 });

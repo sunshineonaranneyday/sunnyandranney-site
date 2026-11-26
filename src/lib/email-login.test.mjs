@@ -41,7 +41,17 @@ const HOSTS = [ADMIN_HOST, EMAIL_HOST, 'sunnyandranney-site.pages.dev', 'sunnyan
 /** What the email-only login may use. A new page or call here is one more thing it can do: add it on purpose. */
 const EMAIL_ROUTES = [
   '/admin/email/',
+  // The store's sent emails, read-only: Kit's list is the charity's too, so only the store's show
+  // (isStoreEmail in sunny-side/kit.mjs), and a sent one's page has "Don't send it again"
+  '/admin/email/sent/',
+  '/admin/email/sent/x/',
+  // "Don't send it again": whoever can schedule the email can turn off its going again (again.mjs)
+  '/api/admin/email/again/',
   '/api/admin/email/event/',
+  // Starting an extra email on a day of its own, besides the weekly one (week-store.mjs createExtra)
+  '/api/admin/email/extra/',
+  // The preview's report of a problem in the email's own layout, which only the owner is shown (and may clear)
+  '/api/admin/email/layout/',
   '/api/admin/email/photos/',
   '/api/admin/email/send/',
   '/api/admin/email/test-people/',
@@ -55,12 +65,9 @@ const EMAIL_ROUTES = [
  */
 const MANAGERS_ONLY = ['/api/admin/email/test-people/'];
 
-/** The store's Kit account is the charity's too, so the sent emails are the charity's as well: not the helper's. */
-const NOT_THE_HELPERS = ['/admin/email/sent/', '/admin/email/sent/x/'];
-
 test('the walk finds the whole admin, so nothing below is passed by finding nothing', () => {
   assert.ok(ADMIN.length >= 45, `only ${ADMIN.length} admin pages and calls found`);
-  for (const path of ['/admin/payroll/', '/admin/hours/', '/admin/staff/x/', '/api/admin/gusto/send/', '/api/admin/medusa/a/b/', '/api/admin/people/', ...NOT_THE_HELPERS]) {
+  for (const path of ['/admin/payroll/', '/admin/hours/', '/admin/staff/x/', '/api/admin/gusto/send/', '/api/admin/medusa/a/b/', '/api/admin/people/']) {
     assert.ok(ADMIN.some((r) => r.path === path), `${path} wasn't found`);
   }
 });
@@ -152,7 +159,7 @@ test('the weekly email’s own page and calls let the email login in, and say so
   }
 });
 
-test('the tester list stays managers’ only, and the email page hides its controls and the sent emails from the helper', () => {
+test('the tester list stays managers’ only, and the email page hides its controls from the helper', () => {
   for (const r of ADMIN.filter((x) => MANAGERS_ONLY.includes(x.path))) {
     const handlers = (r.source.match(/^export (const|async function) (GET|POST|PUT|PATCH|DELETE|ALL)\b/gm) ?? []).length;
     assert.equal((r.source.match(/requireRole\(context\.locals, 'manager'\)/g) ?? []).length, handlers, `${r.file}: every handler managers only`);
@@ -160,12 +167,9 @@ test('the tester list stays managers’ only, and the email page hides its contr
   const page = readFileSync(new URL('../pages/admin/email/index.astro', import.meta.url), 'utf8');
   assert.match(page, /const view = viewFor\(admin, Astro\.url\.hostname\.toLowerCase\(\)\);/);
   assert.match(page, /managesList: view\.role === 'manager'/);
-  assert.match(page, /sentLink: view\.role === 'manager'/);
   const send = readFileSync(new URL('../components/email/Send.tsx', import.meta.url), 'utf8');
   assert.match(send, /!p\.you && props\.managesList &&/, 'the remove buttons');
-  assert.match(send, /!props\.managesList \? null : showAdd/, 'the add form');
-  const app = readFileSync(new URL('../components/email/EmailApp.tsx', import.meta.url), 'utf8');
-  assert.match(app, /props\.sentLink && <a href="\/admin\/email\/sent\/">/);
+  assert.match(send, /\{props\.managesList && \(\s*<li class=\{`em-person em-person-add/, 'the Add someone card');
 });
 
 test('a path that climbs out of the email is cleaned up before it’s checked', () => {
@@ -173,7 +177,7 @@ test('a path that climbs out of the email is cleaned up before it’s checked', 
     const { pathname } = new URL(`https://${EMAIL_HOST}${sneaky}`);
     assert.equal(isEmailPath(pathname), false, `${sneaky} became ${pathname}`);
   }
-  for (const near of ['/admin/emails/', '/admin/email-old/', '/admin/emailer', '/api/admin/emailing/', '/admin/email/sent/', '/admin/email/sent/123/']) assert.equal(isEmailPath(near), false, near);
+  for (const near of ['/admin/emails/', '/admin/email-old/', '/admin/emailer', '/api/admin/emailing/']) assert.equal(isEmailPath(near), false, near);
   assert.equal(isEmailPath('/ADMIN/EMAIL/'), true);
   assert.equal(isEmailPath('/admin/email'), true);
 });
@@ -186,7 +190,6 @@ test('the email address opens on the weekly email, from anywhere else', () => {
   assert.equal(at(`https://${EMAIL_HOST}/admin/payroll/`), home);
   assert.equal(at(`https://${EMAIL_HOST}/shop/`), home);
   assert.equal(at(`https://${EMAIL_HOST}/admin/email/?send=2026-11-24`), null);
-  assert.equal(at(`https://${EMAIL_HOST}/admin/email/sent/`), home);
   // Calls and posts aren't moved: the front door refuses them.
   assert.equal(at(`https://${EMAIL_HOST}/api/admin/people/`), null);
   assert.equal(at(`https://${EMAIL_HOST}/admin/payroll/`, 'POST'), null);

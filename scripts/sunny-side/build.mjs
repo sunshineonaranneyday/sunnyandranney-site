@@ -1,6 +1,7 @@
-// Builds the weekly email from its brief: node scripts/sunny-side/build.mjs [--local] [brief.json ...]
+// Builds the weekly email from its brief: node scripts/sunny-side/build.mjs [--local] [--tests] [brief.json ...]
 // With no briefs named, every brief in briefs/ goes to out/ and every stress test in tests/ to out/tests/,
-// which verify.mjs then holds to the standard. The email itself is src/lib/sunny-side/email.mjs, the
+// which verify.mjs then holds to the standard. --tests builds the stress tests alone: they need nothing
+// but this repo (no admin database, no store pages), so the pull request check builds them. The email itself is src/lib/sunny-side/email.mjs, the
 // same code the admin uses to preview the week's special.
 //
 // A brief whose "sale", "wall" or "events" is "admin" takes what Staci set at /admin/email/: the
@@ -26,7 +27,8 @@ const HERE = new URL('.', import.meta.url).pathname;
 const ROOT = join(HERE, '..', '..');
 const args = process.argv.slice(2);
 const local = args.includes('--local');
-const briefs = args.filter((a) => a !== '--local');
+const testsOnly = args.includes('--tests');
+const briefs = args.filter((a) => a !== '--local' && a !== '--tests');
 
 const ADMIN = 'admin.sunnyandranney.com/admin/email/';
 
@@ -178,7 +180,7 @@ async function build(path, out) {
 }
 
 // Every brief is tried, so one waiting on the admin doesn't hold up the rest; any that fail are
-// listed at the end and the build exits 1. With no briefs named, emails whose brief is gone go too.
+// listed at the end and the build exits 1.
 const failed = [];
 async function attempt(path, out) {
   try {
@@ -187,17 +189,27 @@ async function attempt(path, out) {
     failed.push(`${relative(HERE, path)}: ${err.message}`);
   }
 }
-if (briefs.length) {
-  for (const path of briefs) await attempt(path, join(HERE, 'out'));
-} else {
-  for (const [folder, out] of [['briefs', join(HERE, 'out')], ['tests', join(HERE, 'out', 'tests')]]) {
-    const files = readdirSync(join(HERE, folder)).filter((f) => f.endsWith('.json')).sort();
-    const current = new Set(files.map((f) => `${basename(f, '.json')}.html`));
-    mkdirSync(out, { recursive: true });
-    for (const old of readdirSync(out).filter((f) => f.endsWith('.html') && !current.has(f))) rmSync(join(out, old));
-    for (const file of files) await attempt(join(HERE, folder, file), out);
-  }
+// What this run builds, and where: the briefs named, or every brief in briefs/ (not with --tests) and
+// every stress test in tests/
+const jobs = briefs.length
+  ? briefs.map((path) => [path, join(HERE, 'out')])
+  : [['briefs', join(HERE, 'out')], ['tests', join(HERE, 'out', 'tests')]]
+      .filter(([folder]) => !testsOnly || folder === 'tests')
+      .flatMap(([folder, out]) =>
+        readdirSync(join(HERE, folder))
+          .filter((f) => f.endsWith('.json'))
+          .sort()
+          .map((f) => [join(HERE, folder, f), out]),
+      );
+// verify.mjs checks every email in out/ and out/tests/, so only this run's are left there. With
+// --tests or briefs named, the others were from an older build, older code, and could fail or pass
+// on HTML this change never touched; an email whose brief is gone goes too.
+const keep = new Set(jobs.map(([path, out]) => join(out, `${basename(path, '.json')}.html`)));
+for (const dir of [join(HERE, 'out'), join(HERE, 'out', 'tests')]) {
+  mkdirSync(dir, { recursive: true });
+  for (const f of readdirSync(dir).filter((f) => f.endsWith('.html'))) if (!keep.has(join(dir, f))) rmSync(join(dir, f));
 }
+for (const [path, out] of jobs) await attempt(path, out);
 if (failed.length) {
   console.error(`\nNot built:\n${failed.map((f) => `- ${f}`).join('\n')}`);
   process.exit(1);

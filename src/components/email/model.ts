@@ -9,19 +9,23 @@ export type Kind = keyof typeof KINDS;
 
 export interface Special {
   kind: Kind | '';
-  headline: string;
   tiers: { spend: number | null; percent: number | null }[];
   percent: number | null;
   ends: string;
+  /** A sale by the hour's name, the big line over its percents. */
+  name: string;
+  /** A sale by the hour's rows: a day, its hours ("HH:MM", both '' for all day) and its percent. */
+  windows: { day: string; from: string; to: string; percent: number | null }[];
 }
 
 /** The sale as typed: numbers stay text until they're read, so "1,0" isn't fought while typing. */
 export interface SaleForm {
   kind: Kind | '';
-  headline: string;
   tiers: { spend: string; percent: string }[];
   percent: string;
   ends: string;
+  name: string;
+  windows: { day: string; from: string; to: string; percent: string }[];
 }
 
 export interface Pick {
@@ -78,25 +82,43 @@ export interface EventRecord {
   updatedBy: string;
 }
 
-/** The most recent sale saved before this email's, to start from. */
-export interface LastSale {
+/**
+ * What each ready-made sale opens with: the store's last of that kind, else the usual (20% off
+ * everything; a spend-more sale's amounts are the store's to set the first time).
+ */
+export interface SalePresets {
+  percent: number;
+  /** The last spend-more tiers saved here, else the store's own from its Nov 3 email (special.mjs, STORE_TIERS). */
+  tiers: { spend: number; percent: number }[];
+  /** The last day a sale runs unless she changes it (usualEnds). */
+  ends: string;
+}
+
+/** One of the emails still to go: the weekly one being worked on, and any extras (special.mjs isExtraDate). */
+export interface EmailTab {
+  send: string;
   label: string;
-  summary: string;
-  special: Special;
+  extra: boolean;
+  href: string;
+  scheduled: boolean;
 }
 
 export interface AppProps {
-  /** The one email being worked on (weekToWorkOn): this week's until it goes out, then next week's. */
+  /** The email being worked on: the weekly one (weekToWorkOn: this week's until it goes out, then next week's), or an extra. */
   send: string;
   label: string;
+  /** True for an extra email: it goes on its own day, once (special.mjs isExtraDate). */
+  extra: boolean;
+  /** Every email still to go, in date order, to switch between. */
+  emails: EmailTab[];
+  /** The last day an extra email can be started for (EXTRA_WITHIN_DAYS from today). */
+  extraMax: string;
   today: string;
   record: { special: Special | null; wall: Wall | null; updatedAt: string; updatedBy: string } | null;
-  last: LastSale | null;
+  presets: SalePresets;
   events: EventRecord[];
   /** managesList: may add or take people off the list (managers; a test makes each a Kit subscriber). */
   test: { people: TestPerson[]; me: string; managesList: boolean };
-  /** Show the link to the sent emails (managers: Kit's list includes the charity's emails). */
-  sentLink: boolean;
   /** The rest of the email (parts.mjs), as saved, or blank. */
   parts: Parts;
   /** The store's own photos, newest first. */
@@ -107,14 +129,34 @@ export interface AppProps {
   tests: TestSent[];
   /** The charity's kids, most recent reveal first (kids.mjs). */
   kids: Kid[];
+  /** The charity's reveals still ahead, soonest first, that the email can invite readers to (kids.mjs). */
+  reveals: Reveal[];
   /** When the store's emails usually go ("HH:MM" Eastern), from Kit, or null. */
   usualTime: string | null;
-  /** Kit's active subscribers, or null if Kit didn't say. */
+  /** The store's active subscribers in Kit (STORE_SEGMENT), or null if Kit didn't say. */
   subscribers: number | null;
   /** The charity's numbers, read from its site when the page loaded, or null if it didn't answer. */
   impact: { rooms: string; children: string } | null;
+  /** The store's hours as Google has them (settings:hours, synced each morning), for the visit band (store-hours.mjs). */
+  hours: { days: Array<{ day: string; open: string; close: string; closed: boolean }>; holidays: Array<{ date: string; label: string; open: string; close: string; closed: boolean }> } | null;
   /** True on a developer's machine, whose uploads aren't on the live site. */
   local: boolean;
+  /** The signed-in login is the owner's, the one shown problems in the email's own layout. */
+  owner: boolean;
+  /** Problems in the email's own layout the preview reported (layout-store.mjs); the owner's only, else empty. */
+  layoutReports: LayoutReport[];
+}
+
+/** A word in the email's own layout the preview measured too wide for a phone (layout-store.mjs). */
+export interface LayoutReport {
+  word: string;
+  over: number;
+  width: number;
+  send: string;
+  seenBy: string;
+  firstSeen: string;
+  lastSeen: string;
+  times: number;
 }
 
 export interface Parts {
@@ -122,15 +164,48 @@ export interface Parts {
   preheader: string;
   /** A library photo's id, or '' for the store's wide shot. */
   hero: string;
-  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[] };
+  /** layout: the collage's layout (collage-layouts.mjs), or '' for the one that fits its photos best. */
+  story: { label: string; headline: string; body: string; cta: string; link: string; photos: string[]; layout: string };
+  /** A charity reveal still ahead (its kid's slug), its own section under the story, or '' for none. */
+  reveal: string;
   /** The charity kid's slug, or '' for the most recent reveal. */
   kid: string;
+  /** One of that family's photos ("cf:" id), or '' for their finished room. */
+  kidPhoto: string;
+  /** The sections turned off (parts.mjs SWITCHES). */
+  off: Switch[];
+}
+/** A section of the email that can be turned off (parts.mjs SWITCHES). */
+export type Switch = 'sale' | 'products' | 'photos' | 'events' | 'charity';
+export interface KidPhoto {
+  src: string;
+  alt: string;
+  /** The charity's own photo of the finished room. */
+  after?: true;
+}
+/** A charity reveal still ahead, with the day and time the charity publishes (kids.mjs, upcomingReveals). */
+export interface Reveal {
+  slug: string;
+  name: string;
+  start: string;
+  day: string;
+  long: string;
+  short: string;
+  time: string;
+  room: string;
+  photo: KidPhoto;
+  story: string;
+  page: string;
+  live: string;
 }
 export interface Kid {
   slug: string;
   name: string;
   page: string;
-  photo: { src: string; alt: string };
+  /** The photo the email starts on: the finished room, when the charity has one. */
+  photo: KidPhoto;
+  /** Their photos, that one first (kids.mjs, photosOf). */
+  photos: KidPhoto[];
   caption: string;
   story: string;
   revealedOn: string | null;
@@ -146,6 +221,8 @@ export interface Photo {
   w: number;
   h: number;
   alt: string;
+  /** The part every crop keeps in view, "0.42x0.31" (across x down, 0 to 1), or '' to leave it to the resizing (photo-store.mjs). */
+  focus: string;
   uploadedBy: string;
   uploadedAt: string;
 }
@@ -156,6 +233,20 @@ export interface KitSend {
   by: string;
   sendAt: string;
   status: string;
+  /** Going again to the people who didn't open it (again.mjs againView), or null. */
+  again?: AgainView | null;
+}
+/** A week's email going again to the people who didn't open it, as the page sees it. */
+export interface AgainView {
+  state: 'waiting' | 'scheduled' | 'sent' | 'skipped' | 'cancelled';
+  sendAt: string;
+  subject: string;
+  people: number | null;
+  left: Record<string, number> | null;
+  note: string | null;
+  stoppedBy: string | null;
+  kitId: string | null;
+  detail?: string;
 }
 export const partsSnapshot = (p: Parts) => JSON.stringify(p);
 
@@ -184,13 +275,14 @@ const twoTiers = () => [
 ];
 
 export function saleFormOf(s: Special | null): SaleForm {
-  if (!s) return { kind: '', headline: '', tiers: twoTiers(), percent: '', ends: '' };
+  if (!s) return { kind: '', tiers: twoTiers(), percent: '', ends: '', name: '', windows: [] };
   return {
     kind: s.kind,
-    headline: s.headline ?? '',
     tiers: s.tiers?.length ? s.tiers.map((t) => ({ spend: money(t.spend), percent: num(t.percent) })) : twoTiers(),
     percent: num(s.percent ?? null),
     ends: s.ends ?? '',
+    name: s.name ?? '',
+    windows: (s.windows ?? []).map((w) => ({ day: w.day, from: w.from, to: w.to, percent: num(w.percent) })),
   };
 }
 
@@ -202,9 +294,9 @@ export function saleSnapshot(f: SaleForm): string {
   if (!s.kind) return '';
   const keep: Record<string, unknown> = { kind: s.kind };
   if (isDiscount(s.kind)) keep.ends = s.ends;
-  if (s.kind === 'tiers') Object.assign(keep, { headline: s.headline, tiers: s.tiers });
+  if (s.kind === 'tiers') keep.tiers = s.tiers;
   if (s.kind === 'percent') keep.percent = s.percent;
-  if (s.kind === 'headline') keep.headline = s.headline;
+  if (s.kind === 'times') Object.assign(keep, { name: s.name, windows: s.windows });
   return JSON.stringify(keep);
 }
 

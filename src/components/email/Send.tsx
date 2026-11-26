@@ -1,8 +1,10 @@
 /** @jsxImportSource preact */
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { againDays, againLine, againTimes, usualAgainDay, usualAgainSubject, usualAgainTime } from '@/lib/sunny-side/again.mjs';
+import { PART_LIMITS } from '@/lib/sunny-side/parts.mjs';
 import { sendLabel } from '@/lib/sunny-side/special.mjs';
 import { checkPerson, cleanPerson, namesOf } from '@/lib/sunny-side/testers.mjs';
-import { type KitSend, type TestPerson, type TestSent, at, send as call, toast, who } from './model';
+import { type AgainView, type KitSend, type TestPerson, type TestSent, at, send as call, toast, who } from './model';
 import { FieldError } from './parts';
 import { X } from './Sale';
 
@@ -42,8 +44,21 @@ const timesFor = (d: string, today: string) => {
   const now = minutesOf(eastern.format(new Date()));
   return TIMES.filter((t) => minutesOf(t.value) >= now + LEAD_MIN);
 };
+/**
+ * The times a tap away, besides the store's usual once it has one: early morning, when the showroom
+ * opens (10 AM, the time picked until the store has a usual), lunch and evening. Every other quarter
+ * hour is under "Other time". (Peter, 2026-11-16: 57 times in one list buried the usual one.)
+ */
+const OPENS = '10:00';
+const QUICK = ['08:00', OPENS, '12:00', '18:00'];
+const OTHER = 'other';
+/** "Tue" and "Nov 17", the two lines of a day's button */
+const dayParts = (d: string) => {
+  const [wd, md] = sendLabel(d).split(', ');
+  return { wd, md };
+};
 const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const count = (n: number | null) => (n === null || Number.isNaN(n) ? 'every subscriber' : `${n.toLocaleString('en-US')} subscriber${n === 1 ? '' : 's'}`);
+const count = (n: number | null) => (n === null || Number.isNaN(n) ? 'the store’s subscribers' : `${n.toLocaleString('en-US')} subscriber${n === 1 ? '' : 's'}`);
 
 interface Props {
   send: string;
@@ -70,18 +85,34 @@ interface Props {
   subscribers: number | null;
   subject: string;
   preheader: string;
+  /** The sale's last day and when a reveal the email invites people to starts, if any: it can't go again after either. */
+  saleEnds: string | null;
+  revealStart: string | null;
+  /** An extra email (special.mjs isExtraDate): it goes on its own day, once, and never again to the people who don't open it. */
+  extra?: boolean;
 }
 
 /**
  * Sends the week's email from here, through Kit: a test to whoever's ticked (Kit sends it a minute
- * later, exactly as subscribers get it, as of the day picked), then the email itself to every
- * subscriber on the day and at the time picked. Once it's scheduled the email is locked until the
+ * later, exactly as subscribers get it, as of the day picked), then the email itself to the store's
+ * subscribers on the day and at the time picked. Once it's scheduled the email is locked until the
  * send is cancelled.
  */
 /** An address that breaks, when it must, only after its "@" or before a ".": "holly@" over "soardcharity.com", never "soardcharit" over "y.com". */
 function breakable(email: string) {
   return email.split(/(?<=@)|(?=\.)/).flatMap((part, k) => (k ? [<wbr />, part] : [part]));
 }
+
+/** "AB" for Ann Banks, "C" for Cal; you, by your email ("dana.r@" is "DR"). */
+const initials = (p: TestPerson) => {
+  const words = (p.you ? p.email.split('@')[0] : p.name).split(/[\s._-]+/).filter(Boolean);
+  return words.slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+};
+const Tick = () => (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </svg>
+);
 
 export function Send(props: Props) {
   const { send, label, day, days, setDay, today, todo, dirty, saving, saveFirst, me, kitSend, setKitSend, subscribers } = props;
@@ -93,16 +124,80 @@ export function Send(props: Props) {
   const [adding, setAdding] = useState({ name: '', email: '' });
   const [addError, setAddError] = useState<string | undefined>();
   const [showAdd, setShowAdd] = useState(false);
-  const [wanted, setTime] = useState(props.usualTime && TIMES.some((t) => t.value === props.usualTime) ? props.usualTime : '10:00');
+  /** Who was just taken off, held in their place with an Undo until the list changes again. */
+  const [gone, setGone] = useState<{ person: TestPerson; at: number; was: boolean; done: Promise<boolean> } | null>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const addCard = useRef<HTMLButtonElement>(null);
+  const nameInput = useRef<HTMLInputElement>(null);
+  /**
+   * Where focus goes once the render that draws it lands: a person's card (by email), the Undo,
+   * the Add card or the form's Name, in the same frame. Not autofocus, which a browser honors once
+   * per page load (the form then opened with nothing focused, so Esc did nothing), and not a
+   * paint later, which on a busy page left the first keys typed going nowhere.
+   */
+  const focusNext = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const want = focusNext.current;
+    if (!want) return;
+    const el =
+      want === 'undo' ? undoButton.current : want === 'add' ? addCard.current : want === 'name' ? nameInput.current : list.current?.querySelector<HTMLInputElement>(`input[value="${CSS.escape(want)}"]`);
+    if (el) {
+      el.focus();
+      focusNext.current = null;
+    }
+  });
+  const [wanted, setTime] = useState(props.usualTime && TIMES.some((t) => t.value === props.usualTime) ? props.usualTime : OPENS);
   // Today offers only the times still ahead, and a day with none left isn't offered
   const open = days.filter((d) => timesFor(d, today).length);
   const times = timesFor(day, today);
-  const time = times.some((t) => t.value === wanted) ? wanted : (times.find((t) => t.value === props.usualTime) ?? times[0])?.value ?? wanted;
+  // Today, once the time wanted has passed: the usual or the opening time if still ahead, else the next one
+  const time = times.some((t) => t.value === wanted) ? wanted : (times.find((t) => t.value === props.usualTime) ?? times.find((t) => t.value === OPENS) ?? times[0])?.value ?? wanted;
+  // The usual time and the common ones still open that day, in order through the day
+  const quick = [...new Set([props.usualTime, ...QUICK])].filter((v): v is string => Boolean(v) && times.some((t) => t.value === v)).sort((a, b) => minutesOf(a) - minutesOf(b));
+  const [other, setOther] = useState(false);
+  const otherOn = other || !quick.includes(time);
+  const otherSelect = useRef<HTMLSelectElement>(null);
+  const pickTime = (v: string) => {
+    if (v === OTHER) {
+      setOther(true);
+      window.setTimeout(() => otherSelect.current?.focus(), 0);
+    } else {
+      setOther(false);
+      setTime(v);
+    }
+  };
   useEffect(() => {
     if (!kitSend && open.length && !open.includes(day)) setDay(open[0]);
   }, [open.join(), day, kitSend]);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
+
+  // Going again, a few days later, to the people who don't open it (again.mjs). On unless turned off.
+  const againAt = { day, time, revealStart: props.revealStart };
+  const againIn = props.extra ? [] : againDays({ send, ...againAt, saleEnds: props.saleEnds });
+  const [againWanted, setAgainWanted] = useState(true);
+  const againOn = againWanted && againIn.length > 0;
+  const [pickedAgainDay, setAgainDay] = useState<string | null>(null);
+  const againDay = pickedAgainDay && againIn.includes(pickedAgainDay) ? pickedAgainDay : usualAgainDay(againIn);
+  const againOk = againDay ? againTimes(againDay, againAt) : [];
+  const againTimeList = TIMES.filter((t) => againOk.includes(t.value));
+  const [pickedAgainTime, setAgainTime] = useState<string | null>(null);
+  const againTime = pickedAgainTime && againOk.includes(pickedAgainTime) ? pickedAgainTime : againDay ? usualAgainTime(againDay, againAt) : time;
+  // Follows the subject line until it's typed in
+  const [typedAgainSubject, setAgainSubject] = useState<string | null>(null);
+  const againSubject = typedAgainSubject ?? usualAgainSubject(props.subject);
+  const [againError, setAgainError] = useState<{ field: 'again.day' | 'again.subject'; message: string } | null>(null);
+  const againSubjectInput = useRef<HTMLInputElement>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
+  /** What's wrong with the subject line it goes again with that the page can see without asking; the server checks the rest. */
+  const againSubjectProblem = () => {
+    const v = againSubject.replace(/\s+/g, ' ').trim();
+    if (!v) return 'Write the subject line it goes again with.';
+    if (v.length > PART_LIMITS.subject) return `This subject line is ${v.length} characters; keep it to ${PART_LIMITS.subject}.`;
+    if (v.toLowerCase() === props.subject.trim().toLowerCase()) return 'Use a new subject line: a new one gets more of them to open it.';
+    return '';
+  };
 
   useEffect(() => {
     const last = remembered()?.filter((e) => props.people.some((p) => p.email === e));
@@ -111,13 +206,14 @@ export function Send(props: Props) {
 
   const ready = !todo.length;
   const to = people.filter((p) => chosen.has(p.email)).map((p) => p.email);
-  const choose = (email: string, on: boolean) => {
-    const next = new Set(chosen);
-    if (on) next.add(email);
-    else next.delete(email);
-    setChosen(next);
-    remember([...next]);
-  };
+  const choose = (email: string, on: boolean) =>
+    setChosen((was) => {
+      const next = new Set(was);
+      if (on) next.add(email);
+      else next.delete(email);
+      remember([...next]);
+      return next;
+    });
   const last = props.tests[0];
 
   async function test() {
@@ -137,18 +233,47 @@ export function Send(props: Props) {
   async function openSchedule() {
     if (busy || saving || !ready) return;
     setProblem(null);
+    const wrong = againOn ? againSubjectProblem() : '';
+    if (wrong) {
+      setAgainError({ field: 'again.subject', message: wrong });
+      againSubjectInput.current?.focus();
+      return;
+    }
+    setAgainError(null);
     if (dirty && !(await saveFirst())) return;
     dialog.current?.showModal();
   }
 
   async function schedule() {
     setBusy('schedule');
-    const res = await call<{ kit: KitSend }>('/api/admin/email/send/', 'PUT', { send, day, time });
+    const again = againOn && againDay ? { day: againDay, time: againTime, subject: againSubject } : null;
+    const res = await call<{ kit: KitSend }>('/api/admin/email/send/', 'PUT', { send, day, time, again });
     setBusy(null);
     dialog.current?.close();
-    if (!res.ok) return setProblem(res.error);
+    if (!res.ok) {
+      // A problem with going again shows by its field
+      const field = (res.body as { field?: string } | undefined)?.field;
+      if (field === 'again.day' || field === 'again.subject') {
+        setAgainError({ field, message: res.error });
+        if (field === 'again.subject') againSubjectInput.current?.focus();
+        else document.getElementById('em-again-day')?.scrollIntoView({ block: 'center' });
+        return;
+      }
+      return setProblem(res.error);
+    }
     setKitSend(res.body.kit);
     toast(`Scheduled for ${when.format(new Date(res.body.kit.sendAt))}`);
+  }
+
+  /** "Don't send it again": it still goes once, as scheduled. */
+  async function stopAgain() {
+    setBusy('cancel');
+    const res = await call<{ again: AgainView | null }>('/api/admin/email/again/', 'DELETE', { send });
+    setBusy(null);
+    setConfirmStop(false);
+    if (!res.ok) return setProblem(res.error);
+    if (kitSend) setKitSend({ ...kitSend, again: res.body.again });
+    toast('It won’t go again.');
   }
 
   async function cancelSend() {
@@ -173,17 +298,73 @@ export function Send(props: Props) {
     setAdding({ name: '', email: '' });
     setAddError(undefined);
     setShowAdd(false);
+    setGone(null);
+    focusNext.current = person.email;
     toast(`Added ${person.name}`);
   }
 
-  async function remove(p: TestPerson) {
-    const res = await call<{ people: TestPerson[] }>('/api/admin/email/test-people/', 'DELETE', { email: p.email });
-    if (!res.ok) return setProblem(res.error);
-    setPeople(res.body.people);
+  function openAdd() {
+    focusNext.current = 'name';
+    setShowAdd(true);
+  }
+
+  function closeAdd() {
+    focusNext.current = 'add';
+    setShowAdd(false);
+    setAdding({ name: '', email: '' });
+    setAddError(undefined);
+  }
+
+  /** Takes them off at once, leaving an Undo where their card was; if the server says no, they come back. */
+  function remove(p: TestPerson) {
+    const at = people.findIndex((x) => x.email === p.email);
+    const was = chosen.has(p.email);
+    setProblem(null);
+    setPeople((list) => list.filter((x) => x.email !== p.email));
     choose(p.email, false);
+    const done = call<{ people: TestPerson[] }>('/api/admin/email/test-people/', 'DELETE', { email: p.email }).then((res) => {
+      if (res.ok) return true;
+      setPeople((list) => (list.some((x) => x.email === p.email) ? list : [...list.slice(0, at), p, ...list.slice(at)]));
+      setGone((g) => (g?.person.email === p.email ? null : g));
+      if (was) choose(p.email, true);
+      setProblem(res.error);
+      return false;
+    });
+    focusNext.current = 'undo';
+    setGone({ person: p, at, was, done });
+  }
+
+  /** Puts them back where they were, ticked if they were. Waits for the take-off to land first, so it can't undo the undo. */
+  async function undo() {
+    if (!gone) return;
+    const { person, at, was, done } = gone;
+    setGone(null);
+    if (!(await done)) return;
+    setPeople((list) => [...list.slice(0, at), person, ...list.slice(at)]);
+    if (was) choose(person.email, true);
+    focusNext.current = person.email;
+    const res = await call<{ people: TestPerson[] }>('/api/admin/email/test-people/', 'PUT', { name: person.name, email: person.email });
+    if (!res.ok) {
+      // Still off on the server: the Undo card comes back, so it can be tried again
+      setPeople((list) => list.filter((x) => x.email !== person.email));
+      if (was) choose(person.email, false);
+      setGone({ person, at, was, done: Promise.resolve(true) });
+      return setProblem(res.error);
+    }
+    setPeople(res.body.people);
   }
 
   const goes = kitSend && (kitSend.status === 'sending' || kitSend.status === 'completed');
+  const goneCard = gone && (
+    <li class="em-person em-person-gone" key="gone">
+      <span role="status">
+        <b>{gone.person.name}</b> is off the list.
+      </span>
+      <button type="button" class="btn btn-ghost btn-small" ref={undoButton} aria-label={`Undo, put ${gone.person.name} back on the list`} onClick={() => void undo()}>
+        Undo
+      </button>
+    </li>
+  );
 
   return (
     <div class="em-send">
@@ -207,50 +388,96 @@ export function Send(props: Props) {
 
       <div class="em-send-card">
         <h3>Send a test</h3>
-        <p class="em-hint">Kit sends it about a minute later, exactly as subscribers will get it, with “[Test]” before the subject.</p>
-        <ul class="em-test-list">
-          {people.map((p) => (
-            <li class="em-test-person" key={p.email}>
-              <label class="check">
-                <input type="checkbox" checked={chosen.has(p.email)} onChange={(e) => choose(p.email, (e.target as HTMLInputElement).checked)} />
-                <span class="em-test-name">{p.you ? 'You' : p.name}</span>
-                <span class="em-test-email">{breakable(p.email)}</span>
-              </label>
-              {!p.you && props.managesList && (
-                <button type="button" class="btn btn-ghost btn-icon em-remove" aria-label={`Take ${p.name} off the list`} onClick={() => void remove(p)}>
-                  <X />
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-        {!props.managesList ? null : showAdd ? (
-          <form class="em-test-add" onSubmit={add} noValidate>
-            <div class="em-test-add-row">
-              <input aria-label="Their name" placeholder="Name" autocomplete="off" value={adding.name} maxLength={40} onInput={(e) => setAdding({ ...adding, name: (e.target as HTMLInputElement).value })} />
-              <input
-                type="email"
-                aria-label="Their email"
-                placeholder="Email"
-                autocomplete="off"
-                value={adding.email}
-                onInput={(e) => {
-                  setAdding({ ...adding, email: (e.target as HTMLInputElement).value });
-                  setAddError(undefined);
-                }}
-                {...(addError ? { 'aria-invalid': true, 'aria-describedby': 'em-test-add-error' } : {})}
-              />
-              <button type="submit" class="btn">
-                Add
-              </button>
-            </div>
-            <FieldError id="em-test-add-error" message={addError} />
-          </form>
-        ) : (
-          <button type="button" class="btn btn-ghost btn-small em-add-person" onClick={() => setShowAdd(true)}>
-            + Add someone
-          </button>
-        )}
+        <p class="em-hint">Pick who gets it. Kit sends it about a minute later, exactly as subscribers will get it, with “[Test]” and the time before the subject.</p>
+        <div class="em-people" ref={list}>
+          <ul class="em-test-list" aria-label="Who gets the test">
+            {people.flatMap((p, i) => {
+              const card = (
+                <li class="em-person" key={p.email}>
+                  <label class="em-person-card">
+                    <input type="checkbox" class="visually-hidden" value={p.email} checked={chosen.has(p.email)} onChange={(e) => choose(p.email, (e.target as HTMLInputElement).checked)} />
+                    <span class="em-avatar" aria-hidden="true">
+                      <span class="em-avatar-face">{initials(p)}</span>
+                      <span class="em-avatar-back">
+                        <Tick />
+                      </span>
+                    </span>
+                    <span class="em-person-text">
+                      <span class="em-person-name">{p.you ? 'You' : p.name}</span>
+                      <span class="em-person-email">
+                        {p.email.slice(0, p.email.indexOf('@') + 1)}
+                        <span class="em-person-domain">{breakable(p.email.slice(p.email.indexOf('@') + 1))}</span>
+                      </span>
+                    </span>
+                  </label>
+                  {!p.you && props.managesList && (
+                    <button type="button" class="btn btn-ghost btn-icon em-person-remove" aria-label={`Take ${p.name} off the list`} onClick={() => remove(p)}>
+                      <X />
+                    </button>
+                  )}
+                </li>
+              );
+              return gone && gone.at === i ? [goneCard, card] : [card];
+            })}
+            {gone && gone.at >= people.length && goneCard}
+            {props.managesList && (
+              <li class={`em-person em-person-add${showAdd ? ' is-open' : ''}`} key="add">
+                {showAdd ? (
+                  <form
+                    class="em-test-add"
+                    onSubmit={add}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        closeAdd();
+                      }
+                    }}
+                    noValidate
+                  >
+                    <div class="em-test-add-row">
+                      <input ref={nameInput} aria-label="Their name" placeholder="Name" autocomplete="off" value={adding.name} maxLength={40} onInput={(e) => setAdding({ ...adding, name: (e.target as HTMLInputElement).value })} />
+                      <input
+                        type="email"
+                        aria-label="Their email"
+                        placeholder="Email"
+                        autocomplete="off"
+                        value={adding.email}
+                        onInput={(e) => {
+                          setAdding({ ...adding, email: (e.target as HTMLInputElement).value });
+                          setAddError(undefined);
+                        }}
+                        {...(addError ? { 'aria-invalid': true, 'aria-describedby': 'em-test-add-error' } : {})}
+                      />
+                      <FieldError id="em-test-add-error" message={addError} />
+                      <div class="em-test-add-actions">
+                        <button type="button" class="btn btn-ghost" onClick={closeAdd}>
+                          Cancel
+                        </button>
+                        <button type="submit" class="btn btn-dark">
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                ) : (
+                  <button type="button" class="em-person-card em-add-card" ref={addCard} onClick={openAdd}>
+                    <span class="em-avatar" aria-hidden="true">
+                      <span class="em-avatar-face">
+                        <svg viewBox="0 0 24 24">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                      </span>
+                    </span>
+                    <span class="em-person-text">
+                      <span class="em-person-name">Add someone</span>
+                      <span class="em-person-email">Anyone who checks the email</span>
+                    </span>
+                  </button>
+                )}
+              </li>
+            )}
+          </ul>
+        </div>
         <div class="em-send-row">
           <button type="button" class="btn btn-dark" onClick={() => void test()} disabled={!ready || !to.length || Boolean(busy) || saving || Boolean(goes)}>
             {busy === 'test' ? 'Sending the test…' : `${dirty ? 'Save and send' : 'Send'} test to ${to.length === 1 && to[0] === me ? 'you' : `${to.length} ${to.length === 1 ? 'person' : 'people'}`}`}
@@ -306,39 +533,176 @@ export function Send(props: Props) {
                     </button>
                   ))}
               </div>
+              {kitSend.again && (
+                <div class="em-again-set" key={kitSend.again.state}>
+                  <p>{againLine(kitSend.again, (iso) => when.format(new Date(iso)))}</p>
+                  {(kitSend.again.state === 'waiting' || kitSend.again.state === 'scheduled') && (
+                    <>
+                      <p class="em-hint">With the subject line “{kitSend.again.subject}”.</p>
+                      {confirmStop ? (
+                        <span class="em-confirm" role="group" aria-label="Don’t send it again">
+                          It still goes once, as scheduled.
+                          <button type="button" class="btn btn-small" onClick={() => setConfirmStop(false)}>
+                            Keep it
+                          </button>
+                          <button type="button" class="btn btn-small btn-danger" onClick={() => void stopAgain()} disabled={busy === 'cancel'}>
+                            {busy === 'cancel' ? 'Turning it off…' : 'Don’t send it again'}
+                          </button>
+                        </span>
+                      ) : (
+                        <button type="button" class="btn btn-small" onClick={() => setConfirmStop(true)}>
+                          Don’t send it again
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         ) : (
           <>
             {open.length ? (
               <div class="em-when">
-                <label class="visually-hidden" for="em-send-day">
-                  Day
-                </label>
-                <select id="em-send-day" value={day} onChange={(e) => setDay((e.target as HTMLSelectElement).value)}>
-                  {open.map((d) => (
-                    <option value={d}>
-                      {d === today ? 'Today, ' : ''}
-                      {sendLabel(d)}
-                      {d === send ? ' (usual)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <label class="visually-hidden" for="em-send-time">
-                  Time
-                </label>
-                <select id="em-send-time" value={time} onChange={(e) => setTime((e.target as HTMLSelectElement).value)}>
-                  {times.map((t) => (
-                    <option value={t.value}>
-                      {t.label}
-                      {t.value === props.usualTime ? ' (usual)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <span class="em-hint">Eastern, to {count(subscribers)}.</span>
+                <fieldset class="em-seg em-days" id="em-send-day">
+                  <legend>Day</legend>
+                  <div class="em-seg-row">
+                    {open.map((d) => {
+                      const { wd, md } = dayParts(d);
+                      return (
+                        <label class="em-seg-option">
+                          <input type="radio" name="em-send-day" value={d} checked={d === day} onChange={() => setDay(d)} />
+                          <span>
+                            <strong>{d === today ? 'Today' : wd}</strong>
+                            <small>{md}</small>
+                            <em>{d === send && !props.extra ? 'Usual' : '\u00a0'}</em>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+                <fieldset class="em-seg em-times" id="em-send-time">
+                  <legend>Time, Eastern</legend>
+                  {quick.length > 0 && (
+                    <div class="em-seg-row">
+                      {[...quick, OTHER].map((v) => (
+                        <label class="em-seg-option">
+                          <input type="radio" name="em-send-time" value={v} checked={v === OTHER ? otherOn : !otherOn && v === time} onChange={() => pickTime(v)} />
+                          <span>
+                            <strong>{v === OTHER ? 'Other time' : timeLabel(v)}</strong>
+                            <em>{v === props.usualTime ? 'Usual' : v === OPENS && !props.usualTime ? 'Store opens' : '\u00a0'}</em>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {(otherOn || !quick.length) && (
+                    <div class="em-other-time">
+                      <label for="em-send-other">{quick.length ? 'Pick the time' : 'Time'}</label>
+                      <select id="em-send-other" ref={otherSelect} value={time} onChange={(e) => setTime((e.target as HTMLSelectElement).value)}>
+                        {times.map((t) => (
+                          <option value={t.value}>
+                            {t.label}
+                            {t.value === props.usualTime ? ' (usual)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </fieldset>
+                <p class="em-hint">To {count(subscribers)}.</p>
+                {!props.extra && (
+                <div class={`em-again${againOn ? ' is-on' : ''}`}>
+                  <label class="em-again-switch">
+                    <input
+                      type="checkbox"
+                      checked={againOn}
+                      disabled={!againIn.length}
+                      onChange={(e) => {
+                        setAgainWanted((e.target as HTMLInputElement).checked);
+                        setAgainError(null);
+                      }}
+                      aria-describedby="em-again-who"
+                    />
+                    <span>
+                      <strong>Send it again to people who don’t open it</strong>
+                      <small id="em-again-who">
+                        {againIn.length
+                          ? 'A few days later, under a new subject line, to those who’ve opened one of the store’s emails in the last 60 days. No one gets more than one of these a month.'
+                          : props.revealStart
+                            ? 'Not this time: it goes again at least two days after, in the same week, while the sale is on, and before the reveal it invites people to.'
+                            : 'Not this time: it goes again at least two days after, in the same week, while the sale is on.'}
+                      </small>
+                    </span>
+                  </label>
+                  {againOn && againDay && (
+                    <div class="em-again-fields">
+                      <fieldset class="em-seg em-days" id="em-again-day">
+                        <legend>Day it goes again</legend>
+                        <div class="em-seg-row">
+                          {againIn.map((d) => {
+                            const { wd, md } = dayParts(d);
+                            return (
+                              <label class="em-seg-option">
+                                <input
+                                  type="radio"
+                                  name="em-again-day"
+                                  value={d}
+                                  checked={d === againDay}
+                                  onChange={() => {
+                                    setAgainDay(d);
+                                    setAgainError(null);
+                                  }}
+                                />
+                                <span>
+                                  <strong>{wd}</strong>
+                                  <small>{md}</small>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        {againError?.field === 'again.day' && <FieldError id="em-again-day-error" message={againError.message} />}
+                      </fieldset>
+                      <div class="field em-again-time">
+                        <label for="em-again-time">Time it goes again, Eastern</label>
+                        <select id="em-again-time" value={againTime} onChange={(e) => setAgainTime((e.target as HTMLSelectElement).value)}>
+                          {againTimeList.map((t) => (
+                            <option value={t.value}>
+                              {t.label}
+                              {t.value === time ? ' (same time)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div class="field em-again-subject">
+                        <label for="em-again-subject">Subject line when it goes again</label>
+                        <input
+                          id="em-again-subject"
+                          ref={againSubjectInput}
+                          value={againSubject}
+                          maxLength={PART_LIMITS.subject + 20}
+                          onInput={(e) => {
+                            setAgainSubject((e.target as HTMLInputElement).value);
+                            if (againError?.field === 'again.subject') setAgainError(null);
+                          }}
+                          {...(againError?.field === 'again.subject' ? { 'aria-invalid': true, 'aria-describedby': 'em-again-subject-error' } : { 'aria-describedby': 'em-again-subject-hint' })}
+                        />
+                        <FieldError id="em-again-subject-error" message={againError?.field === 'again.subject' ? againError.message : undefined} />
+                        {againError?.field !== 'again.subject' && (
+                          <p class="em-hint" id="em-again-subject-hint">
+                            A new subject line gets more of them to open it. Products sold by then are left out of it.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                )}
               </div>
             ) : (
-              <p class="em-hint">This email’s week is over, so it can’t be scheduled.</p>
+              <p class="em-hint">{props.extra ? 'This email’s day is over, so it can’t be scheduled.' : 'This email’s week is over, so it can’t be scheduled.'}</p>
             )}
             <div class="em-send-row">
               <button type="button" class="btn btn-primary" onClick={() => void openSchedule()} disabled={!ready || !open.length || Boolean(busy) || saving}>
@@ -364,6 +728,14 @@ export function Send(props: Props) {
           <dd>{props.subject}</dd>
           <dt>Preview</dt>
           <dd>{props.preheader}</dd>
+          {againOn && againDay && (
+            <>
+              <dt>Again</dt>
+              <dd>
+                {sendLabel(againDay)}, {timeLabel(againTime)}, to people who haven’t opened it, as “{againSubject.replace(/\s+/g, ' ').trim()}”
+              </dd>
+            </>
+          )}
         </dl>
         <p class="em-hint">You can cancel it here until it goes.</p>
         <div class="em-dialog-actions">

@@ -4,6 +4,16 @@
 # The build isn't repeated here: it reads live Shopify data with the store's
 # keys, so Cloudflare Pages builds it on deploy, and a failed build there keeps
 # the last good version live.
+#
+# The weekly email is held to its standard here too, inside "Tests" so nothing
+# merges that breaks it: its stress tests (scripts/sunny-side/tests/) are built
+# and rendered by verify.mjs in Chromium and WebKit, as sent, as Gmail shows them
+# and with no style block at all, at every width from 320 to 700px. A word in the
+# email's own layout too wide for a phone is stopped here, so it never reaches
+# the admin. It runs offline (EMAIL_CHECK_OFFLINE): every photo is a blank of its
+# own shape, so no image host can fail a pull request; only the email's Google
+# Fonts load, as in a reader's mail app. The live photos' own checks (format,
+# weight, dark artwork) run in the full check on a computer.
 
 name: Checks
 
@@ -20,10 +30,37 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The Playwright the lockfile installs, so the tests run in Microsoft's image for exactly that
+  # version, whose browsers are the ones it drives
+  playwright:
+    name: Playwright version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: package-lock.json
+          sparse-checkout-cone-mode: false
+      - id: version
+        run: echo "version=$(node -p "require('./package-lock.json').packages['node_modules/playwright'].version")" >> "$GITHUB_OUTPUT"
+
   tests:
     name: Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    needs: playwright
+    # 24.04, not ubuntu-latest: that became Ubuntu 26.04, and the Playwright the email check uses
+    # (package.json) has no browsers for it ("Playwright does not support chromium on ubuntu26.04").
+    runs-on: ubuntu-24.04
+    # Microsoft's Playwright image for the lockfile's version (Ubuntu 24.04, "noble"): Chromium and
+    # WebKit and every system package they need come in it. Installing them on each run
+    # ("playwright install --with-deps") spent 15 to 20 minutes fetching 138 Ubuntu packages from a
+    # slow mirror, and twice ran out the 20 minutes before the email check began (Nov 18, 2026).
+    # --ipc=host: Chromium runs out of shared memory in Docker's default 64MB.
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
+      options: --ipc=host
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -33,3 +70,11 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm test
+      - name: The weekly email fits every screen
+        env:
+          EMAIL_CHECK_OFFLINE: '1'
+        run: |
+          node scripts/sunny-side/build.mjs --tests
+          node scripts/sunny-side/verify.mjs
+      - name: Every collage layout lines up
+        run: node scripts/sunny-side/collages.mjs

@@ -1,0 +1,20 @@
+name = "email-again"
+main = "src/index.ts"
+compatibility_date = "2026-01-14"
+# Nothing to call from outside: no workers.dev address, no preview URLs, no routes.
+workers_dev = false
+preview_urls = false
+
+# Every two minutes. The site decides what's due (src/lib/sunny-side/again-run.mjs); a call with
+# nothing due reads one D1 table and stops.
+[triggers]
+crons = ["*/2 * * * *"]
+
+[observability]
+enabled = true
+
+[vars]
+AGAIN_URL = "https://sunnyandranney.com/api/email-again/"
+
+# EMAIL_AGAIN_SECRET is a secret, the same as the site's (Pages project sunnyandranney-site):
+# npx wrangler secret put EMAIL_AGAIN_SECRET --config workers/email-again/wrangler.toml

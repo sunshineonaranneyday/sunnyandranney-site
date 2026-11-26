@@ -23,29 +23,71 @@
 .em-bar-save { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem 0.75rem; }
 .em-status { font-size: 0.875rem; font-weight: 600; color: var(--ink-3); }
 
-/* On a phone the bar scrolls away, and Save waits at the bottom of the screen once there's something to save. */
+.em-status-top { display: none; }
+/*
+ * On a phone the bar scrolls away, and Save and Preview live in a toolbar at the foot of the screen, the
+ * way iOS keeps a view's actions (Apple's Human Interface Guidelines, Toolbars). They're there from the
+ * start, so the first change moves nothing (Save used to move down at it, and the page jumped:
+ * src/lib/admin/first-change.test.mjs), and nothing floats over the fields. The page ends a toolbar's
+ * height lower, so Schedule is never under it. The status reads under the title instead.
+ */
 @container (max-width: 600px) {
   .em-bar { position: static; }
-  .em.is-dirty .em-bar-save {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+  .em-bar-save {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; flex-wrap: nowrap; gap: 0.5rem;
     justify-content: flex-end; padding: 0.625rem 1rem calc(0.625rem + env(safe-area-inset-bottom, 0px)); background: var(--panel); border-top: 1px solid var(--line); box-shadow: var(--shadow);
   }
-  .em.is-dirty .em-status { margin-right: auto; }
-  .em.is-dirty .em-jump { bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); }
+  .em-bar-save .em-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .em-bar-save .em-jump { margin-right: auto; }
+  .em-status-top { display: block; margin-top: 0.25rem; font-size: 0.8125rem; font-weight: 600; color: var(--ink-3); }
+  .em-grid { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
+  .em :is(input, textarea, select, button) { scroll-margin-bottom: calc(5rem + env(safe-area-inset-bottom, 0px)); }
 }
 
-/* ── Layout: the editor beside the preview once there's room for both, the preview below it until then ── */
+/* ── The emails still to go, to switch between, and a new extra one (EmailApp.tsx, Emails) ── */
+.em-emails { margin: 0 0 1rem; }
+.em-email-tabs { list-style: none; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; margin: 0; padding: 0; }
+.em-email-tab {
+  display: grid; gap: 0.0625rem; min-height: 44px; padding: 0.5rem 0.875rem; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--panel); color: var(--ink); font: inherit; text-align: left; text-decoration: none; cursor: pointer; box-shadow: var(--shadow-sm);
+}
+.em-email-tab strong { font-size: 0.9375rem; font-weight: 700; line-height: 1.25; }
+.em-email-tab small { font-size: 0.75rem; font-weight: 600; color: var(--ink-3); line-height: 1.3; }
+@media (hover: hover) { .em-email-tab:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); } }
+.em-email-tab:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-email-tab[aria-current='page'] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.em-email-new { border-style: dashed; background: transparent; box-shadow: none; }
+.em-email-add { padding: 0.625rem 0.875rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); box-shadow: var(--shadow-sm); }
+.em-email-add label { display: block; margin-bottom: 0.375rem; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+.em-email-add-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.em-email-add input { width: auto; min-height: 44px; }
+.em-email-add .em-hint { max-width: 32rem; }
+
+/* ── Layout: the editor beside the preview once there's room for both, a sheet over the page until then ── */
 .em-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
 .em-side { min-width: 0; }
-.em .em-jump { position: fixed; right: 1rem; bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); z-index: 15; box-shadow: var(--shadow); transition: opacity var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease), visibility 0s; }
-/* Once the preview is on screen the button has nowhere to go: it fades down and leaves the tab order */
-.em.sees-preview .em-jump { opacity: 0; transform: translateY(8px); visibility: hidden; pointer-events: none; transition: opacity var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease), visibility 0s linear var(--em-fast); }
 @container (min-width: 940px) {
   .em-grid { grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); }
   .em-side { position: sticky; top: calc(var(--topbar, 0px) + 7.5rem); max-height: calc(100vh - 8.5rem - var(--topbar, 0px)); overflow-y: auto; overscroll-behavior: contain; border-radius: var(--r-lg); scrollbar-width: thin; }
   .em .em-jump { display: none; }
 }
-@media (min-width: 1024px) { .em .em-jump { bottom: 1.5rem; } }
+/* Below that width the preview is a sheet over the page (EmailApp.tsx, previewing): a tap away, and back
+   to the same spot, instead of 11 screens down the page. Closed, it stays laid out out of sight, so its
+   measuring frames keep checking the email; it never takes the page's length. */
+@container (max-width: 939.98px) {
+  .em-side {
+    position: fixed; inset: var(--topbar, 0px) 0 0 0; z-index: 30; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding: 0 0.75rem calc(1rem + env(safe-area-inset-bottom, 0px)); background: var(--bg);
+    visibility: hidden; opacity: 0; transform: translateY(1.5rem);
+    transition: opacity var(--em-mid) var(--em-ease), transform var(--em-mid) var(--em-ease), visibility 0s linear var(--em-mid);
+  }
+  .em.is-previewing .em-side { visibility: visible; opacity: 1; transform: none; transition: opacity var(--em-mid) var(--em-ease), transform var(--em-mid) var(--em-ease), visibility 0s; }
+  /* The sheet already starts under the admin's top bar, so its own bar sticks to the sheet's top */
+  .em-side { --sticky-top: 0px; }
+  .em-side-bar { position: sticky; top: var(--sticky-top, 0px); z-index: 2; display: flex; align-items: center; margin: 0 -0.75rem 0.75rem; padding: 0.5rem 0.75rem; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .em.is-previewing .em-jump { visibility: hidden; pointer-events: none; }
+}
+@container (min-width: 940px) { .em-side-bar { display: none; } }
 
 /* ── Sections ── */
 .em-section { display: flex; flex-wrap: wrap; align-items: center; column-gap: 0.75rem; }
@@ -55,6 +97,44 @@
 .em-step { display: inline-grid; place-items: center; width: 1.75rem; height: 1.75rem; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 0.8125rem; font-weight: 700; }
 .em-section > .em-section-tools { flex: 0 1 auto; margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; margin-bottom: 1rem; }
 .em-section-tools:empty { display: none; }
+/*
+ * A section folds to its header and a one-line summary (parts.tsx Section). The title is the button
+ * (WAI-ARIA disclosure); its ::after stretches over the header while open, and over the whole card
+ * while folded, so the card is one big target without a button wrapped round a heading.
+ */
+.em-section.is-foldable { position: relative; }
+.em-section.is-foldable:not(.is-folded) > .em-section-head { position: relative; }
+.em-section-toggle { margin: 0; padding: 0; border: 0; background: none; font: inherit; letter-spacing: inherit; color: inherit; text-align: left; cursor: pointer; }
+/* Open, the title's target runs 12px above and below it (44px tall, Apple's minimum), into the header's own margin */
+.em-section-toggle::after { content: ''; position: absolute; inset: -0.75rem -0.5rem; border-radius: 10px; }
+.em-section.is-folded .em-section-toggle::after { inset: 0; border-radius: inherit; }
+.em-section-toggle:focus-visible { outline: none; }
+.em-section-toggle:focus-visible::after { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-section-chevron { flex: 0 0 auto; margin-left: auto; width: 0.5rem; height: 0.5rem; margin-right: 0.25rem; border-right: 2px solid var(--ink-3); border-bottom: 2px solid var(--ink-3); transform: translateY(-2px) rotate(45deg); transition: transform var(--em-mid) var(--em-ease); }
+.em-section:not(.is-folded) .em-section-chevron { transform: translateY(2px) rotate(-135deg); }
+.em-section.is-folded > :not(.em-section-head) { display: none; }
+.em-section.is-folded > .em-section-head { margin-bottom: 0; }
+.em-section > .em-section-head > .em-section-summary { flex: 1 1 100%; min-width: 0; margin: 0; padding-left: 2.375rem; color: var(--ink-2); font-size: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * A section's on/off switch (parts.mjs SWITCHES), in its header: over the fold's target, which covers
+ * the whole folded card, so a tap on it switches and never opens the section
+ */
+.em-switch { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 0.4375rem; min-height: 44px; margin: -0.75rem 0 -0.75rem auto; padding: 0 0.25rem; font-size: 0.8125rem; font-weight: 700; letter-spacing: 0; text-transform: none; color: var(--ink-2); cursor: pointer; }
+.em-switch + .em-section-chevron { margin-left: 0.25rem; }
+/* As specific as the admin's own checkbox rule (AdminBase, input[type='checkbox']), which otherwise sized it as a tick box */
+.em-switch input[type='checkbox'] { appearance: none; -webkit-appearance: none; position: relative; flex: none; width: 2.25rem; min-width: 2.25rem; height: 1.375rem; min-height: 1.375rem; padding: 0; margin: 0; border-radius: 999px; background: var(--line); border: 0; box-shadow: none; cursor: pointer; transition: background-color 0.15s var(--ease); }
+.em-switch input::after { content: ''; position: absolute; top: 0.1875rem; left: 0.1875rem; width: 1rem; height: 1rem; border-radius: 50%; background: var(--panel); box-shadow: var(--shadow-sm); transition: transform 0.15s var(--ease); }
+.em-switch input[type='checkbox']:checked { background: var(--teal); }
+.em-switch input:checked::after { transform: translateX(0.875rem); }
+.em-switch input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-switch span { min-width: 1.5rem; }
+.badge-off { background: var(--sunk); color: var(--ink-3); }
+.em-section.is-off .em-section-head h2 { color: var(--ink-3); }
+.em-off-note { color: var(--ink-2); font-size: 0.9375rem; margin: 0 0 1rem; }
+@media (hover: hover) {
+  .em-section.is-folded:hover { border-color: var(--ink-3); }
+  .em-section-toggle:hover { text-decoration: underline; text-underline-offset: 3px; }
+}
 
 .em-hint { color: var(--ink-3); font-size: 0.8125rem; margin-top: 0.3125rem; }
 .em-inline { display: inline; margin-left: 0.5rem; }
@@ -70,7 +150,8 @@
  * top edge the browser's way, so a fieldset with a background keeps its words on it.
  */
 :where(.em) fieldset { border: 0; min-width: 0; margin: 0 0 1rem; padding: 0; }
-:where(.em) legend { float: left; width: 100%; font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 0.375rem; padding: 0; }
+.em label:not([class]) { font-size: 0.75rem; } /* the admin's field labels are 11px; 12 on this page, read on a phone */
+:where(.em) legend { float: left; width: 100%; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 0.375rem; padding: 0; }
 :where(.em) legend + * { clear: both; }
 .em-none { color: var(--ink-3); font-size: 0.9375rem; }
 
@@ -78,14 +159,31 @@
 .em-seg-row { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 12px; background: var(--sunk); }
 .em-seg-option { flex: 1 1 auto; margin: 0; position: relative; font-size: 0.875rem; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink-2); cursor: pointer; }
 .em-seg-option span { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 0.375rem 0.875rem; border-radius: 9px; text-align: center; transition: background-color 0.15s var(--ease), color 0.15s var(--ease); }
-.em-seg-option:hover span { color: var(--ink); background: color-mix(in srgb, var(--panel) 55%, transparent); }
+@media (hover: hover) { .em-seg-option:hover span { color: var(--ink); background: color-mix(in srgb, var(--panel) 55%, transparent); } }
 .em-seg-option:has(input:checked) span { background: var(--panel); color: var(--ink); box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
 .em-seg-option:has(input:focus-visible) span { outline: 2px solid var(--teal); outline-offset: 1px; }
-.em-sale-body { margin-top: 1.25rem; }
-/* Last week's sale, one tap from being this week's, when nothing is set yet */
-.em-last { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin: 0 0 1.25rem; padding: 0.75rem 0.75rem 0.75rem 1rem; border-radius: var(--r-md); background: var(--sunk); }
-.em-last-what { flex: 1 1 14rem; min-width: 0; font-size: 0.9375rem; color: var(--ink-2); overflow-wrap: anywhere; }
-.em-last-what strong { color: var(--ink); }
+.em-sale-edit { margin-top: 1.25rem; display: grid; gap: 1.25rem; }
+.em-sale-edit .field, .em-sale-edit fieldset { margin: 0; }
+/* The ready-made sales: three cards, one tap each; the chosen one is outlined (Peter, 2026-11-16) */
+/* Four, two by two (a sale by the hour joined them Nov 25, 2026) */
+.em-sale-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.625rem; }
+@container (max-width: 560px) { .em-sale-cards { grid-template-columns: minmax(0, 1fr); } }
+.em-sale-card {
+  position: relative; display: grid; align-content: start; gap: 0.25rem; min-height: 5.25rem; padding: 0.875rem 2.25rem 0.875rem 1rem;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font: inherit; text-align: left;
+  cursor: pointer; box-shadow: var(--shadow-sm); transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+@media (hover: hover) { .em-sale-card:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); } }
+.em-sale-card:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-sale-card[aria-pressed='true'] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+/* A check in the chosen card's corner */
+.em-sale-card[aria-pressed='true']::after {
+  content: ''; position: absolute; top: 0.875rem; right: 0.875rem; width: 1.125rem; height: 1.125rem; border-radius: 50%;
+  background: var(--ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / 0.6875rem no-repeat;
+}
+.em-sale-card-title { font-size: 1.0625rem; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.em-sale-card-sub { display: grid; font-size: 0.875rem; color: var(--ink-3); line-height: 1.4; }
+.em-sale-card-line { white-space: nowrap; }
 
 /* ── Money and percent fields ── */
 .em-affix { position: relative; display: block; }
@@ -95,7 +193,7 @@
 .em-affix-end > input { padding-left: 0.75rem; padding-right: 3.75rem; }
 
 .em-tier-head, .em-tier { display: grid; grid-template-columns: minmax(0, 1fr) 1.5rem minmax(0, 1fr) 44px; gap: 0 0.5rem; align-items: center; }
-.em-tier-head { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 0.25rem; }
+.em-tier-head { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 0.25rem; }
 .em-tier-head span:last-child { grid-column: 3; }
 .em-tier-list { list-style: none; display: grid; gap: 0.5rem; margin: 0 0 0.75rem; padding: 0; }
 .em-tier .em-error { grid-column: 1 / -1; }
@@ -103,6 +201,18 @@
 .em-remove { color: var(--ink-3); }
 .em-remove:disabled { visibility: hidden; }
 .em-percent .em-affix, .em-ends input { max-width: 13rem; }
+/* A sale by the hour: each row its day, its hours (or all day) and its percent */
+.em-sale-name input { max-width: 26rem; }
+.em-window-list { list-style: none; display: grid; gap: 0.5rem; margin: 0 0 0.75rem; padding: 0; }
+.em-window { display: grid; grid-template-columns: minmax(7.5rem, 1.2fr) minmax(6rem, 1fr) minmax(6.5rem, 1fr) minmax(6.5rem, 0.9fr) 44px; gap: 0.5rem; align-items: center; }
+.em-window .em-error { grid-column: 1 / -1; margin-top: 0; }
+.em-window-allday { color: var(--ink-3); font-size: 0.875rem; font-weight: 600; padding-left: 0.25rem; }
+@container (max-width: 560px) {
+  .em-window { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; padding-bottom: 0.5rem; border-bottom: 1px solid var(--line); }
+  .em-window > select:first-child { grid-column: 1 / 3; }
+  .em-window > .em-affix { grid-column: 1 / 3; }
+  .em-window > .em-remove { grid-column: 3; grid-row: 1; }
+}
 
 /* ── Things most weeks leave alone, folded away with what they say now ── */
 .em-extras { border-top: 1px solid var(--line); padding-top: 0.75rem; margin-top: 0.25rem; }
@@ -114,59 +224,63 @@
 .em-extras-now { color: var(--ink-3); font-size: 0.875rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 12rem; }
 .em-extras-body { padding-top: 0.75rem; }
 
-/* ── The products, laid out the way the email lays them out ── */
-.em-wall-hint { margin: 0 0 0.75rem; }
-.em-wall { display: grid; gap: 0.75rem; touch-action: pan-y; }
+/* ── The products, laid out the way the email lays them out, and arranged as the collage is (drag.ts):
+   the photo is what's dragged, tapped, or picked up with Space or Enter ── */
+.em-wall-panel .em-wall-line { margin-bottom: 0.75rem; }
+.em-wall-panel:is(.is-tap, .is-key, .is-drag) .em-wall-line { color: var(--ink); font-weight: 600; }
+/* Positioned, so each tile's place can be read without the slide it may be in (homeRect) */
+.em-wall { position: relative; display: grid; gap: 0.75rem; }
 .em-wall-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.75rem; }
 .em-wall-row-1 { grid-template-columns: minmax(0, 1fr); }
 .em-wall-row-free { grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); }
-.em-tile { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); overflow: hidden; transition: box-shadow 0.15s var(--ease), opacity 0.15s var(--ease); }
+.em-tile { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); overflow: hidden; transition: box-shadow 0.15s var(--ease), opacity 0.15s var(--ease), transform 0.15s var(--ease); }
 .em-tile.is-bad { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
-.em-tile.is-dragged { opacity: 0.45; }
-.em-tile.is-target { box-shadow: 0 0 0 3px var(--teal); }
-.em-wall.is-dragging, .em-wall.is-dragging * { cursor: grabbing; user-select: none; }
+/* Where the held product lands if she lets go; the one picked up; and, while one is, every spot it can go */
+.em-tile.is-placeholder { box-shadow: 0 0 0 2px var(--teal); }
+.em-tile.is-placeholder .em-tile-pick img { opacity: 0.35; }
+.em-tile.is-held { position: relative; z-index: 2; transform: scale(1.02); box-shadow: 0 0 0 3px var(--teal), 0 12px 28px rgba(28, 27, 25, 0.24); }
+.em-tile.is-choice { outline: 2px dashed color-mix(in srgb, var(--teal) 70%, transparent); outline-offset: 2px; }
+.em-tile.is-choice .em-tile-pick:focus-visible .em-collage-here { opacity: 1; }
+@media (hover: hover) { .em-tile.is-choice .em-tile-pick:hover .em-collage-here { opacity: 1; } }
+@media (hover: none) { .em-tile.is-choice .em-collage-here { opacity: 0.9; background: color-mix(in srgb, var(--ink) 22%, transparent); } }
 .em-tile-photo { position: relative; aspect-ratio: 1; background: var(--sunk); }
 .em-tile-wide .em-tile-photo { aspect-ratio: 3 / 2; }
 .em-tile-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.em-tile-grip, .em-tile-remove {
-  position: absolute; top: 0.375rem; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+.em-tile-pick {
+  position: absolute; inset: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: grab;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.em-tile-pick img { pointer-events: none; -webkit-user-drag: none; transition: opacity var(--em-fast) var(--em-ease); }
+.em-tile-pick:focus-visible { outline: 3px solid var(--teal); outline-offset: -3px; }
+.em-tile-remove {
+  position: absolute; top: 0.375rem; right: 0.375rem; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
   border: 0; border-radius: 10px; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--ink); box-shadow: var(--shadow-sm); cursor: pointer;
 }
-.em-tile-grip { left: 0.375rem; cursor: grab; touch-action: none; }
-.em-tile-remove { right: 0.375rem; }
-.em-tile-grip:focus-visible, .em-tile-remove:focus-visible, .em-tile-photos button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-tile-remove:focus-visible, .em-tile-photos button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .em-tile-photos {
   position: absolute; left: 50%; bottom: 0.375rem; transform: translateX(-50%); display: flex; align-items: center; gap: 0.125rem;
   padding: 0 0.125rem; border-radius: 999px; background: color-mix(in srgb, var(--panel) 90%, transparent); box-shadow: var(--shadow-sm); white-space: nowrap;
 }
 .em-tile-photos span { font-size: 0.75rem; font-weight: 600; color: var(--ink-2); padding: 0 0.25rem; }
-.em-tile-photos button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 1.25rem; line-height: 1; cursor: pointer; }
-.em-tile-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.625rem 0.75rem 0.375rem; flex: 1; }
+.em-tile-photos button { width: 44px; height: 44px; border: 0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 1.25rem; line-height: 1; cursor: pointer; }
+.em-tile-body { display: flex; flex-direction: column; gap: 0.125rem; padding: 0.625rem 0.75rem 0.625rem; flex: 1; }
 .em-tile-name { font-weight: 700; line-height: 1.3; }
 .em-tile-meta { font-size: 0.875rem; color: var(--ink-2); }
 .em-low { color: var(--clay); font-weight: 600; }
 .em-tile-rename { margin-top: 0.5rem; }
-.em-tile-rename input { min-height: 40px; }
-.em-tile-move { display: flex; align-items: center; justify-content: space-between; gap: 0.25rem; margin-top: auto; padding-top: 0.25rem; }
-.em-tile-move .btn { padding-inline: 0.5rem; min-width: 44px; }
 .em-tile, .em-tile-body, .em-tile-rename { min-width: 0; }
 .em-tile-name { overflow-wrap: anywhere; }
-/* Two tiles across a phone: the moves and the photo count go to arrows and numbers, and the tile's
-   place goes on its own line above its arrows, which keep their 44px (two of them and "3 of 6" don't
-   fit a tile on a 320px phone) */
+/* Two tiles across a phone: "Photo 2 of 3" becomes "2 of 3" so the photo's arrows keep their 44px */
 @container (max-width: 560px) {
   .em-wide-only { display: none; }
   .em-tile-body { padding-inline: 0.5rem; }
-  .em-tile-move { flex-wrap: wrap; row-gap: 0; }
-  .em-tile-place { order: -1; flex: 0 0 100%; text-align: center; }
 }
-.em-tile-place { font-size: 0.75rem; font-weight: 600; color: var(--ink-3); white-space: nowrap; }
 
 .em-empty {
   display: grid; gap: 0.375rem; width: 100%; padding: 2rem 1.25rem; text-align: center; cursor: pointer;
   border: 2px dashed var(--line); border-radius: var(--r-lg); background: var(--sunk); color: var(--ink); font: inherit;
 }
-.em-empty:hover:not(:disabled) { border-color: var(--ink); }
+@media (hover: hover) { .em-empty:hover:not(:disabled) { border-color: var(--ink); } }
 .em-empty strong { font-size: 1.0625rem; }
 .em-empty span { color: var(--ink-3); font-size: 0.875rem; }
 .em-empty:disabled { cursor: progress; }
@@ -208,7 +322,7 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
   display: flex; flex-direction: column; gap: 0.125rem; width: 100%; height: 100%; padding: 0 0 0.625rem; text-align: left; cursor: pointer;
   border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font: inherit; overflow: hidden;
 }
-.em-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--ink) 35%, var(--line)); }
+@media (hover: hover) { .em-card:hover:not(:disabled) { border-color: color-mix(in srgb, var(--ink) 35%, var(--line)); } }
 .em-card:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .em-card[aria-pressed='true'] { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); }
 .em-card:disabled { cursor: not-allowed; }
@@ -266,7 +380,8 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
   font-size: 0.9375rem; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink);
 }
 .em-dropzone input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.em-dropzone:hover, .em-photos.is-dropping .em-dropzone { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 6%, var(--panel)); }
+.em-photos.is-dropping .em-dropzone { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 6%, var(--panel)); }
+@media (hover: hover) { .em-dropzone:hover { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 6%, var(--panel)); } }
 .em-dropzone:has(input:focus-visible) { outline: 2px solid var(--teal); outline-offset: 2px; }
 .em-dropzone-or { font-weight: 600; color: var(--ink-2); }
 .em-dropzone-hint { flex: 1 1 100%; font-size: 0.8125rem; color: var(--ink-3); }
@@ -283,25 +398,163 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
   position: sticky; top: 45vh; margin: 3rem 1rem; padding: 0.625rem 1rem; border-radius: 999px; background: var(--ink); color: var(--panel);
   font-weight: 700; box-shadow: var(--shadow); animation: em-pop var(--em-mid) var(--em-pop) both;
 }
-.em-collage { border: 0; margin: 0 0 1rem; padding: 0.875rem; min-width: 0; max-width: 27.75rem; background: var(--sunk); border-radius: var(--r-md); }
-/* The strip is the email's collage in small: one wide photo, then rows of two or three (COLLAGE_ROWS) */
-.em-collage-list { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.375rem; }
-.em-collage-item { position: relative; display: grid; gap: 0.125rem; min-width: 0; }
-.em-collage-item img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--sunk); }
-.em-collage-item.is-row-1 { grid-column: span 6; }
-.em-collage-item.is-row-1 img { aspect-ratio: 2; }
-.em-collage-item.is-row-2 { grid-column: span 3; }
-.em-collage-item.is-row-3 { grid-column: span 2; }
-.em-collage-n { position: absolute; top: 6px; left: 6px; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 12px; background: var(--ink); color: var(--panel); font-size: 0.8125rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
-.em-collage-moves { display: flex; justify-content: center; }
-.em-library { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
-.em-photo { display: grid; gap: 0.375rem; align-content: start; padding: 0.5rem; border: 1px solid var(--line); border-radius: var(--r-md); }
-.em-photo.is-hero { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-.em-photo-img { position: relative; display: block; }
-.em-photo-img img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--sunk); }
-.em-photo-name { font-weight: 700; font-size: 0.875rem; }
-.em-photo-alt { font-size: 0.8125rem; min-height: 44px; }
-.em-photo .check { min-height: 32px; font-size: 0.875rem; }
+/* ── The story's collage: drawn the way the email lays it out, and rearranged by dragging (drag.ts),
+   tapping a photo then its new spot, or the keyboard ── */
+.em-collage { border: 0; margin: 0 0 1rem; padding: 0.875rem; min-width: 0; max-width: 27.75rem; background: var(--sunk); border-radius: var(--r-md); transition: box-shadow var(--em-fast) var(--em-ease); }
+/* A library photo held over the page: the collage shows it's where it goes */
+.em-collage.is-taking { box-shadow: 0 0 0 2px var(--teal); }
+/* One height whatever it says (the Undo bar is the tallest), so the photos never shift when it changes */
+.em-collage-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; min-height: 3rem; margin: 0 0 0.5rem; font-size: 0.8125rem; line-height: 1.35; color: var(--ink-2); }
+.em-collage-hint > span { flex: 1 1 10rem; min-width: 0; }
+.em-collage:is(.is-tap, .is-key, .is-swap, .is-drag) .em-collage-hint { color: var(--ink); font-weight: 600; }
+.em-collage-hint-photo { flex: none; width: 32px; height: 32px; border-radius: 6px; object-fit: cover; }
+.em-collage-cancel { flex: none; margin-left: auto; }
+/* "press and hold" is said only where a finger does the dragging */
+.em-touch-only { display: none; }
+@media (hover: none) and (pointer: coarse) { .em-touch-only { display: inline; } }
+/* The strip is the email's collage in small, in the chosen layout (collage-layouts.mjs): each photo in its
+   spot at the email's own proportions, its 4px gutters scaled with it (aspect-ratio and spots set inline).
+   Positioned, so each spot's place can be read without the slide it may be in (homeRect). */
+.em-collage-list { position: relative; list-style: none; width: 100%; margin: 0 0 0.75rem; padding: 0; }
+.em-collage-item { position: absolute; margin: 0; min-width: 0; }
+/* The photo itself: what's dragged, tapped, or picked up with Space or Enter */
+.em-collage-pick {
+  position: relative; display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 4px; background: var(--line); color: inherit; font: inherit; cursor: grab;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  transition: transform var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease);
+}
+.em-collage-pick img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 4px; pointer-events: none; -webkit-user-drag: none; transition: opacity var(--em-fast) var(--em-ease); }
+@media (hover: hover) { html:not(.em-holding) .em-collage-pick:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--ink) 30%, transparent); } }
+.em-collage-pick:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+/* Where the held photo lands if she lets go: the photo, faded, ringed in teal */
+.em-collage-item.is-placeholder .em-collage-pick { box-shadow: 0 0 0 2px var(--teal); }
+.em-collage-item.is-placeholder .em-collage-pick img { opacity: 0.35; }
+/* Picked up by a tap or the keys: lifted; every other spot is somewhere it can go */
+.em-collage-item.is-held { z-index: 2; }
+.em-collage-item.is-held .em-collage-pick { transform: scale(1.03); box-shadow: 0 0 0 3px var(--teal), 0 12px 28px rgba(28, 27, 25, 0.24); }
+.em-collage-here {
+  position: absolute; inset: 0; display: grid; place-items: center; border-radius: 4px; background: color-mix(in srgb, var(--ink) 34%, transparent);
+  color: #fff; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0; transition: opacity var(--em-fast) var(--em-ease); pointer-events: none;
+}
+.em-collage-item.is-choice .em-collage-pick { outline: 2px dashed color-mix(in srgb, var(--teal) 70%, transparent); outline-offset: 2px; }
+.em-collage-item.is-choice .em-collage-pick:focus-visible .em-collage-here { opacity: 1; }
+@media (hover: hover) { .em-collage-item.is-choice .em-collage-pick:hover .em-collage-here { opacity: 1; } }
+@media (hover: none) { .em-collage-item.is-choice .em-collage-here { opacity: 0.9; background: color-mix(in srgb, var(--ink) 22%, transparent); } }
+.em-collage-n { position: absolute; top: 6px; left: 6px; min-width: 24px; height: 24px; padding: 0 6px; border-radius: 12px; background: var(--ink); color: var(--panel); font-size: 0.8125rem; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; pointer-events: none; }
+/* A photo's × and its "what part shows": drawn small on the photo, 44px to tap */
+.em-collage-x, .em-collage-focus {
+  position: absolute; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--ink); box-shadow: 0 1px 3px rgba(28, 27, 25, 0.28); cursor: pointer;
+  transition: background-color var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease);
+}
+.em-collage-x::before, .em-collage-focus::before { content: ''; position: absolute; inset: -7px; }
+.em-collage-x { top: 6px; right: 6px; }
+.em-collage-focus { right: 6px; bottom: 6px; }
+.em-collage-x svg { width: 16px; height: 16px; }
+/* A spot under 92px on a side (a small spot of some layouts on a phone) has no room for a 44px button
+   that leaves its middle free to tap: its buttons go, and a tap picks it up, as on any spot, with Take
+   out and What part shows beside Cancel in the status line. Photos.tsx measures the strip and marks
+   these spots, since a size container on the grid or a spot made Chrome lose their size. */
+.em-collage-item.is-small .em-collage-x, .em-collage-item.is-small .em-collage-focus { display: none; }
+.em-collage-item.is-small .em-collage-n { top: 4px; left: 4px; min-width: 20px; height: 20px; padding: 0 5px; font-size: 0.75rem; }
+.em-collage-item.is-small .em-collage-here { font-size: 0.6875rem; letter-spacing: 0.06em; }
+@media (hover: hover) { .em-collage-x:hover, .em-collage-focus:hover { background: var(--panel); transform: scale(1.08); } }
+.em-collage-x:focus-visible, .em-collage-focus:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+/* Room for more: where a library photo can be dropped at the end, and what to do when the collage is empty */
+.em-collage-add {
+  display: grid; place-items: center; min-height: 3.25rem; margin: 0 0 0.75rem; padding: 0.625rem 0.875rem; border: 2px dashed color-mix(in srgb, var(--ink) 18%, var(--line));
+  border-radius: 8px; text-align: center; font-size: 0.8125rem; line-height: 1.4; color: var(--ink-2); transition: border-color var(--em-fast) var(--em-ease), background-color var(--em-fast) var(--em-ease);
+}
+.em-collage-add.is-empty { min-height: 7rem; }
+.em-collage-add strong { display: block; color: var(--ink); font-size: 0.875rem; }
+.em-collage.is-taking .em-collage-add { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 8%, transparent); color: var(--ink); font-weight: 600; }
+/* Moving her photos to the spots that keep the most of them, when that keeps a good deal more */
+.em-fit { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.75rem; font-size: 0.875rem; color: var(--ink-2); margin: 0 0 0.75rem; }
+/* The layouts for this many photos, each drawn with her photos (Layouts.tsx) */
+.em-layout-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); gap: 0.5rem; margin: 0 0 0.75rem; }
+.em-layout {
+  position: relative; display: grid; justify-items: center; align-content: start; gap: 0.25rem; min-height: 44px; margin: 0;
+  padding: 0.5rem 0.375rem 0.5rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel);
+  text-align: center; text-transform: none; letter-spacing: 0; font-size: 0.8125rem; font-weight: 600; color: var(--ink-2); cursor: pointer;
+  transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease);
+}
+@media (hover: hover) { .em-layout:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); } }
+.em-layout:has(input:focus-visible) { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-layout.is-on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); color: var(--ink); }
+.em-layout-frame { display: grid; place-items: center; width: 88px; height: 72px; }
+.em-layout-mini { position: relative; display: block; }
+.em-layout-mini img { position: absolute; display: block; object-fit: cover; border-radius: 1px; background: var(--sunk); }
+.em-layout-name { line-height: 1.25; }
+.em-layout-best { padding: 0.0625rem 0.5rem; border-radius: 999px; background: var(--teal-soft); color: var(--teal); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; }
+/* The last change, and Undo, in the status line */
+.em-collage-hint.is-undo { padding: 0.375rem 0.375rem 0.375rem 0.75rem; border-radius: 8px; background: var(--ink); color: var(--panel); font-weight: 600; animation: em-pop var(--em-mid) var(--em-pop) both; }
+.em .em-undo-button { flex: none; margin-left: auto; background: transparent; color: var(--panel); border-color: color-mix(in srgb, var(--panel) 45%, transparent); box-shadow: none; }
+@media (hover: hover) { .em .em-undo-button:hover { background: color-mix(in srgb, var(--panel) 14%, transparent); } }
+/* The photo that follows the pointer: on the page's body (drag.ts), so it's styled outside .em. Over the page's
+   own bars and toasts, under the admin's open menu (200), which can't be open while a photo is held. */
+.em-ghost { position: fixed; top: 0; left: 0; z-index: 150; pointer-events: none; will-change: transform; }
+.em-ghost img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 8px; box-shadow: 0 2px 6px rgba(28, 27, 25, 0.14); transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.em-ghost.is-lifted img { transform: scale(1.05); box-shadow: 0 22px 44px rgba(28, 27, 25, 0.3), 0 6px 12px rgba(28, 27, 25, 0.16); }
+html.em-holding, html.em-holding * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+@media (prefers-reduced-motion: reduce) { .em-ghost img { transition: none; } }
+/* The library, compact: three across a phone, each photo with its two uses as 44px toggles (.em-chip) */
+.em-library { list-style: none; margin: 0 0 0.75rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 0.75rem 0.5rem; }
+.em-photo { display: grid; gap: 0.375rem; align-content: start; min-width: 0; }
+.em-photo-img {
+  position: relative; display: block; width: 100%; padding: 0; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; cursor: grab;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.em-photo-img.is-still { cursor: default; }
+.em-photo-img:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+.em-photo-img img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--sunk); -webkit-user-drag: none; pointer-events: none; }
+/* The top photo, outlined in ink on the photo itself */
+.em-photo.is-hero .em-photo-img img { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--ink); }
+/* The library photo being carried up to the collage, and the one waiting for her to pick what it replaces */
+.em-photo.is-lifted .em-photo-img img { opacity: 0.35; }
+.em-photo.is-waiting .em-photo-img img { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--teal); }
+.em-photo-name { font-weight: 700; font-size: 0.8125rem; line-height: 1.3; }
+/* A library photo's bin, on its top right corner (its number in the collage is on the left): drawn small,
+   44px to tap. It opens the photo's sheet at "Delete it for good?" */
+.em-photo { position: relative; }
+.em-photo-delete {
+  position: absolute; top: 4px; right: 4px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%;
+  background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--ink); box-shadow: 0 1px 3px rgba(28, 27, 25, 0.28); cursor: pointer;
+  transition: background-color var(--em-fast) var(--em-ease), color var(--em-fast) var(--em-ease);
+}
+.em-photo-delete::before { content: ''; position: absolute; inset: -8px; }
+.em-photo-delete svg { width: 15px; height: 15px; }
+@media (hover: hover) { .em-photo-delete:hover { background: var(--panel); color: var(--red); } }
+.em-photo-delete:focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+/* A use of a photo, as a toggle: a real radio or tick box inside, ticked in ink */
+.em-chip {
+  position: relative; display: flex; align-items: center; justify-content: center; gap: 0.25rem; min-height: 44px; margin: 0; padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink-2); cursor: pointer;
+  font-size: 0.8125rem; font-weight: 600; line-height: 1.2; letter-spacing: 0; text-transform: none; text-align: center;
+  transition: background-color var(--em-fast) var(--em-ease), color var(--em-fast) var(--em-ease), border-color var(--em-fast) var(--em-ease);
+}
+.em-chip:has(input:checked) { background: var(--ink); border-color: var(--ink); color: var(--panel); }
+.em-chip:has(input:checked)::before { content: '✓'; font-weight: 700; }
+.em-chip:has(input:focus-visible) { outline: 2px solid var(--teal); outline-offset: 2px; }
+.em-chip:has(input:disabled) { opacity: 0.5; cursor: default; }
+@media (hover: hover) { .em-chip:not(:has(input:checked)):hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); color: var(--ink); } }
+/* One photo's details (PhotoDetails in Photos.tsx): the whole photo beside its words, uses and what part shows */
+dialog.em-photo-sheet { width: min(44rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; }
+.em-photo-sheet-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.em-photo-sheet-img { display: block; justify-self: center; width: min(100%, calc(40vh * var(--r, 1))); max-height: 40vh; border-radius: 8px; overflow: hidden; background: var(--sunk); }
+.em-photo-sheet-img img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.em-photo-sheet-fields { display: grid; gap: 0.75rem; align-content: start; min-width: 0; }
+.em-photo-sheet-fields .field { margin: 0; }
+.em-photo-sheet-uses { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; }
+.em-photo-sheet-focus { justify-content: flex-start; gap: 0.5rem; white-space: normal; text-align: left; }
+/* Delete sits apart from Done, on the left; asking, the sheet says what deleting does, with Keep and Delete */
+.em-photo-sheet-delete { margin-right: auto; gap: 0.375rem; }
+.em-photo-sheet-ask { display: grid; gap: 0.625rem; padding: 0.875rem 1rem; border-radius: var(--r-md); background: var(--red-soft); }
+.em-photo-sheet-ask p { margin: 0; font-size: 0.9375rem; line-height: 1.4; color: var(--ink); }
+/* Two classes: the admin's .btn comes later in the page and would win over one */
+.em-photo-sheet-ask .em-photo-sheet-yes { background: var(--red); border-color: var(--red); color: #fff; }
+@media (hover: hover) { .em-photo-sheet-ask .em-photo-sheet-yes:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 86%, #000); border-color: color-mix(in srgb, var(--red) 86%, #000); color: #fff; } }
+@media (min-width: 640px) { .em-photo-sheet-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } .em-photo-sheet-img { max-height: 60vh; width: 100%; } }
+@media (max-width: 640px) { dialog.em-photo-sheet { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; } }
 .em input[type='radio'] { width: 1.25rem; min-height: 1.25rem; height: 1.25rem; flex: none; accent-color: var(--ink); box-shadow: none; }
 
 /* ── The story, the charity, the subject ── */
@@ -321,24 +574,81 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-section .badge { transition: background-color var(--em-mid) var(--em-ease), color var(--em-mid) var(--em-ease); }
 .em-section { transition: opacity var(--em-slow) var(--em-ease); }
 .em-section.is-locked { opacity: 0.55; }
-.em-photo, .em-collage-item, .em-kid, .em-test-person, .em-scheduled, .em-done, .em-todo li { animation: em-in var(--em-mid) var(--em-ease) both; }
-.em-photo .em-photo-img img, .em-kid img { transition: transform var(--em-slow) var(--em-ease); }
-.em-photo:hover .em-photo-img img { transform: scale(1.02); }
+.em-photo, .em-collage-item, .em-person, .em-scheduled, .em-done, .em-todo li { animation: em-in var(--em-mid) var(--em-ease) both; }
+.em-photo .em-photo-img img { transition: transform var(--em-slow) var(--em-ease); }
+@media (hover: hover) { .em-photo:hover .em-photo-img img { transform: scale(1.02); } }
 .em-photo { transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease); }
 .em-collage-item { will-change: transform; }
+
+/* ── What part of a photo shows (FocusPicker.tsx): the whole photo with its point, beside the email's two crops ── */
+dialog.em-focus { width: min(58rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow-y: auto; --em-focus-h: min(52vh, 30rem); }
+.em-focus-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.em-focus-stage { display: grid; place-items: center; min-width: 0; padding: 0.75rem; border-radius: var(--r-md); background: var(--sunk); }
+.em-focus-frame { position: relative; max-width: 100%; cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; border-radius: 6px; }
+.em-focus-frame img { display: block; width: 100%; height: 100%; border-radius: 6px; pointer-events: none; -webkit-user-drag: none; }
+.em-focus-frame:focus-visible { outline: 3px solid var(--teal); outline-offset: 4px; }
+.em-focus-dot { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.55), inset 0 0 0 1.5px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.3); pointer-events: none; }
+.em-focus-dot::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
+.em-focus-tap {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: calc(100% - 1rem); padding: 0.5rem 0.875rem; border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 82%, transparent); color: #fff; font-size: 0.875rem; font-weight: 700; text-align: center; pointer-events: none;
+}
+.em-focus-crops { --em-crop-h: 6.5rem; display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: 0.75rem; }
+.em-focus-crop { display: grid; gap: 0.375rem; align-content: start; min-width: 0; max-width: 100%; margin: 0; }
+/* An edge of its own, so a crop of a photo on white still shows where it stops */
+.em-focus-crop-box { display: block; overflow: hidden; border-radius: 6px; background: var(--sunk); outline: 1px solid var(--line); outline-offset: 0; }
+.em-focus-crop-box img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.em-focus-crop figcaption { font-size: 0.8125rem; line-height: 1.35; color: var(--ink-3); }
+.em-focus-crop figcaption strong { color: var(--ink); }
+.em-focus-now { flex: 1 1 100%; margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--ink-2); }
+.em-focus-actions { flex-wrap: wrap; }
+.em-focus-actions .em-focus-auto { margin-right: auto; }
+@media (min-width: 760px) {
+  .em-focus-body { grid-template-columns: minmax(0, 1fr) 15rem; align-items: start; }
+  .em-focus-crops { --em-crop-h: 7rem; }
+}
+@media (max-width: 640px) {
+  dialog.em-focus { width: calc(100vw - 1rem); max-height: calc(100dvh - 1rem); padding: 1rem; --em-focus-h: 44vh; }
+}
 @media (prefers-reduced-motion: reduce) {
   .em *, .em *::before, .em *::after { animation: none !important; transition: none !important; }
 }
 
-/* ── The charity ── */
-.em-kid { display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr); gap: 0.875rem; align-items: start; margin: 0 0 0.75rem; padding: 0.75rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); }
-.em-kid img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: var(--sunk); }
-.em-kid figcaption { display: grid; gap: 0.375rem; min-width: 0; }
-.em-kid-caption { font-weight: 700; }
-.em-kid-story { color: var(--ink-2); font-size: 0.875rem; line-height: 1.45; }
-.em-kid-link { font-size: 0.8125rem; font-weight: 600; color: var(--ink); }
-.em-charity > .em-hint { margin: 0; }
-@container (max-width: 560px) { .em-kid { grid-template-columns: minmax(0, 1fr); } }
+/* ── The charity: families and their photos as pictures to tap, each cropped as the email crops it ── */
+.em-pick { margin: 0 0 1.25rem; }
+.em-pick-hint { margin: 0 0 0.5rem; }
+.em-families, .em-kid-pics { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.625rem; }
+.em-families { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.em-kid-pics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.5rem; }
+.em-family, .em-kid-pic {
+  position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; padding: 0; text-align: left; cursor: pointer;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); color: var(--ink); font: inherit; overflow: hidden;
+  transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease);
+}
+.em-kid-pic { border-radius: 8px; background: var(--sunk); }
+@media (hover: hover) { .em-family:hover, .em-kid-pic:hover { border-color: color-mix(in srgb, var(--ink) 35%, var(--line)); } }
+.em-family:focus-visible, .em-kid-pic:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+/* Chosen: a ring outside the photo (an inset one would sit under it) and a check on it */
+.em-family[aria-pressed='true'], .em-kid-pic[aria-pressed='true'] { border-color: var(--ink); box-shadow: 0 0 0 2px var(--ink); }
+.em-family-photo { position: relative; display: block; }
+.em-family-photo img, .em-kid-pic img { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; object-fit: cover; background: var(--sunk); }
+.em-family-name { padding: 0.5rem 0.625rem 0; font-weight: 700; font-size: 0.875rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.em-family-when { padding: 0.125rem 0.625rem 0.5rem; font-size: 0.8125rem; line-height: 1.35; color: var(--ink-2); }
+.em-pick-check { position: absolute; top: 0.375rem; right: 0.375rem; display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; background: var(--ink); color: var(--bg); box-shadow: 0 0 0 2px var(--panel); }
+.em-pick-more { margin-top: 0.625rem; }
+/* "No reveal", beside the reveals: no photo of its own, so a panel the photos' shape */
+.em-story-own { display: grid; place-items: center; aspect-ratio: 2 / 1; padding: 0.5rem; background: var(--sunk); color: var(--ink-2); font-size: 0.8125rem; font-weight: 600; text-align: center; }
+.em-kid-words { padding: 0.75rem 0.875rem; border-radius: var(--r-md); background: var(--sunk); }
+.em-kid-words p { margin: 0; font-size: 0.875rem; line-height: 1.5; color: var(--ink-2); }
+.em-kid-words strong { color: var(--ink); }
+.em-kid-words .em-hint { margin-top: 0.375rem; font-size: 0.8125rem; }
+.em-kid-words a { font-weight: 600; color: var(--ink); white-space: nowrap; }
+@container (max-width: 560px) {
+  .em-families { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .em-kid-pics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+/* A small phone: photos stay at least 44px tall to tap */
+@container (max-width: 360px) { .em-kid-pics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* ── Send ── */
 .em-send { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
@@ -354,37 +664,164 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-send-real.is-set { border-color: var(--sage); box-shadow: inset 0 0 0 1px var(--sage); }
 .em-send-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.875rem; margin-top: 0.875rem; }
 .em-send-row .em-hint { margin: 0; }
-.em-test-list { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.375rem; }
-.em-test-person { display: flex; align-items: center; gap: 0.25rem; min-width: 0; padding: 0 0.25rem 0 0.875rem; border: 1px solid var(--line); border-radius: var(--r-md); }
-/* The name over the whole address, like a mail app's contacts: an address cut to "holly@soardcharity.c…" can't be checked */
-.em-test-person .check { flex: 1; min-width: 0; min-height: 44px; padding-block: 0.5rem; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 0.625rem; align-items: center; }
-.em-test-person .check input { grid-row: span 2; }
-.em-test-name { font-weight: 700; line-height: 1.25; }
-.em-test-email { min-width: 0; overflow-wrap: break-word; color: var(--ink-3); font-size: 0.875rem; font-weight: 400; line-height: 1.3; }
 .em-nowrap { white-space: nowrap; }
-.em-add-person { padding-left: 0; }
-.em-test-add { margin-top: 0.25rem; animation: em-fade var(--em-mid) var(--em-ease) both; }
-.em-test-add-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; gap: 0.5rem; }
+/*
+ * The people a test goes to, as cards: tap anywhere on one to tick it. Ticked, the face flips
+ * to a check (Gmail's select) and the card takes the ink edge a picked product has. One to a
+ * row on a phone, so a whole email fits; side by side, face over name, once two fit.
+ */
+.em-people { container-type: inline-size; margin: 0 0 0.25rem; }
+.em-test-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+.em-person { position: relative; min-width: 0; display: grid; }
+.em-person-card {
+  position: relative; display: grid; grid-template-columns: 2.5rem minmax(0, 1fr); align-items: center; gap: 0.75rem;
+  width: 100%; min-height: 4.25rem; margin: 0; padding: 0.75rem 0.875rem;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel); box-shadow: var(--shadow-sm);
+  font: inherit; font-size: 0.9375rem; font-weight: 500; letter-spacing: 0; text-transform: none; text-align: left; color: var(--ink);
+  cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none;
+  transition: border-color var(--em-fast) var(--em-ease), box-shadow var(--em-fast) var(--em-ease), transform var(--em-fast) var(--em-ease);
+}
+/* The X has its own column, like any row's trailing button: no text runs under it, so a tap on the
+   end of an email ticks that person and never takes them off. (With the X up by the name, the
+   email ran under its 44px target on an iPhone, and its pressed state covered the ".com".) */
+.em-person:has(.em-person-remove) .em-person-card { padding-right: 3.25rem; }
+@media (hover: hover) {
+  .em-person-card:hover { border-color: color-mix(in srgb, var(--ink) 30%, var(--line)); box-shadow: 0 6px 16px rgba(28, 27, 25, 0.08); transform: translateY(-1px); }
+}
+.em-person-card:active { transform: scale(0.985); }
+.em-person-card:has(input:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink), var(--shadow-sm); }
+.em-person-card:has(input:focus-visible), .em-person-card:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/*
+ * The flip is flat: the side going away narrows to nothing, then the other side widens in. A 3D
+ * flip leans on backface-visibility, which Safari ignored here and showed the check's mirror
+ * image on every unticked card. Each state's own transition runs: out at once, in after it.
+ */
+.em-avatar { position: relative; display: block; width: 2.5rem; height: 2.5rem; }
+.em-avatar > span {
+  position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%;
+  font-size: 0.9375rem; font-weight: 700; letter-spacing: 0.02em; line-height: 1;
+}
+/* Every face the same quiet stone, like a phone's contacts: in this admin teal, gold and clay are
+   badges (sent, pending, warning), so a clay face read as something wrong with that person. The
+   ink check is then the only mark on the list. */
+.em-avatar-face {
+  background: var(--sunk); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line);
+  transition: transform 140ms var(--em-ease) 120ms;
+}
+.em-avatar-back { background: var(--ink); color: #fff; transform: scaleX(0); transition: transform 120ms cubic-bezier(0.4, 0, 1, 1); }
+.em-person-card:has(input:checked) .em-avatar-face { transform: scaleX(0); transition: transform 120ms cubic-bezier(0.4, 0, 1, 1); }
+.em-person-card:has(input:checked) .em-avatar-back { transform: none; transition: transform 140ms var(--em-ease) 120ms; }
+.em-avatar svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+
+.em-person-text { display: grid; gap: 0.125rem; min-width: 0; }
+.em-person-name { font-size: 0.9375rem; font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The whole address, always: an address cut to "name@yourbusin…" can't be checked. It breaks
+   only when the card's too narrow, after its "@" or before a "." (breakable) */
+.em-person-email { font-size: 0.8125rem; line-height: 1.3; color: var(--ink-3); overflow-wrap: break-word; }
+/* The domain moves down whole ("name@" over "yourbusiness.com", not ".com" alone on a line), and
+   breaks before a "." only when even a line of its own is too narrow for it */
+.em-person-domain { display: inline-block; max-width: 100%; }
+.em .em-person-remove { position: absolute; top: 50%; right: 0.25rem; transform: translateY(-50%); color: var(--ink-3); }
+@media (hover: hover) { .em .em-person-remove:hover { color: var(--ink); } }
+
+/* Just taken off: the card holds its place, with the way back */
+.em-person-gone {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-height: 4.25rem; padding: 0.5rem 0.5rem 0.5rem 0.875rem;
+  border: 1px dashed color-mix(in srgb, var(--ink) 22%, var(--line)); border-radius: var(--r-md); background: var(--sunk);
+  font-size: 0.875rem; color: var(--ink-2); animation: em-fade var(--em-mid) var(--em-ease) both;
+}
+.em-person-gone b { color: var(--ink); }
+
+/* Adding someone: a dashed card at the end, which opens into the form across the row */
+.em .em-add-card { border-style: dashed; border-color: color-mix(in srgb, var(--ink) 22%, var(--line)); background: transparent; box-shadow: none; }
+.em-add-card .em-avatar-face { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 22%, var(--line)); }
+.em-person-add.is-open { grid-column: 1 / -1; }
+.em-test-add { padding: 0.75rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--sunk); animation: em-fade var(--em-mid) var(--em-ease) both; }
+/* Measured against the list (.em-people), not the page: stacked on a phone, name beside email
+   once there's room, and the buttons on the same line once there's room for those too */
+.em-test-add-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.5rem; }
+.em-test-add-actions { display: flex; gap: 0.5rem; }
+.em-test-add-actions .btn { flex: 1; }
+@container (min-width: 28rem) {
+  .em-test-add-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); }
+  .em-test-add-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .em-test-add-actions .btn { flex: none; }
+}
+@container (min-width: 44rem) {
+  .em-test-add-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; }
+  .em-test-add-actions { grid-row: 1; grid-column: 3; }
+}
+/* The error sits right under the email it's about, across the row */
+.em-test-add .em-error { grid-column: 1 / -1; margin: 0; }
+
+/* The smallest phones: a smaller face buys the email 14px, so even at 320px an address breaks only
+   after its @ (measured: the longest is 188px, its longest domain 141px) */
+@container (max-width: 17.5rem) {
+  .em-person-card { grid-template-columns: 2rem minmax(0, 1fr); gap: 0.625rem; padding: 0.75rem; }
+  .em-avatar { width: 2rem; height: 2rem; }
+  .em-avatar > span { font-size: 0.8125rem; }
+  .em-avatar svg { width: 1rem; height: 1rem; }
+}
+@container (min-width: 28rem) {
+  .em-test-list { grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr)); gap: 0.625rem; }
+  .em-person-card { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 0.75rem; min-height: 0; padding: 1rem; }
+  /* Side by side the X sits in the face's row, clear of the name and email below it */
+  .em-person:has(.em-person-remove) .em-person-card { padding-right: 1rem; }
+  .em .em-person-remove { top: 0.375rem; right: 0.375rem; transform: none; }
+  .em-person-gone { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0.25rem; padding: 1rem; }
+  .em-person-gone .btn { margin-left: -0.75rem; }
+}
 .em-done { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--sage); font-weight: 600; font-size: 0.875rem; }
 .em-done svg, .em-scheduled-icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 24; animation: em-draw var(--em-slow) var(--em-ease) both 80ms; }
 .em-scheduled { display: flex; gap: 0.75rem; align-items: flex-start; }
 .em-scheduled-icon { width: 28px; height: 28px; padding: 4px; border-radius: 50%; background: var(--sage); stroke: #fff; margin-top: 2px; }
 .em-scheduled-when { font-size: 1.0625rem; font-weight: 700; margin: 0 0 0.125rem; }
 .em-scheduled .em-hint { margin: 0; }
-.em-when { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-top: 0.25rem; }
-.em-when select { width: auto; min-width: 9rem; }
-.em-when .em-hint { margin: 0; }
+/* When it goes: the week's days and the usual times as buttons, one tap each; every other time in "Other time" */
+.em-when { display: grid; gap: 0.25rem; margin-top: 0.25rem; }
+.em-when .em-seg { margin: 0 0 0.75rem; }
+.em-when .em-seg-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.em-when .em-seg-option span { flex-direction: column; gap: 0.0625rem; min-height: 44px; padding: 0.375rem 0.25rem; line-height: 1.2; }
+.em-when .em-seg-option strong { font-weight: 700; white-space: nowrap; }
+.em-when .em-seg-option small { font-size: 0.8125rem; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.em-when .em-seg-option em { font-style: normal; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--teal); }
+.em-other-time { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.75rem; margin-top: 0.625rem; animation: em-fade var(--em-mid) var(--em-ease) both; }
+.em-other-time label { font-weight: 600; font-size: 0.875rem; }
+.em-other-time select { width: auto; min-width: 9rem; min-height: 44px; }
+.em-when > .em-hint { margin: 0; }
+/* Going again to the people who don't open it: a switch, and when it's on, its day, time and subject line */
+/* Every box in it may shrink: a field's own width (an input's 20 characters) would otherwise widen the whole column on a 320px phone */
+.em-again { min-width: 0; margin-top: 0.75rem; padding: 0.875rem 1rem; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.em-again.is-on { border-color: color-mix(in srgb, var(--teal) 45%, var(--line)); }
+.em-again-switch { display: flex; gap: 0.75rem; align-items: flex-start; margin: 0; font-size: 0.9375rem; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink); cursor: pointer; }
+.em-again-switch input { flex: none; width: 1.25rem; height: 1.25rem; margin: 0.125rem 0 0; accent-color: var(--teal); }
+.em-again-switch span { display: grid; gap: 0.1875rem; min-width: 0; }
+.em-again-switch strong { font-weight: 700; }
+.em-again-switch small { font-size: 0.8125rem; font-weight: 500; color: var(--ink-3); line-height: 1.4; }
+.em-again-switch:has(input:disabled) { cursor: default; color: var(--ink-3); }
+.em-again-fields { min-width: 0; grid-template-columns: minmax(0, 1fr); display: grid; gap: 0.75rem; margin-top: 0.875rem; padding-top: 0.875rem; border-top: 1px solid var(--line); animation: em-fade var(--em-mid) var(--em-ease) both; }
+.em-again-fields .em-seg { margin: 0; }
+.em-again-fields .field { margin: 0; }
+/* As wide as its box up to a comfortable width: sized to its longest time ("4:30 PM (same as the first)") it ran 6px off a 320px phone */
+.em-again-time select { width: 100%; min-width: 0; max-width: 20rem; min-height: 44px; }
+.em-again-subject input { width: 100%; min-width: 0; }
+.em-again-set { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line); display: grid; justify-items: start; gap: 0.375rem; }
+.em-again-set p { margin: 0; font-weight: 600; }
+.em-again-set .em-hint { font-weight: 400; overflow-wrap: anywhere; }
 .em-dialog { width: min(32rem, calc(100vw - 2rem)); padding: 1.25rem; border: 0; border-radius: var(--r-lg, 16px); background: var(--panel); color: var(--ink); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.24); }
 .em-dialog[open] { animation: em-pop var(--em-mid) var(--em-pop) both; }
 .em-dialog::backdrop { background: rgba(28, 28, 28, 0.45); animation: em-fade var(--em-mid) var(--em-ease) both; }
 .em-dialog h2 { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.875rem; }
 .em-dialog-facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.5rem 1rem; margin: 0 0 0.75rem; }
-.em-dialog-facts dt { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); padding-top: 0.2rem; }
+.em-dialog-facts dt { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); padding-top: 0.2rem; }
 .em-dialog-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .em-dialog .em-hint { margin: 0 0 1rem; }
 .em-dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 @container (max-width: 560px) {
-  .em-test-add-row { grid-template-columns: minmax(0, 1fr); }
+  /* Each cell at least as wide as its words ("Other time", "12:00 PM" in bold), as many to a row as fit */
+  .em-when .em-seg-row { grid-auto-flow: row; grid-template-columns: repeat(auto-fit, minmax(5.75rem, 1fr)); }
+  .em-when .em-days .em-seg-row { grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr)); }
   .em-send-row .btn { width: 100%; }
 }
 
@@ -417,3 +854,22 @@ dialog.em-picker[open] { display: flex; flex-direction: column; }
 .em-preview-foot { margin-top:.75rem }
 .em-measure { position:absolute;left:-10000px;top:0;width:0;height:0;overflow:hidden;visibility:hidden }
 .em-measure iframe { border:0 }
+/* Only the owner sees this: a word in the email's own layout too wide for a phone, which nothing on the page can fix */
+.em-owner.card { margin-bottom:.75rem;border-left:3px solid var(--red) }
+.em-owner h2 { font-size:.9375rem;margin:0 0 .375rem }
+.em-owner ul { margin:0 0 .5rem;padding-left:1.125rem;font-size:.875rem }
+.em-owner .em-hint { margin:0 0 .625rem }
+
+/* ── On a touch screen ──
+   iPhone Safari zooms the page into any text field under 16px when it's tapped, and leaves it zoomed with
+   the page's right edge off screen (seen in iOS Safari, 2026-11-17): every field on the page is 16px here.
+   And everything tapped is at least 44px each way (Apple's Human Interface Guidelines), the small
+   buttons and tick boxes included. scripts/check-email-phone.mjs holds the page to both. */
+@media (pointer: coarse) {
+  .em :is(input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']), select, textarea) { font-size: 16px; }
+  .em .btn { min-height: 44px; }
+  .em .check { min-height: 44px; }
+  .em .em-tap-link { display: inline-flex; align-items: center; min-height: 44px; }
+  /* The status line's tallest is the Undo bar with its 44px button: reserved, so photos never shift under it */
+  .em-collage-hint { min-height: 3.5rem; }
+}

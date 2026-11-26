@@ -7,9 +7,6 @@
 /** The email's own font, served by the admin. */
 export const FONT = "<style>@font-face{font-family:'DM Sans';src:url('/fonts/DMSans-Variable.woff2') format('woff2');font-weight:100 1000;font-style:normal;}</style>";
 
-/** The font link as email.mjs writes it, hidden from Outlook. */
-export const FONT_LINK = /<!--\[if !mso\]><!--><link href="https:\/\/fonts\.googleapis\.com[^>]*><!--<!\[endif\]-->/;
-
 /**
  * Any email's HTML with every Google Fonts link taken out and the admin's copy put in: an email sent
  * before the font link took its current form still draws in its own font, and nothing is blocked.

@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
 import { dbOf, json, readJson, requireRole } from '@/lib/admin-http';
 import { kitClient, readyTester, sendTest, templateFor } from '@/lib/sunny-side/kit.mjs';
-import { isSendDate, isSendDay, sendLabel } from '@/lib/sunny-side/special.mjs';
-import { otherWeek, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
+import { isSendDay, sendLabel } from '@/lib/sunny-side/special.mjs';
+import { workRefusal } from '@/lib/sunny-side/week-store.mjs';
 import { TEST_MAX, TESTS_PER_DAY, namesOf, testPeople, testRecipients } from '@/lib/sunny-side/testers.mjs';
 import { listPeople, logTest, testsSince } from '@/lib/sunny-side/test-store.mjs';
 import { weekEmail } from '@/lib/sunny-side/week-email';
@@ -22,16 +22,17 @@ export const POST: APIRoute = async (context) => {
   if (admin instanceof Response) return admin;
   const env = context.locals.runtime.env;
   if (!env.KIT_API_KEY) return json({ error: 'The site isn’t connected to Kit: KIT_API_KEY isn’t set.' }, 503);
+  if (!env.KIT_SENDER) return json({ error: 'The site has no sending address for the store’s emails: KIT_SENDER isn’t set. Without it Kit would send them as the charity.' }, 503);
 
   const body = await readJson(context.request);
   const send = body?.send;
-  if (!isSendDate(send)) return json({ error: 'Invalid request' }, 400);
+  if (typeof send !== 'string') return json({ error: 'Invalid request' }, 400);
   const now = new Date();
   const today = localDate(now.toISOString());
   const db = dbOf(context);
-  // Only the email being worked on can be tested (weekToWorkOn)
-  const refused = otherWeek(send as string, (await weekToWorkOn(db, today, now.getTime())).send);
-  if (refused) return json({ error: refused }, 409);
+  // Only the weekly email being worked on (weekToWorkOn) or an extra still to go can be tested
+  const { refused } = await workRefusal(db, send, today, now.getTime());
+  if (refused) return json({ error: refused }, refused === 'Invalid request' ? 400 : 409);
   // The day it'll go, so the test is the email as it'll be that day
   const day = typeof body?.day === 'string' ? body.day : (send as string);
   if (!isSendDay(send, day)) return json({ error: `Pick a day in the ${sendLabel(send as string)} email’s week.` }, 400);
@@ -63,6 +64,7 @@ export const POST: APIRoute = async (context) => {
       templateId,
       tagIds,
       description: `Test of the ${sendLabel(send as string)} email, from the store admin`,
+      from: env.KIT_SENDER,
       now: now.getTime(),
     });
     const at = now.toISOString();

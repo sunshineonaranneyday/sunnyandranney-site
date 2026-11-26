@@ -1,11 +1,12 @@
 /** @jsxImportSource preact */
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { FIRST_SCREEN, SITE } from '@/lib/sunny-side/email.mjs';
+import { FIRST_SCREEN, SITE, plain } from '@/lib/sunny-side/email.mjs';
 import { checkEvent, cleanEvent, sortedDates, toBriefEvent } from '@/lib/sunny-side/events.mjs';
 import { check, draftSale, sendDays, sendLabel } from '@/lib/sunny-side/special.mjs';
-import { kitProblems, pageEmail } from '@/lib/sunny-side/page-email.mjs';
-import { blankParts, checkParts, linesOf } from '@/lib/sunny-side/parts.mjs';
+import { kitProblems, pageEmail, pagePlace, sectionOf } from '@/lib/sunny-side/page-email.mjs';
+import { NO_SALE, blankParts, checkParts, linesOf } from '@/lib/sunny-side/parts.mjs';
 import { PICKS, checkWall } from '@/lib/sunny-side/wall.mjs';
+import { layoutFor, ratioOf } from '@/lib/sunny-side/collage-layouts.mjs';
 import { Charity } from './Charity';
 import { type Draft, Events } from './Events';
 import {
@@ -13,11 +14,13 @@ import {
   type Catalog,
   type EventRecord,
   type KitSend,
+  type LayoutReport,
   type Parts,
   type Photo,
   type Product,
   type SaleForm,
   type StoreEvent,
+  type Switch,
   type Wall,
   at,
   fieldId,
@@ -30,18 +33,16 @@ import {
   wallSnapshot,
   who,
 } from './model';
-import { Section } from './parts';
+import { FieldError, Section } from './parts';
 import { Photos } from './Photos';
-import { type Fit, type Focus, type Spill, Preview } from './Preview';
+import { type Fits, type Focus, type Spill, Preview } from './Preview';
 import { Products } from './Products';
 import { Sale } from './Sale';
 import { Send } from './Send';
-import { Story } from './Story';
+import { RevealPick } from './Story';
 import { Subject } from './Subject';
 
 const blankWall = (): Wall => ({ label: '', headline: '', picks: [], arranged: 'auto' });
-/** The order errors are listed in: the page's order, top to bottom. */
-const ORDER = ['kind', 'headline', 'tiers', 'percent', 'ends', 'picks', 'wall', 'photos', 'story', 'mission', 'subject', 'preheader'];
 
 /** An event as the preview draws it while it's still being typed: what's missing is filled in or left out. */
 function draftEvent(ev: StoreEvent): StoreEvent | null {
@@ -51,23 +52,45 @@ function draftEvent(ev: StoreEvent): StoreEvent | null {
   return { ...ev, id: ev.id || 'new-event', title: ev.title || 'Your event', when: ev.when || 'What’s on', dates };
 }
 
-/** Where too-wide words are, in the page's words, and what to do: always what and where, never "something". */
-const SPILL_WHERE: Record<Spill['part'], [string, string]> = {
+/**
+ * Where too-wide words are, in the page's words, and what to do: always what and where, never
+ * "something". Only what can be fixed here: a word in the email's own layout is code, so it's
+ * reported to the owner (layout.ts) and never shown to whoever is setting up the email.
+ */
+type Fixable = Exclude<Spill['part'], 'layout'>;
+const SPILL_WHERE: Record<Fixable, [string, string]> = {
   offer: ['the sale', 'Shorten it.'],
   wall: ['a product’s name', 'Give it a shorter name on its tile.'],
-  story: ['the story', 'Shorten it, or break it with a space.'],
-  photos: ['the story', 'Shorten it, or break it with a space.'],
+  story: ['the photos', 'Shorten it, or break it with a space.'],
+  photos: ['the photos', 'Shorten it, or break it with a space.'],
+  reveal: ['the reveal', 'Those words come from the charity’s site: pick another reveal, or fix them there.'],
   events: ['the events', 'Shorten it in the event.'],
   mission: ['the charity section', 'Those words come from the charity’s site: pick another family, or fix them there.'],
-  layout: ['the email’s own layout', 'That isn’t anything typed here, so it doesn’t stop saving: tell Peter.'],
 };
-const spillMessage = (s: Spill) => `“${s.word}” in ${SPILL_WHERE[s.part][0]} is ${s.over} px too wide for a small phone (320 px). ${SPILL_WHERE[s.part][1]}`;
+/** Each measuring frame's phone width (Preview: the smallest phone, a phone, the smallest phone bare). */
+const FRAME_WIDTH = { small: 320, phone: 390, bare: 320 } as const;
+type Frame = keyof typeof FRAME_WIDTH;
+/**
+ * The phone a spill was found on, by the frame that measured it. The bare frame is the email with its
+ * styles dropped, which the preview doesn't show, so it says where that happens: otherwise she'd be
+ * told a word is too wide while the preview shows it fitting.
+ */
+const SPILL_ON: Record<Frame, string> = {
+  small: 'a small phone (320 px)',
+  phone: 'a phone (390 px)',
+  bare: 'a small phone (320 px) in some mail apps, like the Gmail app with a Yahoo or iCloud address',
+};
+const spillMessage = (s: Spill & { part: Fixable; frame: Frame }) =>
+  `“${s.word}” in ${SPILL_WHERE[s.part][0]} is ${s.over} px too wide for ${SPILL_ON[s.frame]}. ${SPILL_WHERE[s.part][1]}`;
+/** How many times a layout report that didn't go through is sent again, and how far apart. */
+const REPORT_TRIES = 3;
+const REPORT_RETRY_MS = 20_000;
 
 /** "YYYY-MM-DD" in the store's time zone. */
 const easternDay = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(iso));
 
 export default function EmailApp(props: AppProps) {
-  const { send, label, today, last } = props;
+  const { send, label, today, presets, extra } = props;
   // ── The week: sale and products, saved together ──
   const [form, setForm] = useState<SaleForm>(() => saleFormOf(props.record?.special ?? null));
   const [wall, setWallState] = useState<Wall>(() => props.record?.wall ?? blankWall());
@@ -96,13 +119,24 @@ export default function EmailApp(props: AppProps) {
   const [catalogProblem, setCatalogProblem] = useState<string | null>(null);
   const [events, setEvents] = useState<EventRecord[]>(props.events);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [fit, setFit] = useState<{ small: Fit | null; phone: Fit | null }>({ small: null, phone: null });
+  const [fit, setFit] = useState<Fits>({ small: null, phone: null, bare: null });
+  // The owner's view of problems in the email's own layout: those reported from this page before (layout-store.mjs)
+  const [layoutReports, setLayoutReports] = useState(props.layoutReports);
+  const reported = useRef(new Set<string>());
+  // Times each word's report didn't go through, and a tick that sends the ones still waiting again
+  const tries = useRef(new Map<string, number>());
+  const [retry, setRetry] = useState(0);
   const [focus, setFocus] = useState<Focus>('offer');
   /** The part of the email Staci is working on, from where her focus or tap is. */
   const follow = (e: Event) => {
-    const section = (e.target as HTMLElement).closest('.em-section')?.id;
-    const part: Focus | null =
-      ({ 'em-sale': 'offer', 'em-products': 'wall', 'em-photos': 'photos', 'em-story': 'story', 'em-events': 'events', 'em-charity': 'mission', 'em-lines': 'offer', 'em-send': 'offer' } as Record<string, Focus>)[section ?? ''] ?? null;
+    const target = e.target as HTMLElement;
+    const section = target.closest('.em-section')?.id;
+    // Picking the top photo shows the top of the email, where it goes ("offer" is the top: the
+    // preview has no mark for the masthead); the rest of Photos is the collage
+    const topPhoto = section === 'em-photos' && Boolean(target.closest('label')?.querySelector('input[name="em-hero"]'));
+    const part: Focus | null = topPhoto
+      ? 'offer'
+      : (({ 'em-sale': 'offer', 'em-products': 'wall', 'em-photos': 'photos', 'em-reveal': 'reveal', 'em-events': 'events', 'em-charity': 'mission', 'em-lines': 'offer', 'em-send': 'offer' } as Record<string, Focus>)[section ?? ''] ?? null);
     if (part && part !== focus) setFocus(part);
   };
 
@@ -116,9 +150,15 @@ export default function EmailApp(props: AppProps) {
       .catch((err: Error) => setCatalogProblem(`The shop’s products didn’t load (${err.message}). Reload the page to try again.`));
   }, []);
 
+  // The sections turned off (parts.mjs SWITCHES): the email goes without them, and what's in them
+  // stays as it is, finished or not, for when they're turned back on
+  const isOff = (key: Switch) => parts.off.includes(key);
+  const saleOff = isOff('sale');
+  const productsOff = isOff('products');
+  const turn = (key: Switch, on: boolean) => setParts((p) => ({ ...p, off: on ? p.off.filter((k) => k !== key) : [...p.off, key] }));
   const special = useMemo(() => specialOf(form), [form]);
-  const saleErrors = useMemo(() => (form.kind ? check(special, day) : {}), [special, form.kind, day]);
-  const wallErrors = useMemo(() => (wall.picks.length ? checkWall(wall, { catalog: catalog ?? undefined, send: day }) : {}), [wall, catalog, day]);
+  const saleErrors = useMemo(() => (form.kind && !saleOff ? check(special, day) : {}), [special, form.kind, day, saleOff]);
+  const wallErrors = useMemo(() => (wall.picks.length && !productsOff ? checkWall(wall, { catalog: catalog ?? undefined, send: day }) : {}), [wall, catalog, day, productsOff]);
   const dirtySale = saleSnapshot(form) !== saleSnapshot(saved.form);
   const dirtyWall = wallSnapshot(wall) !== wallSnapshot(saved.wall);
   const dirtyParts = partsSnapshot(parts) !== partsSnapshot(saved.parts);
@@ -126,7 +166,9 @@ export default function EmailApp(props: AppProps) {
   const photosById = useMemo(() => new Map(photos.map((p) => [p.id, p])), [photos]);
   const saleOk = Boolean(form.kind) && !Object.keys(saleErrors).length;
   const sale = useMemo(() => draftSale(form.kind ? special : { ...special, kind: 'tiers' }), [special, form.kind]);
-  const partsErrors = useMemo(() => checkParts(parts, { sale: saleOk ? sale : null, photos: photosById, kids: props.kids }), [parts, saleOk, sale, photosById]);
+  // The subject line is checked against the sale the email has: none, when it's off
+  const linesSale = saleOff ? NO_SALE : saleOk ? sale : null;
+  const partsErrors = useMemo(() => checkParts(parts, { sale: linesSale, photos: photosById, kids: props.kids, reveals: props.reveals }), [parts, linesSale, photosById]);
 
   const set = (patch: Partial<SaleForm>) => {
     setForm((f) => ({ ...f, ...patch }));
@@ -143,7 +185,7 @@ export default function EmailApp(props: AppProps) {
   };
   const shownParts = (key: string) => partsErrors[key];
   const touch = (key: string) => setTouched((t) => ({ ...t, [key]: true }));
-  const shownSale = (key: string) => (attempted || touched[key.split('.').slice(0, key.startsWith('tiers.') ? 2 : 1).join('.')] ? saleErrors[key] : undefined);
+  const shownSale = (key: string) => (attempted || touched[key.split('.').slice(0, /^(tiers|windows)\./.test(key) ? 2 : 1).join('.')] ? saleErrors[key] : undefined);
   // A product's problem shows as soon as it's picked: it's about the store, not about typing
   const shownWall = (key: string) => (key === 'picks' && !attempted ? undefined : wallErrors[key]);
 
@@ -161,32 +203,67 @@ export default function EmailApp(props: AppProps) {
   const wallReady = Boolean(catalog) && wall.picks.length >= PICKS[0] && wall.picks.length <= PICKS[1];
   // The same email the Kit draft is made from (page-email.mjs), so Kit gets what the page shows
   const { brief, sections } = useMemo(
-    () => pageEmail({ sale, wall, parts, photos: photosById, kids: props.kids, catalog, events: shownEvents, impact: props.impact, send: day, site: SITE }),
+    () => pageEmail({ sale, wall, parts, photos: photosById, kids: props.kids, reveals: props.reveals, catalog, events: shownEvents, impact: props.impact, hours: props.hours, send: day, site: SITE }),
     [sale, wall, parts, photosById, catalog, shownEvents, day],
   );
 
-  const fold = fit.small && fit.phone ? Math.max(fit.small.buttonAt, fit.phone.buttonAt) : null;
-  // What's too wide for a small phone, named, with where to fix it (the 320 px phone first: it's the tightest)
-  const spillAt = [...(fit.small?.spills ?? []), ...(fit.phone?.spills ?? [])][0] ?? null;
+  const frames = (['small', 'phone', 'bare'] as const).map((k) => [k, fit[k]] as const);
+  const measured = Boolean(fit.small && fit.phone);
+  // Where the sale button lands on a phone; an email without the sale has no button to land
+  const fold = measured && !saleOff ? Math.max(...frames.map(([, f]) => f?.buttonAt ?? 0)) : null;
+  // What's too wide for a small phone, named, with where to fix it (the 320 px phone first: it's the
+  // tightest). Words in the email's own layout aren't hers to fix: they go to the owner instead.
+  const spills = frames.flatMap(([k, f]) => (f?.spills ?? []).map((s) => ({ ...s, width: FRAME_WIDTH[k], frame: k })));
+  const spillAt = (spills.find((s) => s.part !== 'layout') as (Spill & { part: Fixable; frame: Frame }) | undefined) ?? null;
+  const layoutSpills = spills.filter((s) => s.part === 'layout');
   const spill = Boolean(spillAt);
   const spillWords = spillAt ? spillMessage(spillAt) : null;
-  const longNames = useMemo(() => new Set([...(fit.small?.longNames ?? []), ...(fit.phone?.longNames ?? [])]), [fit]);
+  const longNames = useMemo(() => new Set(frames.flatMap(([, f]) => f?.longNames ?? [])), [fit]);
+  // A layout problem is reported once per word for each page load: the owner sees it on this page, as
+  // the server now has it (how often, since when). One that doesn't go through (the connection
+  // dropped) is sent again a few times, or the owner would never hear of it from this page.
+  useEffect(() => {
+    for (const s of layoutSpills) {
+      if (reported.current.has(s.word) || (tries.current.get(s.word) ?? 0) >= REPORT_TRIES) continue;
+      reported.current.add(s.word);
+      void call<{ report?: LayoutReport }>('/api/admin/email/layout/', 'POST', { word: s.word, over: s.over, width: s.width, send }).then((res) => {
+        if (res.ok) {
+          const saved = res.body.report;
+          if (props.owner && saved) setLayoutReports((list) => [saved, ...list.filter((r) => r.word !== saved.word)]);
+          return;
+        }
+        reported.current.delete(s.word);
+        const n = (tries.current.get(s.word) ?? 0) + 1;
+        tries.current.set(s.word, n);
+        if (n < REPORT_TRIES) setTimeout(() => setRetry((t) => t + 1), REPORT_RETRY_MS);
+      });
+    }
+  }, [layoutSpills.map((s) => s.word).join('|'), retry]);
+  async function clearLayoutReports() {
+    const res = await call('/api/admin/email/layout/', 'DELETE', {});
+    if (res.ok) {
+      setLayoutReports([]);
+      reported.current.clear();
+      tries.current.clear();
+    } else toast(res.error, 'error');
+  }
   const layoutProblem =
     fold !== null && fold > FIRST_SCREEN
-      ? `On a phone the sale button lands ${fold - FIRST_SCREEN} px below the first screen. Shorten the headline${form.kind === 'tiers' ? ' or use fewer tiers' : ''}.`
-      : spillWords && spillAt!.part !== 'layout'
+      ? `On a phone the sale button lands ${fold - FIRST_SCREEN} px below the first screen.${form.kind === 'tiers' ? ' Use fewer tiers.' : ''}`
+      : spillWords
         ? spillWords
         : longNames.size
           ? `${longNames.size === 1 ? 'A product name runs' : `${longNames.size} product names run`} past two lines on a small phone. Give ${longNames.size === 1 ? 'it' : 'them'} a shorter name.`
           : null;
 
   // The section that fixes it, for the error list's link
-  const SECTION: Record<Spill['part'], string> = { offer: 'em-sale', wall: 'em-products', story: 'em-story', photos: 'em-story', events: 'em-events', mission: 'em-charity', layout: 'em-preview' };
+  const SECTION: Record<Fixable, string> = { offer: 'em-sale', wall: 'em-products', reveal: 'em-reveal', story: 'em-photos', photos: 'em-photos', events: 'em-events', mission: 'em-charity' };
   const layoutSection = layoutProblem === spillWords && spillAt ? SECTION[spillAt.part] : longNames.size && layoutProblem && !(fold !== null && fold > FIRST_SCREEN) ? 'em-products' : 'em-sale';
 
   // ── Saving ──
   const errors = { ...saleErrors, ...wallErrors, ...partsErrors };
-  const errorList = Object.entries(errors).sort(([a], [b]) => ORDER.indexOf(a.split('.')[0]) - ORDER.indexOf(b.split('.')[0]));
+  // In the page's order, top to bottom (PAGE_SECTIONS)
+  const errorList = Object.entries(errors).sort(([a], [b]) => pagePlace(sectionOf(a)) - pagePlace(sectionOf(b)));
   const summaryRef = useRef<HTMLDivElement>(null);
 
   /** Saves the week. True once it's saved (or there was nothing to save), false when it can't be yet. */
@@ -224,6 +301,13 @@ export default function EmailApp(props: AppProps) {
     const res = await call('/api/admin/email/week/', 'DELETE', { send, since: version.updatedAt });
     setSaving(false);
     if (!res.ok) return setProblem(res.error);
+    // An extra email is gone: back to the weekly one
+    if (extra) {
+      gone.current = true;
+      toast(`Deleted the ${label} email`);
+      location.assign('/admin/email/');
+      return;
+    }
     setVersion(null);
     setForm(saleFormOf(null));
     setWallState(blankWall());
@@ -244,22 +328,14 @@ export default function EmailApp(props: AppProps) {
     setProblem(null);
   }
 
-  /** Last week's sale as this week's, with its last day left to set (a sale with no discount has none). */
-  const startFromLast = () => {
-    if (!last) return;
-    set({ ...saleFormOf(last.special), ends: '' });
-    setTouched({});
-    setAttempted(false);
-    const discount = last.special.kind !== 'headline';
-    window.setTimeout(() => document.getElementById(fieldId(discount ? 'ends' : 'headline'))?.focus(), 0);
-    toast(discount ? `Started from the ${last.label} sale. Set its last day.` : `Started from the ${last.label} headline.`);
-  };
 
   // Leaving with unsaved changes asks first; ⌘S / Ctrl+S saves
   const leaving = dirty || Boolean(draft);
+  // Set once an extra email is deleted, so going back to the weekly one doesn't ask about it
+  const gone = useRef(false);
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
-      if (!leaving) return;
+      if (!leaving || gone.current) return;
       e.preventDefault();
       e.returnValue = '';
     };
@@ -277,15 +353,39 @@ export default function EmailApp(props: AppProps) {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // The phone's "See the preview" button steps aside once the preview itself is on screen
-  const [seesPreview, setSeesPreview] = useState(false);
+  // On a phone or upright iPad the preview is a sheet over the page: Preview opens it at the
+  // part she's working on, and "Back to editing" closes it with the page just where she left it (as
+  // Shopify's and Canva's phone editors keep editing and preview a tap apart). It was 11 screens down
+  // the page, below Send. While it's open the page under it is out of reach, and Escape closes it.
+  const [previewing, setPreviewing] = useState(false);
+  const jump = useRef<HTMLButtonElement>(null);
+  const back = useRef<HTMLButtonElement>(null);
+  // Whatever opened the preview gets focus back when it closes: the button, or, if it isn't showing, what had focus
+  const opener = useRef<HTMLElement | null>(null);
+  const openPreview = () => {
+    opener.current = document.activeElement as HTMLElement | null;
+    setPreviewing(true);
+  };
+  const closePreview = () => {
+    setPreviewing(false);
+    requestAnimationFrame(() => {
+      const to = [jump.current, opener.current].find((el) => el?.isConnected && getComputedStyle(el).visibility === 'visible' && getComputedStyle(el).display !== 'none');
+      to?.focus({ preventScroll: true });
+    });
+  };
   useEffect(() => {
-    const preview = document.getElementById('em-preview');
-    if (!preview || typeof IntersectionObserver === 'undefined') return;
-    const watch = new IntersectionObserver(([entry]) => setSeesPreview(entry.isIntersecting), { rootMargin: '0px 0px -25% 0px' });
-    watch.observe(preview);
-    return () => watch.disconnect();
-  }, []);
+    if (!previewing) return;
+    back.current?.focus({ preventScroll: true });
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && closePreview();
+    // Wide enough for the preview beside the form again (the button isn't drawn there): no sheet
+    const wide = () => jump.current && getComputedStyle(jump.current).display === 'none' && setPreviewing(false);
+    window.addEventListener('keydown', key);
+    window.addEventListener('resize', wide);
+    return () => {
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('resize', wide);
+    };
+  }, [previewing]);
 
   // ── Where each part stands ──
   const saleState = !form.kind ? { state: 'Not set', tone: 'todo' as const } : Object.keys(saleErrors).length ? { state: 'Needs fixing', tone: 'bad' as const } : { state: 'Ready', tone: 'ok' as const };
@@ -304,6 +404,7 @@ export default function EmailApp(props: AppProps) {
     parts: saved.parts,
     photos: photosById,
     kids: props.kids,
+    reveals: props.reveals,
     catalog,
     send: day,
     check,
@@ -313,7 +414,7 @@ export default function EmailApp(props: AppProps) {
   });
   // Unsaved changes are saved first, so what counts is what's on the page once it saves
   const kitTodo = dirty
-    ? kitProblems({ special: form.kind ? special : null, wall: wall.picks.length ? wall : null, parts, photos: photosById, kids: props.kids, catalog, send: day, check, checkWall, checkParts, sale: saleOk ? sale : null })
+    ? kitProblems({ special: form.kind ? special : null, wall: wall.picks.length ? wall : null, parts, photos: photosById, kids: props.kids, reveals: props.reveals, catalog, send: day, check, checkWall, checkParts, sale: saleOk ? sale : null })
     : toKit;
   const story = parts.story;
   const kid = props.kids.find((k) => k.slug === parts.kid) ?? props.kids[0];
@@ -325,41 +426,147 @@ export default function EmailApp(props: AppProps) {
     : kitTodo.length
       ? { state: `${kitTodo.length} to do`, tone: 'todo' as const }
       : { state: 'Ready', tone: 'ok' as const };
-  const lines = saleOk ? linesOf(parts, sale) : { subject: parts.subject, preheader: parts.preheader };
-  const plainLine = (t: string) => t.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#8217;/g, '’');
-  const inbox = { subject: plainLine(lines.subject), preheader: plainLine(lines.preheader) };
-  const storyState = story.headline && story.body ? { state: story.photos.length ? `Ready · ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}` : 'Ready, no photos', tone: 'ok' as const } : { state: 'Not written', tone: 'todo' as const };
+  const lines = saleOff ? linesOf(parts, null) : saleOk ? linesOf(parts, sale) : { subject: parts.subject, preheader: parts.preheader };
+  // Exactly what Kit gets (week-email.ts): the same plain text
+  const inbox = { subject: plain(lines.subject), preheader: plain(lines.preheader) };
+  const reveal = parts.reveal ? props.reveals.find((r) => r.slug === parts.reveal) : null;
+  const revealState = parts.reveal
+    ? reveal
+      ? { state: `${reveal.name}’s reveal · ${reveal.short}`, tone: 'ok' as const }
+      : { state: 'Pick again', tone: 'bad' as const }
+    : { state: 'None this week', tone: 'ok' as const };
+  // ── Folding: a finished section shows as a line to open, the way Mailchimp's campaign checklist
+  // shows each finished part; an unfinished one stays open, and one with a problem can't be folded.
+  // Whether a section starts open is settled when the page opens, so finishing one never folds it
+  // under her fingers. ──
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const startsOpen = useRef<Record<string, boolean>>({});
+  const folding = (id: string, tone: 'ok' | 'todo' | 'bad' | 'off') => {
+    // A section that's off opens folded, like a finished one: there's nothing in it to do
+    if (!(id in startsOpen.current)) startsOpen.current[id] = tone !== 'ok' && tone !== 'off';
+    const open = tone === 'bad' || (opened[id] ?? startsOpen.current[id]);
+    return { open, onToggle: tone === 'bad' && open ? undefined : () => setOpened((o) => ({ ...o, [id]: !open })) };
+  };
+  // A link to a part of a folded section (the list of what to fix, Send's list of what's left, the
+  // Today page) opens it first, then goes there
+  useEffect(() => {
+    const unfold = (el: Element | null) => {
+      const section = el?.closest<HTMLElement>('.em-section');
+      if (!section?.classList.contains('is-folded')) return false;
+      setOpened((o) => ({ ...o, [section.id]: true }));
+      return true;
+    };
+    const go = (el: HTMLElement) =>
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ block: 'start' });
+        el.focus?.({ preventScroll: true });
+      });
+    const click = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.('a[href^="#"]');
+      if (!a) return;
+      const id = decodeURIComponent(a.getAttribute('href')!.slice(1));
+      const el = document.getElementById(id);
+      if (!el || !unfold(el)) return;
+      e.preventDefault();
+      history.replaceState(null, '', `#${id}`);
+      go(el);
+    };
+    document.addEventListener('click', click, true);
+    const arrived = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (arrived && unfold(arrived)) go(arrived);
+    return () => document.removeEventListener('click', click, true);
+  }, []);
+  const shortDay = (iso: string) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '');
+  const ends = form.ends ? ` · ends ${shortDay(form.ends)}` : '';
+  const summaries: Record<string, string> = {
+    'em-lines': inbox.subject ? `“${inbox.subject}”` : '',
+    'em-sale':
+      form.kind === 'percent'
+        ? `${special.percent}% off everything${ends}`
+        : form.kind === 'tiers'
+          ? `Spend more, save more: ${special.tiers.map((t) => `$${(t.spend ?? 0).toLocaleString('en-US')} → ${t.percent}%`).join(', ')}${ends}`
+          : form.kind === 'headline'
+            ? 'No sale this week'
+            : '',
+    'em-products': n ? `${n} products, ${wall.arranged === 'auto' ? 'arranged for you' : 'in your order'}` : '',
+    'em-reveal': reveal ? `${reveal.name}’s reveal, ${reveal.short}` : 'No reveal this week',
+    'em-photos': story.photos.length
+      ? `${layoutFor(story.layout, story.photos.map((id) => ratioOf(photosById.get(id)))).name}, ${story.photos.length} photo${story.photos.length === 1 ? '' : 's'}`
+      : 'No photos in the collage',
+    'em-events': shownEvents.length ? shownEvents.map((e) => e?.title).filter(Boolean).join(', ') : 'No events this week',
+    'em-charity': kid ? `${kid.name}, ${parts.kidPhoto ? 'one of their photos' : 'their finished room'}` : '',
+  };
+  const linesTone: 'ok' | 'todo' | 'bad' = partsErrors.subject || partsErrors.preheader ? 'bad' : parts.subject ? 'ok' : 'todo';
+  const photosTone: 'ok' | 'bad' = partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok';
+  const eventsTone: 'ok' | 'todo' = inEmail ? 'ok' : 'todo';
+
   const checks = [
-    { ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` },
-    { ok: fold === null ? null : !spill, text: spillWords ?? 'Everything fits a small phone (320 px).' },
-    ...(wallReady && fold !== null ? [{ ok: !longNames.size, text: longNames.size ? `${longNames.size} product name${longNames.size === 1 ? '' : 's'} run past two lines.` : 'Every product name fits two lines.' }] : []),
-    ...(!wallReady ? [{ ok: null, text: n ? `Pick ${Math.max(PICKS[0] - n, 0) || 'no more than 9'} more to see the products here.` : `The products show here once ${PICKS[0]} are picked.` }] : []),
+    ...(saleOff
+      ? []
+      : [{ ok: fold === null ? null : fold <= FIRST_SCREEN, text: fold === null ? 'Checking the fit…' : fold <= FIRST_SCREEN ? `The sale button is on a phone’s first screen, above the teal marks (${fold} of ${FIRST_SCREEN} px).` : `The sale button lands ${fold - FIRST_SCREEN} px below a phone’s first screen, the teal marks.` }]),
+    // Measured as sent and bare (no style block, no web fonts, as the Gmail app shows it to other accounts).
+    // A word in the email's own layout isn't hers, so it never makes this untrue for her: it goes to the owner.
+    { ok: measured ? !spill : null, text: !measured ? 'Checking the fit…' : (spillWords ?? (layoutSpills.length ? 'Everything set up here fits a small phone (320 px).' : 'Everything fits a small phone (320 px), even in the Gmail app.')) },
+    ...(productsOff ? [] : wallReady && measured ? [{ ok: !longNames.size, text: longNames.size ? `${longNames.size} product name${longNames.size === 1 ? '' : 's'} run past two lines.` : 'Every product name fits two lines.' }] : []),
+    ...(productsOff || wallReady ? [] : [{ ok: null, text: n ? `Pick ${Math.max(PICKS[0] - n, 0) || 'no more than 9'} more to see the products here.` : `The products show here once ${PICKS[0]} are picked.` }]),
   ];
 
+  /**
+   * A section's on/off switch, its state and its summary while it's off, for a section that can be
+   * turned off (parts.mjs SWITCHES). Off, it says so and keeps what's in it out of sight.
+   */
+  const OFF_SAYS: Record<Switch, string> = {
+    sale: 'No sale in this email. Its photo goes to the shop.',
+    products: 'No products in this email.',
+    photos: 'No photos in this email: no top photo and no collage.',
+    events: 'No events in this email. They stay on the store’s list for the next one.',
+    charity: 'No charity section in this email.',
+  };
+  const switchOf = (key: Switch, id: string, state: { state: string; tone: 'ok' | 'todo' | 'bad' }, summary: string) => {
+    const off = isOff(key);
+    const shown = off ? { state: 'Off', tone: 'off' as const } : state;
+    return { on: !off, onSwitch: (on: boolean) => turn(key, on), state: shown.state, tone: shown.tone, summary: off ? OFF_SAYS[key] : summary, ...folding(id, shown.tone) };
+  };
+  const offNote = (key: Switch) => (
+    <p class="em-off-note">
+      {OFF_SAYS[key]} What’s set here stays, for when it’s turned back on.
+    </p>
+  );
+
+  const status = locked
+    ? kitSend?.status === 'completed'
+      ? 'Sent'
+      : 'Scheduled: cancel the send to change it'
+    : dirty
+      ? 'Unsaved changes'
+      : version
+        ? `Saved ${at.format(new Date(version.updatedAt))} by ${who(version.updatedBy)}`
+        : 'Nothing saved yet';
+
   return (
-    <div class={`em${dirty ? ' is-dirty' : ''}${seesPreview ? ' sees-preview' : ''}`}>
-      <div class="em-bar">
+    <div class={`em${dirty ? ' is-dirty' : ''}${previewing ? ' is-previewing' : ''}`}>
+      <div class="em-bar" {...(previewing ? { inert: true } : {})}>
         <div class="em-bar-title">
-          <h1>Weekly email</h1>
+          <h1>{extra ? 'Extra email' : 'Weekly email'}</h1>
           <p class="em-which">
             <span>
               The <strong>{label}</strong> email
             </span>
-            {props.sentLink && <a href="/admin/email/sent/">Sent emails</a>}
+            <a href="/admin/email/sent/">Sent emails</a>
+          </p>
+          <p class="em-status-top" aria-hidden="true">
+            {status}
           </p>
         </div>
         <div class="em-bar-save">
           <span class="em-status" aria-live="polite">
-            {locked
-              ? kitSend?.status === 'completed'
-                ? 'Sent'
-                : 'Scheduled: cancel the send to change it'
-              : dirty
-                ? 'Unsaved changes'
-                : version
-                  ? `Saved ${at.format(new Date(version.updatedAt))} by ${who(version.updatedBy)}`
-                  : 'Nothing saved yet'}
+            {status}
           </span>
+          {/* Beside Save, where Kit and Mailchimp keep Preview: in the top bar on an upright iPad, in the
+              toolbar at the foot of a phone's screen (email.css). Not drawn once the preview is beside the form. */}
+          <button type="button" class="em-jump btn" ref={jump} aria-haspopup="dialog" onClick={openPreview}>
+            Preview
+          </button>
           {dirty && (
             <button type="button" class="btn" onClick={discard} disabled={saving}>
               Discard
@@ -371,8 +578,10 @@ export default function EmailApp(props: AppProps) {
         </div>
       </div>
 
+      <Emails emails={props.emails} send={send} today={today} max={props.extraMax} inert={previewing} />
+
       <div class="em-grid">
-        <div class="em-edit" onFocusCapture={follow} onPointerDown={follow}>
+        <div class="em-edit" onFocusCapture={follow} onPointerDown={follow} {...(previewing ? { inert: true } : {})}>
           {attempted && (errorList.length > 0 || layoutProblem) && (
             <div class="em-summary" role="alert" tabIndex={-1} ref={summaryRef}>
               <p>
@@ -405,32 +614,38 @@ export default function EmailApp(props: AppProps) {
             </div>
           )}
 
-          <Section n={1} id="em-sale" locked={locked} title="The sale" state={saleState.state} tone={saleState.tone}>
-            <Sale form={form} special={special} errors={saleErrors} shown={shownSale} set={set} touch={touch} last={last} startFromLast={startFromLast} />
-          </Section>
-
-          <Section n={2} id="em-products" locked={locked} title="The products" state={wallState.state} tone={wallState.tone}>
-            <Products wall={wall} setWall={setWall} catalog={catalog} collections={collections} catalogProblem={catalogProblem} shown={shownWall} longNames={longNames} today={today} />
-          </Section>
-
-          <Section n={3} id="em-photos" locked={locked} title="Photos" state={`${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.photos.length} in the story`} tone={partsErrors.photos || partsErrors['story.photos'] ? 'bad' : 'ok'}>
-            <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} />
-          </Section>
-
-          <Section n={4} id="em-story" locked={locked} title="The story" state={storyState.state} tone={storyState.tone}>
-            <Story parts={parts} setParts={setParts} shown={shownParts} />
-          </Section>
-
-          <Section n={5} id="em-events" locked={locked} title="Events" state={inEmail ? `${inEmail} in this email` : 'None'} tone={inEmail ? 'ok' : 'todo'}>
-            <Events events={events} setEvents={setEvents} draft={draft} setDraft={setDraft} sendDate={day} sendLabel={sendLabel(day)} today={today} />
-          </Section>
-
-          <Section n={6} id="em-charity" locked={locked} title="The charity" state={charityState.state} tone={charityState.tone}>
-            <Charity parts={parts} setParts={setParts} kids={props.kids} error={partsErrors.kid} />
-          </Section>
-
-          <Section n={7} id="em-lines" locked={locked} title="Subject line" state={parts.subject ? 'Written' : 'Not written'} tone={partsErrors.subject || partsErrors.preheader ? 'bad' : parts.subject ? 'ok' : 'todo'}>
+          {/* In Peter's order (PAGE_SECTIONS in page-email.mjs, 2026-11-17): the subject line, the sale, the
+              products, the reveal, the photos, the events and the charity, Send last. No story: it's gone. */}
+          <Section n={1} id="em-lines" locked={locked} title="Subject line" state={parts.subject ? 'Written' : 'Not written'} tone={linesTone} summary={summaries['em-lines']} {...folding('em-lines', linesTone)}>
             <Subject parts={parts} setParts={setParts} sale={saleOk ? sale : null} shown={shownParts} />
+          </Section>
+
+          <Section n={2} id="em-sale" locked={locked} title="The sale" {...switchOf('sale', 'em-sale', saleState, summaries['em-sale'])}>
+            {saleOff ? offNote('sale') : <Sale form={form} special={special} errors={saleErrors} shown={shownSale} set={set} touch={touch} presets={presets} day={day} />}
+          </Section>
+
+          <Section n={3} id="em-products" locked={locked} title="The products" {...switchOf('products', 'em-products', wallState, summaries['em-products'])}>
+            {productsOff ? (
+              offNote('products')
+            ) : (
+              <Products wall={wall} setWall={setWall} catalog={catalog} collections={collections} catalogProblem={catalogProblem} shown={shownWall} longNames={longNames} today={today} />
+            )}
+          </Section>
+
+          <Section n={4} id="em-reveal" locked={locked} title="The reveal" state={revealState.state} tone={revealState.tone} summary={summaries['em-reveal']} {...folding('em-reveal', revealState.tone)}>
+            <RevealPick parts={parts} setParts={setParts} shown={shownParts} reveals={props.reveals} />
+          </Section>
+
+          <Section n={5} id="em-photos" locked={locked} title="Photos" {...switchOf('photos', 'em-photos', { state: `${parts.hero ? 'Top photo set' : 'Store’s wide shot'} · ${story.photos.length} in the collage`, tone: photosTone }, summaries['em-photos'])}>
+            {isOff('photos') ? offNote('photos') : <Photos photos={photos} setPhotos={setPhotos} parts={parts} setParts={setParts} error={partsErrors.photos || partsErrors['story.photos']} local={props.local} />}
+          </Section>
+
+          <Section n={6} id="em-events" locked={locked} title="Events" {...switchOf('events', 'em-events', { state: inEmail ? `${inEmail} in this email` : 'None', tone: eventsTone }, summaries['em-events'])}>
+            {isOff('events') ? offNote('events') : <Events events={events} setEvents={setEvents} draft={draft} setDraft={setDraft} sendDate={day} sendLabel={sendLabel(day)} today={today} />}
+          </Section>
+
+          <Section n={7} id="em-charity" locked={locked} title="The charity" {...switchOf('charity', 'em-charity', charityState, summaries['em-charity'])}>
+            {isOff('charity') ? offNote('charity') : <Charity parts={parts} setParts={setParts} kids={props.kids} error={partsErrors.kid} />}
           </Section>
 
           <Section n={8} id="em-send" title="Send" state={sendState.state} tone={sendState.tone}>
@@ -456,37 +671,155 @@ export default function EmailApp(props: AppProps) {
               subscribers={props.subscribers}
               subject={inbox.subject}
               preheader={inbox.preheader}
+              saleEnds={saleOk && !saleOff && special.ends ? special.ends : null}
+              revealStart={reveal?.start ?? null}
+              extra={extra}
             />
           </Section>
 
           {version && (
             <div class="em-danger">
               {confirmClear ? (
-                <span class="em-confirm" role="group" aria-label="Clear this email">
-                  Clear the sale and products for {label}?
+                <span class="em-confirm" role="group" aria-label={extra ? 'Delete this email' : 'Clear this email'}>
+                  {extra ? `Delete the ${label} email? Everything in it goes.` : `Clear the sale and products for ${label}?`}
                   <button type="button" class="btn btn-small" onClick={() => setConfirmClear(false)}>
-                    Keep them
+                    {extra ? 'Keep it' : 'Keep them'}
                   </button>
                   <button type="button" class="btn btn-small btn-danger" onClick={() => void clear()} disabled={saving}>
-                    Clear
+                    {extra ? 'Delete' : 'Clear'}
                   </button>
                 </span>
               ) : (
-                <button type="button" class="btn btn-ghost btn-small btn-danger" onClick={() => setConfirmClear(true)}>
-                  Clear the {label} email
+                <button type="button" class="btn btn-ghost btn-small btn-danger" onClick={() => setConfirmClear(true)} disabled={locked}>
+                  {extra ? 'Delete' : 'Clear'} the {label} email
                 </button>
               )}
             </div>
           )}
         </div>
 
-        <div class="em-side" id="em-preview">
+        <div class="em-side" id="em-preview" {...(previewing ? { role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Preview of the email' } : {})}>
+          <div class="em-side-bar">
+            <button type="button" class="btn em-side-back" ref={back} onClick={closePreview}>
+              ← Back to editing
+            </button>
+          </div>
+          {props.owner && layoutReports.length > 0 && (
+            <section class="em-owner card" aria-labelledby="em-owner-title">
+              <h2 id="em-owner-title">Only you see this: the email’s own layout</h2>
+              <ul>
+                {layoutReports.map((r) => (
+                  <li key={r.word}>
+                    “{r.word}” was {r.over} px too wide at {r.width} px, seen by {who(r.seenBy)} on {at.format(new Date(r.lastSeen))}
+                    {r.times > 1 ? ` (${r.times} times)` : ''}.
+                  </li>
+                ))}
+              </ul>
+              <p class="em-hint">Nothing typed on this page fixes it, so no one else is shown it. It’s a fix to the email’s code, which verify.mjs checks at every width from 320 to 700 px on every pull request.</p>
+              <button type="button" class="btn btn-small" onClick={() => void clearLayoutReports()}>
+                Clear, it’s fixed
+              </button>
+            </section>
+          )}
           <Preview focus={focus} brief={brief} sections={sections} problem={null} checks={checks} onFit={setFit} />
         </div>
       </div>
-      <a class="em-jump btn btn-dark" href="#em-preview">
-        See the preview
-      </a>
     </div>
+  );
+}
+
+/**
+ * The emails still to go, to switch between: the weekly one being worked on and any extras, in date
+ * order, and a way to start an extra on a day of its own (special.mjs isExtraDate; Peter, 2026-11-25:
+ * "will need the ability to send more than 1 email per week on occasion"). Each is its own page, so
+ * leaving one with unsaved changes asks first, as leaving the page does.
+ */
+function Emails({ emails, send, today, max, inert }: { emails: AppProps['emails']; send: string; today: string; max: string; inert: boolean }) {
+  const [adding, setAdding] = useState(false);
+  const [day, setDay] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (adding) input.current?.focus();
+  }, [adding]);
+  const tuesday = day && new Date(`${day}T12:00:00Z`).getUTCDay() === 2;
+  async function start(e: Event) {
+    e.preventDefault();
+    if (!day) return setError('Pick the day it goes.');
+    if (tuesday) return setError('Tuesday is the weekly email’s day. Pick another day.');
+    setBusy(true);
+    setError(null);
+    const res = await call<{ send: string }>('/api/admin/email/extra/', 'POST', { day });
+    setBusy(false);
+    if (!res.ok) {
+      // One already that day: open it
+      if (typeof res.body.send === 'string') return location.assign(`/admin/email/?extra=${res.body.send}`);
+      return setError(res.error);
+    }
+    location.assign(`/admin/email/?extra=${res.body.send}`);
+  }
+  return (
+    <nav class="em-emails" aria-label="Emails to send" {...(inert ? { inert: true } : {})}>
+      <ul class="em-email-tabs">
+        {emails.map((m) => (
+          <li>
+            <a class="em-email-tab" href={m.href} {...(m.send === send ? { 'aria-current': 'page' } : {})}>
+              <strong>{m.label}</strong>
+              <small>
+                {m.extra ? 'Extra' : 'Weekly'}
+                {m.scheduled ? ' · Scheduled' : ''}
+              </small>
+            </a>
+          </li>
+        ))}
+        <li>
+          {adding ? (
+            <form class="em-email-add" onSubmit={(e) => void start(e)}>
+              <label for="em-extra-day">Day the extra email goes</label>
+              <div class="em-email-add-row">
+                <input
+                  id="em-extra-day"
+                  ref={input}
+                  type="date"
+                  min={today}
+                  max={max}
+                  value={day}
+                  onInput={(e) => {
+                    setDay((e.target as HTMLInputElement).value);
+                    setError(null);
+                  }}
+                  {...(error ? { 'aria-invalid': true, 'aria-describedby': 'em-extra-day-error' } : { 'aria-describedby': 'em-extra-day-hint' })}
+                />
+                <button type="submit" class="btn btn-primary btn-small" disabled={busy}>
+                  {busy ? 'Starting…' : 'Start it'}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-small"
+                  onClick={() => {
+                    setAdding(false);
+                    setError(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              <FieldError id="em-extra-day-error" message={error ?? (tuesday ? 'Tuesday is the weekly email’s day. Pick another day.' : undefined)} />
+              {!error && !tuesday && (
+                <p class="em-hint" id="em-extra-day-hint">
+                  Any day but a Tuesday. It starts with the last email’s products, photos and charity; the subject line and sale are its own.
+                </p>
+              )}
+            </form>
+          ) : (
+            <button type="button" class="em-email-tab em-email-new" onClick={() => setAdding(true)}>
+              <strong>+ Add an email</strong>
+              <small>For a sale or news</small>
+            </button>
+          )}
+        </li>
+      </ul>
+    </nav>
   );
 }

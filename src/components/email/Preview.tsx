@@ -1,7 +1,7 @@
 /** @jsxImportSource preact */
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { FIRST_SCREEN, GOLD, render } from '@/lib/sunny-side/email.mjs';
-import { FONT, FONT_LINK } from './font';
+import { FIRST_SCREEN, FONT_LINK, PARTS, bareEmail, render } from '@/lib/sunny-side/email.mjs';
+import { FONT } from './font';
 
 /** Text too wide for a phone: the word that doesn't fit, by how much, and the part of the email it's in. */
 export interface Spill {
@@ -12,7 +12,8 @@ export interface Spill {
 
 /** What the preview measures at a small phone's and a phone's width, by the rules verify.mjs holds the email to. */
 export interface Fit {
-  buttonAt: number;
+  /** Where the sale button's foot is, or null in an email without the sale. */
+  buttonAt: number | null;
   spill: boolean;
   /** What's too wide, so the page can say what and where, never just "something". */
   spills: Spill[];
@@ -20,12 +21,16 @@ export interface Fit {
   longNames: string[];
 }
 
-/** The email for this brief and these sections, with the font swapped for the admin's copy. */
-function emailHtml(brief: Record<string, unknown>, sections: string[]): string {
-  const html = render(brief, sections);
-  const swapped = html.replace(FONT_LINK, FONT);
-  if (swapped === html) throw new Error('The email’s font link changed; update the preview’s font swap.');
-  return swapped;
+/**
+ * The email for this brief and these sections, built once: as sent, with the font swapped for the
+ * admin's copy, and bare (bareEmail), as the Gmail app shows it to a Yahoo, Outlook or iCloud
+ * account: no web fonts (Helvetica or Arial in their place, which run wider) and no style block, only
+ * the inline styles, the worst case verify.mjs holds the email to.
+ */
+function emailHtml(brief: Record<string, unknown>, sections: string[]): { html: string; bare: string } {
+  const sent = render(brief, sections);
+  if (!FONT_LINK.test(sent)) throw new Error('The email’s font link changed; update the preview’s font swap.');
+  return { html: sent.replace(FONT_LINK, FONT), bare: bareEmail(sent) };
 }
 
 const rowsOf = (doc: Document) => {
@@ -68,16 +73,20 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
   const doc = frame.contentDocument;
   const win = frame.contentWindow;
   if (!doc || !win) return null;
+  // No scrollbar: where the computer always shows them, the frame's took 15px and the "320px" check
+  // laid the email out at 305 (Peter's Chrome, Nov 16, 2026). A phone has none.
+  doc.documentElement.style.overflow = 'hidden';
   await doc.fonts?.ready;
+  // An email with its sale turned off has no button, and is still measured for what spills
   const button = doc.querySelector('a[href*="utm_content=offer-button"]');
-  if (!button) return null;
-  // Each line of text wider than its column, with its widest word (what to shorten) and the part it's in
-  // The sale's whole gold band, not just the dark cell its button sits in
-  const offer = button.closest(`td[bgcolor="${GOLD}"]`)?.closest('tr');
+  if (!doc.body?.childElementCount) return null;
+  // Each line of text wider than its column, with its widest word (what to shorten) and the part it's in:
+  // the band it sits in says (data-part, from email.mjs). Guessing from the page's structure missed the
+  // product tiles (a band below the products' heading) and every event after the first, so Staci was
+  // never told about a word there she could fix, and the owner was told it was the email's own layout.
   const partOfEl = (el: Element): Spill['part'] => {
-    if (offer?.contains(el)) return 'offer';
-    for (const p of ['wall', 'story', 'events', 'mission'] as const) if (partOf(doc, p)?.contains(el)) return p;
-    return 'layout';
+    const part = el.closest('[data-part]')?.getAttribute('data-part') ?? '';
+    return (PARTS as string[]).includes(part) ? (part as Spill['part']) : 'layout';
   };
   const ruler = doc.createElement('canvas').getContext('2d');
   /** An element's widest word and its width: what to shorten. */
@@ -113,21 +122,20 @@ async function measure(frame: HTMLIFrameElement): Promise<Fit | null> {
     .filter((t) => t.getBoundingClientRect().height > 2 * 20 + 1)
     .map((t) => t.closest('a')?.getAttribute('href')?.match(/\/shop\/([^/?]+)/)?.[1] ?? '')
     .filter(Boolean);
-  return { buttonAt: Math.round(button.getBoundingClientRect().bottom + win.scrollY), spill, spills, longNames };
+  return { buttonAt: button ? Math.round(button.getBoundingClientRect().bottom + win.scrollY) : null, spill, spills, longNames };
 }
 
 /** The part of the email Staci is working on, which the preview keeps in view. */
-export type Focus = 'offer' | 'wall' | 'photos' | 'story' | 'events' | 'mission';
+export type Focus = 'offer' | 'wall' | 'photos' | 'story' | 'reveal' | 'events' | 'mission';
 
-/** Where a part starts in the email: found by what's in it, since the email's bands carry no names. */
+/**
+ * Where a part starts in the email: the first band tagged with it (data-part). The photos are the
+ * story's. The sale is the top of the email, its photo and masthead included, so it scrolls to the top.
+ */
 function partOf(doc: Document, focus: Focus): Element | null {
-  const byLink = (slot: string) => doc.querySelector(`a[href*="utm_content=${slot}"]`)?.closest('td[bgcolor]')?.closest('tr') ?? null;
-  if (focus === 'wall') return doc.querySelector('a[href*="utm_content=wall-shop-all"]')?.closest('table')?.closest('tr') ?? null;
-  if (focus === 'story') return byLink('story-link');
-  if (focus === 'photos') return byLink('story-link') ?? null;
-  if (focus === 'events') return doc.querySelector('[bgcolor="#2B7A96"]');
-  if (focus === 'mission') return doc.querySelector('.soard');
-  return null;
+  if (focus === 'offer') return null;
+  const part = focus === 'photos' ? 'story' : focus;
+  return doc.querySelector(`[data-part="${part}"]`)?.closest('tr') ?? null;
 }
 
 interface Props {
@@ -136,12 +144,20 @@ interface Props {
   sections: string[];
   problem: string | null;
   checks: { ok: boolean | null; text: string }[];
-  onFit: (fit: { small: Fit | null; phone: Fit | null }) => void;
+  onFit: (fit: Fits) => void;
+}
+
+/** What each measuring frame found: the smallest phone, a phone, and the smallest phone bare (emailHtml). */
+export interface Fits {
+  small: Fit | null;
+  phone: Fit | null;
+  bare: Fit | null;
 }
 
 /**
  * The email as customers will see it, at phone or computer width, drawn by the same code that
- * builds the email. Two frames out of sight, at 320 and 390px, measure what verify.mjs would.
+ * builds the email. Three frames out of sight measure what verify.mjs would: 320 and 390px as sent,
+ * and 320px bare (no style block, no web fonts).
  */
 export function Preview({ focus, brief, sections, problem, checks, onFit }: Props) {
   const [view, setView] = useState<'phone' | 'computer'>('phone');
@@ -150,6 +166,7 @@ export function Preview({ focus, brief, sections, problem, checks, onFit }: Prop
   const frame = useRef<HTMLIFrameElement>(null);
   const small = useRef<HTMLIFrameElement>(null);
   const phone = useRef<HTMLIFrameElement>(null);
+  const bare = useRef<HTMLIFrameElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const width = view === 'phone' ? 390 : 640;
 
@@ -161,14 +178,16 @@ export function Preview({ focus, brief, sections, problem, checks, onFit }: Prop
     if (!brief) return;
     const t = window.setTimeout(async () => {
       let html: string;
+      let bareHtml: string;
       try {
-        html = emailHtml(brief, sections);
+        ({ html, bare: bareHtml } = emailHtml(brief, sections));
       } catch {
         return; // the page says what's wrong; the preview keeps the last good email
       }
       for (const f of [frame.current, small.current, phone.current]) if (f) show(f, html);
-      const [a, b] = await Promise.all([small.current ? measure(small.current) : null, phone.current ? measure(phone.current) : null]);
-      onFit({ small: a, phone: b });
+      if (bare.current) show(bare.current, bareHtml);
+      const [a, b, c] = await Promise.all([small.current, phone.current, bare.current].map((f) => (f ? measure(f) : null)));
+      onFit({ small: a, phone: b, bare: c });
       const doc = frame.current?.contentDocument;
       if (doc) {
         await doc.fonts?.ready;
@@ -236,6 +255,7 @@ export function Preview({ focus, brief, sections, problem, checks, onFit }: Prop
       <div class="em-measure" aria-hidden="true">
         <iframe ref={small} tabIndex={-1} title="" style={{ width: '320px', height: '900px' }} />
         <iframe ref={phone} tabIndex={-1} title="" style={{ width: '390px', height: '900px' }} />
+        <iframe ref={bare} tabIndex={-1} title="" style={{ width: '320px', height: '900px' }} />
       </div>
     </section>
   );

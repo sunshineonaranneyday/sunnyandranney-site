@@ -1,5 +1,6 @@
 import { defineMiddleware } from 'astro:middleware';
 import { authenticate } from '@/lib/admin-auth';
+import { ADMIN_CSP } from '@/lib/admin-csp.mjs';
 import { adminHostRedirect, frontDoor, frontDoorPath, inScope } from '@/lib/admin-host.mjs';
 
 // Admin paths are matched case-insensitively and with repeated slashes made one (frontDoorPath), so
@@ -11,11 +12,8 @@ const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'same-origin',
-  'Content-Security-Policy':
-    // Images may also come from the store's own Cloudflare Images account (the logo), from the
-    // store's own Shopify files, where product photos live until they move to Cloudflare Images, and
-    // from the domain's image resizing, which sends those files' PNGs as JPEGs (email.mjs, RESIZE).
-    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ/ https://cdn.shopify.com/s/files/1/0930/2117/6092/ https://shop.sunnyandranney.com/cdn-cgi/image/; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  // admin-csp.mjs: where images may come from, with the reasons, and its test
+  'Content-Security-Policy': ADMIN_CSP,
 };
 
 function deny(isApi: boolean, status: number, message: string): Response {
