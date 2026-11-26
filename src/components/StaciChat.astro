@@ -95,7 +95,7 @@
   /* ─── Proactive Greeting Bubble ────────────────────────────── */
   .staci-greeting {
     position: fixed;
-    bottom: 5rem;
+    bottom: calc(5rem + var(--bottom-bar, 0px));
     right: 1.25rem;
     z-index: 9997;
     background: white;
@@ -155,9 +155,11 @@
   }
 
   /* ─── Toggle Button ──────────────────────────────────────── */
+  /* --bottom-bar: the height of a product page's sticky buy bar while it shows (0 elsewhere),
+     so this button sits above it instead of covering its button. */
   #staci-toggle {
     position: fixed;
-    bottom: 1.25rem;
+    bottom: calc(1.25rem + var(--bottom-bar, 0px));
     right: 1.25rem;
     z-index: 9999;
     display: flex;
@@ -170,17 +172,28 @@
     box-shadow:
       0 4px 20px rgba(44, 44, 44, 0.25),
       0 0 0 1px rgba(255, 255, 255, 0.05) inset;
-    transition: transform 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out), opacity 0.3s, padding 0.2s var(--ease-out), border-radius 0.2s var(--ease-out);
+    transition: transform 0.3s var(--ease-out), box-shadow 0.3s var(--ease-out), opacity 0.3s, padding 0.2s var(--ease-out), border-radius 0.2s var(--ease-out), bottom 0.35s var(--ease-out);
     cursor: pointer;
     border: none;
-    /* Entrance animation — slides up on first load */
-    opacity: 0;
-    animation: staciToggleIn 0.6s 0.8s var(--ease-out) forwards;
+    /* Entrance: slides up on first load. "backwards" holds the hidden start only during
+       the delay; after it, the button's own styles rule again, so it can step aside while
+       someone types. With reduced motion there's no animation, and it simply shows (it was
+       stuck invisible, though still clickable, when the start state was its resting style). */
+    animation: staciToggleIn 0.6s 0.8s var(--ease-out) backwards;
   }
 
   @keyframes staciToggleIn {
     from { opacity: 0; transform: translateY(20px) scale(0.9); }
     to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* While a shopper types in a form (the product page's request form sets data-typing),
+     the button steps aside instead of floating over the boxes. */
+  :global(html[data-typing]) #staci-toggle:not(.is-open),
+  :global(html[data-typing]) .staci-greeting {
+    opacity: 0;
+    transform: translateY(12px);
+    pointer-events: none;
   }
 
   #staci-toggle:hover {
@@ -1454,7 +1467,7 @@
 
     #staci-toggle {
       padding: 0.25rem;
-      bottom: calc(0.85rem + env(safe-area-inset-bottom));
+      bottom: calc(0.85rem + max(env(safe-area-inset-bottom), var(--bottom-bar, 0px)));
       right: 0.85rem;
     }
 

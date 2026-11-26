@@ -84,7 +84,12 @@
     .email-capture__btn {
       padding: 0.9rem 1.5rem;
     }
-    .email-capture__hp {
+  }
+
+  /* The spam trap is off screen at every width. It sat inside the phone rule above, so on
+     an iPad or a desktop the footer showed a "Leave this empty" box, and anyone who typed
+     in it was silently dropped. */
+  .email-capture__hp {
     position: absolute;
     left: -9999px;
     width: 1px;
@@ -92,7 +97,8 @@
     overflow: hidden;
   }
 
-  .email-capture__privacy {
+  @media (max-width: 767px) {
+    .email-capture__privacy {
       font-size: 0.68rem;
     }
   }

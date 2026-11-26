@@ -196,6 +196,9 @@ const KIND = { wholesale: 'Wholesale', retail: 'Bought retail', house: 'House' }
     (v ? $('v-lead') : $('v-name')).focus();
   }
   document.querySelectorAll<HTMLElement>('[data-edit]').forEach((el) => el.addEventListener('click', () => open(el.dataset.edit ?? '')));
+  // /admin/vendors/?edit=<id> (the Special orders page's "Set lead time") opens that vendor, on its lead time.
+  const wanted = new URLSearchParams(location.search).get('edit');
+  if (wanted && vendors.some((v) => v.id === wanted)) open(wanted);
   dialog.querySelector('[data-close]')?.addEventListener('click', () => dialog.close());
   document.getElementById('v-save')?.addEventListener('click', async (event) => {
     const button = event.currentTarget as HTMLButtonElement;

@@ -7,6 +7,7 @@ import { initials, svg, tone } from '@/lib/admin-ui';
 import { STORE_TIME_ZONE, workweekStart, localDate, utcToLocalInput } from '@/lib/time-clock/hours.mjs';
 import { nextSend, sendLabel } from '@/lib/sunny-side/special.mjs';
 import { getSpecial } from '@/lib/sunny-side/special-store.mjs';
+import { waitingCount } from '@/lib/store-notify/requests-store.mjs';
 
 const admin = Astro.locals.admin;
 if (!admin) return new Response('Not authorized', { status: 403 });
@@ -21,6 +22,12 @@ const specialMissing = await getSpecial(Astro.locals.runtime.env.DB, emailSend).
   (s) => s === null,
   () => false,
 );
+// Shoppers waiting on a special-order answer. If the table isn't there yet, Today loads without it.
+const requests = await waitingCount(Astro.locals.runtime.env.DB).catch(() => ({ count: 0, oldest: null as string | null, due: null as string | null }));
+// Urgency goes by the answer-by day the shopper was given, as on the Special orders page.
+const storeToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now));
+const requestDue = !requests.due ? 'soon' : requests.due < storeToday ? 'late' : requests.due === storeToday ? 'today' : 'soon';
+const dueDay = requests.due ? new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' }).format(new Date(`${requests.due}T12:00:00Z`)) : null;
 const emailDays = Math.round((Date.parse(emailSend) - Date.parse(localDate(now))) / 86400000);
 const emailWhen = emailDays === 0 ? 'It goes out today' : emailDays === 1 ? 'It goes out tomorrow' : `It goes out in ${emailDays} days`;
 
@@ -42,7 +49,7 @@ const hoursLink = (item: { id: string; clockInAt: string }) => `/admin/hours/?we
 const readyMinutes = t.ready.reduce((sum: number, item: { minutes: number }) => sum + item.minutes, 0);
 const readyPeople = [...new Set(t.ready.map((item: { name: string }) => item.name))] as string[];
 const overtime = t.week.filter((p: { overtimeRisk: boolean }) => p.overtimeRisk);
-const attention = t.missedClockOuts.length + t.ready.length + t.needsLook.length + t.lateOrMissing.length + overtime.length + (specialMissing ? 1 : 0);
+const attention = t.missedClockOuts.length + t.ready.length + t.needsLook.length + t.lateOrMissing.length + overtime.length + (specialMissing ? 1 : 0) + (requests.count ? 1 : 0);
 const weekScale = Math.max(40 * 60, ...t.week.map((p: { projectedMinutes: number }) => p.projectedMinutes));
 const pct = (minutes: number) => `${Math.min(100, (minutes / weekScale) * 100).toFixed(2)}%`;
 const fortyAt = pct(40 * 60);
@@ -174,6 +181,23 @@ interface Missed {
           )}
         </article>
       ))}
+
+      {requests.count > 0 && (
+        <article class:list={['task', requestDue === 'soon' ? 'task-warn' : 'task-urgent']} id="requests-task">
+          <span class="task-icon" aria-hidden="true"><Fragment set:html={svg('tag', 20)} /></span>
+          <div class="task-body">
+            <h3>{requests.count === 1 ? 'A shopper is waiting on a special order' : `${requests.count} shoppers are waiting on special orders`}</h3>
+            <p>{requestDue === 'late'
+              ? `${requests.count === 1 ? 'It was' : 'One was'} due an answer by ${dueDay}. Reply today.`
+              : requestDue === 'today'
+                ? `${requests.count === 1 ? 'They were' : 'One was'} promised an answer today.`
+                : dueDay ? `${requests.count === 1 ? 'They were' : 'The first was'} promised an answer by ${dueDay}.` : 'They were promised an answer within one business day.'}</p>
+          </div>
+          <div class="task-actions">
+            <a class="btn btn-dark btn-small" href="/admin/vendors/special-orders/">Answer {requests.count === 1 ? 'it' : 'them'}</a>
+          </div>
+        </article>
+      )}
 
       {specialMissing && (
         <article class:list={['task', emailDays === 0 ? 'task-urgent' : 'task-warn']} id="special-task">
@@ -340,6 +364,8 @@ interface Missed {
   .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
   .panel-link { font-size: 0.6875rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--teal); text-decoration: none; }
   .panel-link:hover { text-decoration: underline; }
+  /* The store's iPad: a 44pt tap target without making the link look bigger (Apple HIG). */
+  @media (pointer: coarse) { .panel-link { display: inline-flex; align-items: center; min-height: 44px; margin: -13px 0; } }
   .panel-empty { color: var(--ink-3); font-size: 0.9375rem; }
 
   .floor { list-style: none; display: grid; gap: 0.25rem; }

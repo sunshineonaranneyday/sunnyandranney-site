@@ -3,8 +3,12 @@ export const prerender = true;
 
 import Base from '@/layouts/Base.astro';
 import { cfImage, cfSrcset, SIZES } from '@/lib/images';
-import { getCollectionByHandle, getProductByHandle, getProducts, formatPriceShort as fmt, type Product, type ShopifyImage, type ProductVariant, type ProductMedia } from '@/lib/shopify';
-import { getCollectionsStatic, getHeroStatic } from '@/lib/settings';
+import { getProductByHandle, getProducts, formatPriceShort as fmt, type Product, type ShopifyImage, type ProductVariant, type ProductMedia } from '@/lib/shopify';
+import { getHeroStatic } from '@/lib/settings';
+import { fetchShopData, type ShopProduct } from '@/lib/shop-data';
+import { availabilityLine, availabilityOf, schemaAvailability } from '@/lib/availability.mjs';
+import { availabilityIcon } from '@/lib/availability-icons.mjs';
+import { STORE_PHONE } from '@/lib/special-order-request.mjs';
 
 // Shopify altText often carries raw filenames ("Screenshot2026....png", "IMG_1234").
 // Fall back to the product title so screen readers get something meaningful.
@@ -17,86 +21,64 @@ function cleanAlt(alt: string | null | undefined, fallback: string): string {
 }
 
 export async function getStaticPaths() {
-  // Only build PDPs for products in admin-enabled collections
-  const collectionSettings = await getCollectionsStatic();
-  const enabledHandles = collectionSettings
-    ?.filter(c => c.enabled)
-    .sort((a, b) => a.order - b.order)
-    .map(c => c.handle) ?? [];
+  // The same catalog the shop grid uses, availability included, fetched once per build.
+  const { products: listed, allProducts, staffPickHandles, leadDays } = await fetchShopData();
+  const pages: ShopProduct[] = [...allProducts];
+  const seen = new Set(pages.map(p => p.id));
 
-  const allProducts: Product[] = [];
-  const seen = new Set<string>();
-
-  for (const handle of enabledHandles) {
-    const collection = await getCollectionByHandle(handle);
-    if (!collection) continue;
-    for (const product of collection.products) {
-      if (!seen.has(product.id)) {
-        seen.add(product.id);
-        allProducts.push(product);
-      }
-    }
+  // Also the newest products and the hero product: the homepage links them, and they
+  // may sit outside the enabled collections.
+  const [newest, heroSetting] = await Promise.all([
+    getProducts(8, undefined, 'CREATED_AT'),
+    getHeroStatic(),
+  ]);
+  const extras: Product[] = [...newest.products];
+  const heroHandle = heroSetting?.productHandle;
+  if (heroHandle && !pages.some(p => p.handle === heroHandle)) {
+    const heroProduct = await getProductByHandle(heroHandle);
+    if (heroProduct) extras.push(heroProduct);
+  }
+  for (const p of extras) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    pages.push({ ...p, availability: availabilityOf(p, leadDays) });
   }
 
-  // Also include newest products + hero products — they may be from
-  // non-enabled collections and would 404 without pages built for them.
-  try {
-    const [newest, heroSetting] = await Promise.all([
-      getProducts(8, undefined, 'CREATED_AT'),
-      getHeroStatic(),
-    ]);
+  const inStock = listed.filter(p => p.availability.state !== 'special');
+  const categoryOf = (p: Product) => p.category?.name || '';
 
-    // Add newest products (shown on homepage)
-    for (const p of newest.products) {
-      if (!seen.has(p.id)) { seen.add(p.id); allProducts.push(p); }
-    }
-
-    // Add hero product
-    const heroHandle = heroSetting?.productHandle;
-    if (heroHandle && !new Set(allProducts.map(p => p.handle)).has(heroHandle)) {
-      const heroProduct = await getProductByHandle(heroHandle);
-      if (heroProduct && !seen.has(heroProduct.id)) {
-        seen.add(heroProduct.id);
-        allProducts.push(heroProduct);
+  /** Up to `n` browsable products like this one: same category, then same type, in grid order. */
+  function similar(product: Product, pool: ShopProduct[], n: number): ShopProduct[] {
+    const others = pool.filter(p => p.handle !== product.handle);
+    const picked: ShopProduct[] = [];
+    const take = (list: ShopProduct[]) => {
+      for (const p of list) {
+        if (picked.length >= n) return;
+        if (!picked.includes(p)) picked.push(p);
       }
-    }
-  } catch { /* Shopify not configured — skip */ }
-
-  // Fetch staff pick handles for badge display
-  const staffPickHandles = new Set<string>();
-  try {
-    const staffPicksCollection = await getCollectionByHandle('staff-picks');
-    if (staffPicksCollection) {
-      for (const p of staffPicksCollection.products) {
-        staffPickHandles.add(p.handle);
-      }
-    }
-  } catch { /* skip */ }
-
-  // Build related products map — other products from the same collections
-  const relatedMap = new Map<string, Product[]>();
-  for (const product of allProducts) {
-    const others = allProducts
-      .filter(p => p.handle !== product.handle && p.productType === product.productType)
-      .slice(0, 4);
-    if (others.length < 4) {
-      // Fill with any other products
-      const remaining = allProducts
-        .filter(p => p.handle !== product.handle && !others.some(o => o.handle === p.handle))
-        .slice(0, 4 - others.length);
-      others.push(...remaining);
-    }
-    relatedMap.set(product.handle, others);
+    };
+    if (categoryOf(product)) take(others.filter(p => categoryOf(p) === categoryOf(product)));
+    if (product.productType) take(others.filter(p => p.productType === product.productType));
+    take(others);
+    return picked;
   }
 
-  return allProducts.map(product => ({
+  return pages.map(product => ({
     params: { handle: product.handle },
-    props: { product, relatedProducts: relatedMap.get(product.handle) || [], isStaffPick: staffPickHandles.has(product.handle) },
+    props: {
+      product,
+      relatedProducts: similar(product, listed, 4),
+      // "Frequently Bought Together" adds to the cart, so it only bundles pieces in stock.
+      bundleProducts: similar(product, inStock, 2),
+      // A sold piece leads with what's in stock like it, at the top of its page.
+      alternatives: product.availability.state === 'gone' ? similar(product, inStock, 4) : [],
+      isStaffPick: staffPickHandles.has(product.handle),
+    },
   }));
 }
 
 const { handle } = Astro.params;
-const { product, relatedProducts, isStaffPick } = Astro.props;
+const { product, relatedProducts, bundleProducts, alternatives, isStaffPick } = Astro.props as { product: ShopProduct; relatedProducts: ShopProduct[]; bundleProducts: ShopProduct[]; alternatives: ShopProduct[]; isStaffPick: boolean };
 
 if (!product) {
   return Astro.redirect('/shop/');
@@ -110,7 +92,8 @@ const lcpImageSrcset = mainImage ? cfSrcset(mainImage.url, [450, 900, 1400]) : u
 const lcpImageSizes = SIZES.pdpMain;
 const price = product.priceRange.minVariantPrice;
 const compareAt = product.compareAtPriceRange?.minVariantPrice;
-const isOnSale = compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount);
+// Only a piece you can buy now shows a sale: a special order's price is confirmed when it's ordered.
+const isOnSale = !['special', 'gone'].includes(product.availability.state) && compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount);
 
 // Extract videos from media
 const videos = (product.media?.edges || [])
@@ -121,7 +104,18 @@ const videos = (product.media?.edges || [])
 const firstVariant = variants[0];
 const stockQty = firstVariant?.quantityAvailable;
 const isLowStock = stockQty !== null && stockQty > 0 && stockQty <= 5;
-const isSoldOut = !product.availableForSale;
+const availability = product.availability;
+const { state } = availability;
+// Only pieces in stock go in the cart; a special order is requested, a sold piece shows what's like it.
+const canBuy = product.availableForSale && state !== 'special' && state !== 'gone';
+const isSoldOut = !canBuy;
+const whereDetail: Record<string, string> = {
+  showroom: 'Come see it at 109A Oak Street in Roswell.',
+  warehouse: 'We bring it to the showroom for you and call with your pickup day.',
+  'in-stock': 'Ready to take home from our Roswell showroom.',
+  special: `We order it from ${product.vendor || 'the maker'} for you, and it comes to our Roswell showroom for free pickup.`,
+};
+const phoneHref = `tel:+1${STORE_PHONE.replace(/\D/g, '')}`;
 
 const isNewArrival = product.createdAt && (Date.now() - new Date(product.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000;
 
@@ -148,9 +142,7 @@ const productSchema = {
     url: productUrl,
     price: parseFloat(price.amount).toFixed(2),
     priceCurrency: price.currencyCode,
-    availability: product.availableForSale
-      ? 'https://schema.org/InStock'
-      : 'https://schema.org/OutOfStock',
+    availability: schemaAvailability(availability),
     itemCondition: 'https://schema.org/NewCondition',
     seller: { '@type': 'Organization', name: 'Sunny & Ranney' },
     availableAtOrFrom: {
@@ -267,6 +259,13 @@ const breadcrumbSchema = {
       <div class="pdp-grid">
         <!-- Image Gallery -->
         <div class="pdp-gallery">
+          {state === 'gone' && (
+            <p class="pdp-sold-jump">
+              <span class="pdp-sold-jump__icon" set:html={availabilityIcon('gone', 18)} />
+              <strong>This piece has sold.</strong>
+              {alternatives.length > 0 && <a href="#pdp-sold-title">See {alternatives.length} like it in stock</a>}
+            </p>
+          )}
           <div class="pdp-gallery__main" id="gallery-main">
             {mainImage ? (
               <img
@@ -283,7 +282,7 @@ const breadcrumbSchema = {
             ) : (
               <div class="pdp-gallery__placeholder">No Image</div>
             )}
-            {isSoldOut && <span class="product-card__badge product-card__badge--sold" id="pdp-sold-badge">Sold Out</span>}
+            {state === 'gone' && <span class="product-card__badge product-card__badge--sold" id="pdp-sold-badge">Sold</span>}
             {!isSoldOut && isOnSale && <span class="product-card__badge" id="pdp-sale-badge">Sale</span>}
             {!isSoldOut && !isOnSale && isStaffPick && <span class="product-card__badge product-card__badge--pick" id="pdp-pick-badge">Staff Pick</span>}
             {!isSoldOut && !isOnSale && !isStaffPick && isNewArrival && <span class="product-card__badge product-card__badge--new" id="pdp-new-badge">New</span>}
@@ -363,10 +362,56 @@ const breadcrumbSchema = {
               </span>
             )}
           </div>
-          <p class="pdp-price__terms">All sales final · Free showroom pickup in Roswell</p>
+          {canBuy && <p class="pdp-price__terms">All sales final · Free showroom pickup in Roswell</p>}
+
+          {/* Where it is, or that it's a special order */}
+          {state !== 'gone' && (
+            <div class={`pdp-where pdp-where--${state}`} id="pdp-where">
+              <span class="pdp-where__icon" set:html={availabilityIcon(state, 22)} />
+              <div class="pdp-where__text">
+                <strong class="pdp-where__line">{availabilityLine(availability)}</strong>
+                <span class="pdp-where__detail">{whereDetail[state]}</span>
+              </div>
+            </div>
+          )}
+
+          {/* A sold piece says so where the buy button would be, and leads with what's in stock like it */}
+          {state === 'gone' && (
+            <section class="pdp-sold" aria-labelledby="pdp-sold-title">
+              <h2 class="pdp-sold__title" id="pdp-sold-title" tabindex="-1">This piece has sold</h2>
+              <p class="pdp-sold__text">{availability.why === 'one-of-a-kind' ? 'It was one of a kind.' : 'Call us to ask about ordering another.'}{alternatives.length > 0 && ' These are in stock now:'}</p>
+              {alternatives.length > 0 && (
+                <ul class="pdp-sold__grid">
+                  {alternatives.map((alt) => {
+                    const altImg = alt.images.edges[0]?.node;
+                    return (
+                      <li>
+                        <a href={`/shop/${alt.handle}/`} class="pdp-sold__alt">
+                          <span class="pdp-sold__alt-frame">
+                            {altImg && (
+                              <img src={cfImage(altImg.url, { width: 360 })} srcset={`${cfImage(altImg.url, { width: 240 })} 240w, ${cfImage(altImg.url, { width: 360 })} 360w, ${cfImage(altImg.url, { width: 480 })} 480w`} sizes="(max-width: 767px) 45vw, 220px" alt="" width="240" height="240" loading="lazy" decoding="async" />
+                            )}
+                          </span>
+                          <span class="pdp-sold__alt-title">{alt.title}</span>
+                          <span class="pdp-sold__alt-price">{fmt(parseFloat(alt.priceRange.minVariantPrice.amount))}</span>
+                          <span class={`pdp-sold__alt-where pdp-sold__alt-where--${alt.availability.state}`}>
+                            <span set:html={availabilityIcon(alt.availability.state, 14)} />{availabilityLine(alt.availability)}
+                          </span>
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <div class="pdp-sold__help">
+                <p>{availability.why === 'one-of-a-kind' ? 'Looking for something like it? We’re glad to help.' : 'We’ll check with the maker for you.'}</p>
+                <a class="btn btn--outline pdp-sold__call" href={phoneHref}>Call {STORE_PHONE}</a>
+              </div>
+            </section>
+          )}
 
           {/* Low stock urgency indicator */}
-          {isLowStock && (
+          {canBuy && isLowStock && (
             <div class="pdp-urgency" id="pdp-urgency">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
               <span>Only <strong id="stock-count">{stockQty}</strong> left in stock — order soon</span>
@@ -375,6 +420,8 @@ const breadcrumbSchema = {
 
           <hr class="divider" />
 
+          {/* The cart: only for pieces in stock. Kept in the page when hidden; its script expects it. */}
+          <div class="pdp-buy" hidden={!canBuy}>
           {/* Variant selector with grouped options */}
           {variants.length > 1 && (
             <div class="pdp-variants" id="pdp-variants">
@@ -437,15 +484,77 @@ const breadcrumbSchema = {
               </button>
             )}
           </div>
+          </div>
 
-          {/* Sold out — direct to showroom */}
-          {isSoldOut && (
-            <div class="pdp-notify" id="pdp-notify">
-              <p class="pdp-notify__text">This item is currently sold out. Visit our showroom or call us to ask about availability and upcoming inventory.</p>
-              <a href="tel:+16788885140" class="btn btn--outline pdp-notify__btn" style="text-align:center;">Call (678) 888-5140</a>
-            </div>
+          {/* Special order: ask, don't pay. The store confirms the price and date with the vendor first.
+              The button sits where Add to Cart does and opens a three-box form in place. */}
+          {state === 'special' && (
+            <section class="pdp-request" id="request" aria-labelledby="pdp-request-title" data-open="false">
+              <div class="pdp-request__trigger">
+                <div class="pdp-request__clip pdp-request__clip--ring">
+                  <button type="button" class="btn btn--gold pdp-request__open" id="rq-open" aria-expanded="false" aria-controls="rq-panel">Request this piece</button>
+                </div>
+              </div>
+              <div class="pdp-request__panel" id="rq-panel" inert>
+                <div class="pdp-request__clip">
+                  <div class="pdp-request__card" id="rq-card">
+                    <h2 class="pdp-request__title" id="pdp-request-title" tabindex="-1">Request this piece</h2>
+                    <form class="pdp-request__form" id="request-form" novalidate data-handle={product.handle}>
+                      <div class="pdp-request__field">
+                        <label for="rq-name">Your name</label>
+                        <input id="rq-name" name="name" autocomplete="name" autocapitalize="words" enterkeyhint="next" required maxlength="80" aria-describedby="rq-name-error" />
+                        <p class="pdp-request__error" id="rq-name-error" hidden></p>
+                      </div>
+                      <div class="pdp-request__field">
+                        <label for="rq-contact">Email or phone</label>
+                        <p class="pdp-request__hint" id="rq-contact-hint">We’ll only use it to reply about this piece.</p>
+                        <input id="rq-contact" name="contact" type="text" inputmode="email" autocomplete="email" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="next" required maxlength="120" aria-describedby="rq-contact-hint rq-contact-error rq-contact-suggest" />
+                        <p class="pdp-request__suggest" id="rq-contact-suggest" hidden>Did you mean <button type="button" class="pdp-request__suggest-btn" id="rq-suggest-btn"></button>?</p>
+                        <p class="pdp-request__error" id="rq-contact-error" hidden></p>
+                      </div>
+                      <div class="pdp-request__field">
+                        <label for="rq-note">Anything we should know? <span class="pdp-request__optional">(optional)</span></label>
+                        <textarea id="rq-note" name="note" rows="2" maxlength="1000" placeholder="Fabric, finish, how many, when you need it" aria-describedby="rq-note-count rq-note-error"></textarea>
+                        <p class="pdp-request__count" id="rq-note-count" aria-live="polite" hidden></p>
+                        <p class="pdp-request__error" id="rq-note-error" hidden></p>
+                      </div>
+                      <div class="pdp-request__trap" aria-hidden="true">
+                        <label>Leave this empty <input name="website" tabindex="-1" autocomplete="off" /></label>
+                      </div>
+                      <div class="pdp-request__alert" id="rq-alert" role="alert" hidden>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.4v.1"/></svg>
+                        <span><span id="rq-alert-text"></span> <button type="button" class="pdp-request__reload" id="rq-reload" hidden>Reload the page</button></span>
+                      </div>
+                      <button type="submit" class="btn btn--gold pdp-request__submit" id="rq-submit">
+                        <span class="pdp-request__spinner" aria-hidden="true"></span>
+                        <span id="rq-submit-label">Send request</span>
+                      </button>
+                    </form>
+                    <div class="pdp-request__done" id="rq-done" hidden>
+                      <span class="pdp-request__check" aria-hidden="true">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m6 12.5 4 4 8-9" pathLength="1"/></svg>
+                      </span>
+                      <h2 class="pdp-request__done-title" id="rq-done-title" tabindex="-1" aria-describedby="rq-done-text">Request sent</h2>
+                      <p class="pdp-request__done-text" id="rq-done-text">We’ll be in touch by the next business day with the price and arrival date.</p>
+                      <ol class="pdp-request__steps">
+                        <li><span><strong>We check with {product.vendor || 'the maker'}</strong> for the price and when it can arrive.</span></li>
+                        <li><span><strong id="rq-step-reply">We reply by the next business day.</strong> If you’d like it, we send a secure payment link.</span></li>
+                        <li><span><strong>It comes to our showroom</strong> and we call you to pick it up.</span></li>
+                      </ol>
+                      <p class="pdp-request__done-fine">Nothing to pay until you say yes. Questions now? Call <a href={phoneHref}>{STORE_PHONE}</a>.</p>
+                    </div>
+                    <div class="pdp-request__done" id="rq-sold" hidden>
+                      <h2 class="pdp-request__done-title" id="rq-sold-title" tabindex="-1" aria-describedby="rq-sold-text">This piece has just sold</h2>
+                      <p class="pdp-request__done-text" id="rq-sold-text">It can’t be ordered again, but we have pieces like it in stock.</p>
+                      <a class="btn btn--gold pdp-request__submit" href="#related">See pieces like it</a>
+                      <p class="pdp-request__done-fine">Or call us at <a href={phoneHref}>{STORE_PHONE}</a> and we’ll help.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p class="pdp-request__promise" id="rq-promise">We’ll reply within one business day with the price and arrival date. Nothing to pay until you say yes.</p>
+            </section>
           )}
-
 
           <div class="pdp-secondary-actions">
             <button class="pdp-share-btn" id="pdp-share" aria-label="Share product">
@@ -455,7 +564,7 @@ const breadcrumbSchema = {
           </div>
 
           {/* Shop Pay Installments for items $50+ */}
-          {product.availableForSale && parseFloat(price.amount) >= 50 && (
+          {canBuy && parseFloat(price.amount) >= 50 && (
             <div class="pdp-installments">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
               <span>4 interest-free payments of <strong>{fmt(parseFloat(price.amount) / 4)}</strong> with Shop Pay</span>
@@ -463,7 +572,7 @@ const breadcrumbSchema = {
           )}
 
           {/* Local pickup only */}
-          <div class="pdp-delivery">
+          <div class="pdp-delivery" hidden={!canBuy}>
             <div class="pdp-delivery__item">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
               <div>
@@ -473,21 +582,21 @@ const breadcrumbSchema = {
             </div>
           </div>
 
-          {/* Trust signals */}
-          <div class="pdp-trust">
+          {/* Trust signals: true for this piece. A special order has no checkout here, a sold piece nothing to sell. */}
+          {state !== 'gone' && <div class="pdp-trust">
             <div class="pdp-trust__item">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-              <span>Secure checkout via Shopify</span>
+              <span>{state === 'special' ? 'A secure payment link once you say yes' : 'Secure checkout via Shopify'}</span>
             </div>
             <div class="pdp-trust__item">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
               <span>100% of profits help kids</span>
             </div>
-            <div class="pdp-trust__item">
+            {state !== 'special' && <div class="pdp-trust__item">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
               <span>In-store pickup available</span>
-            </div>
-          </div>
+            </div>}
+          </div>}
 
           <div class="pdp-charity-note">
             <span class="pdp-charity-note__icon"></span>
@@ -539,7 +648,7 @@ const breadcrumbSchema = {
   </section>
 
   {/* ═══ FREQUENTLY BOUGHT TOGETHER ═══ */}
-  {relatedProducts.length >= 2 && (
+  {canBuy && bundleProducts.length >= 2 && (
     <section class="fbt-section section">
       <div class="container">
         <h2 class="fbt-title reveal">Frequently Bought Together</h2>
@@ -553,11 +662,11 @@ const breadcrumbSchema = {
             <span class="fbt-item__this">This item</span>
           </div>
           <span class="fbt-plus">+</span>
-          {relatedProducts.slice(0, 2).map((rp: Product, rpIdx: number) => {
+          {bundleProducts.slice(0, 2).map((rp: Product, rpIdx: number) => {
             const rpImage = rp.images.edges[0]?.node;
             const rpPrice = rp.priceRange.minVariantPrice;
             const rpVariant = rp.variants?.edges[0]?.node;
-            const isLast = rpIdx === Math.min(relatedProducts.length, 2) - 1;
+            const isLast = rpIdx === Math.min(bundleProducts.length, 2) - 1;
             return (
               <>
                 <div class="fbt-item">
@@ -581,7 +690,7 @@ const breadcrumbSchema = {
           <div class="fbt-total">
             <span class="fbt-total__label">Bundle Price</span>
             <span class="fbt-total__price" id="fbt-total-price">
-              {fmt(parseFloat(price.amount) + relatedProducts.slice(0, 2).reduce((s: number, rp: Product) => s + parseFloat(rp.priceRange.minVariantPrice.amount), 0))}
+              {fmt(parseFloat(price.amount) + bundleProducts.slice(0, 2).reduce((s: number, rp: Product) => s + parseFloat(rp.priceRange.minVariantPrice.amount), 0))}
             </span>
             <button class="btn btn--gold fbt-total__btn" id="fbt-add-all">Add All to Cart</button>
           </div>
@@ -592,7 +701,7 @@ const breadcrumbSchema = {
 
   {/* ═══ RELATED PRODUCTS ═══ */}
   {relatedProducts.length > 0 && (
-    <section class="related-section section">
+    <section class="related-section section" id="related">
       <div class="container">
         <h2 class="related-title reveal">You Might Also Love</h2>
         <div class="related-grid reveal">
@@ -652,19 +761,22 @@ const breadcrumbSchema = {
     <div class="lightbox__counter" id="lightbox-counter"></div>
   </div>
 
-  {/* ═══ STICKY MOBILE BAR ═══ */}
-  <div class="sticky-bar" id="sticky-bar">
+  {/* ═══ STICKY MOBILE BAR ═══ (none for a sold piece: there's nothing to do with it) */}
+  {state !== 'gone' && <div class="sticky-bar" id="sticky-bar">
     <div class="sticky-bar__info">
       <span class="sticky-bar__title">{product.title}</span>
-      <span class="sticky-bar__price" id="sticky-price">{fmt(parseFloat(price.amount))}</span>
+      <span class="sticky-bar__price" id="sticky-price">{fmt(parseFloat(price.amount))}{state === 'special' && <span class="sticky-bar__kind"> · Special order</span>}</span>
     </div>
-    <button class="btn btn--gold sticky-bar__btn" id="sticky-add" disabled={!product.availableForSale}>
-      {product.availableForSale ? 'Add to Cart' : 'Sold Out'}
-    </button>
-  </div>
+    {canBuy && (
+      <button class="btn btn--gold sticky-bar__btn" id="sticky-add">Add to Cart</button>
+    )}
+    {state === 'special' && (
+      <a href="#request" class="btn btn--gold sticky-bar__btn" id="sticky-request" data-open-request>Request</a>
+    )}
+  </div>}
 
-  {/* ═══ STICKY DESKTOP HEADER ═══ */}
-  <div class="sticky-header" id="sticky-header" aria-hidden="true">
+  {/* ═══ STICKY DESKTOP HEADER ═══ (none for a sold piece) */}
+  {state !== 'gone' && <div class="sticky-header" id="sticky-header" aria-hidden="true">
     <div class="container sticky-header__inner">
       <div class="sticky-header__product">
         {mainImage && (
@@ -680,22 +792,21 @@ const breadcrumbSchema = {
         </div>
       </div>
       <div class="sticky-header__actions">
-        {isLowStock && (
+        {canBuy && isLowStock && (
           <span class="sticky-header__urgency">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
             Only {stockQty} left
           </span>
         )}
-        <button
-          class="btn btn--gold sticky-header__atc"
-          id="sticky-header-add"
-          disabled={!product.availableForSale}
-        >
-          {product.availableForSale ? 'Add to Cart' : 'Sold Out'}
-        </button>
+        {canBuy && (
+          <button class="btn btn--gold sticky-header__atc" id="sticky-header-add">Add to Cart</button>
+        )}
+        {state === 'special' && (
+          <a href="#request" class="btn btn--gold sticky-header__atc" id="sticky-header-request" data-open-request>Request this piece</a>
+        )}
       </div>
     </div>
-  </div>
+  </div>}
 </Base>
 
 <style>
@@ -931,28 +1042,309 @@ const breadcrumbSchema = {
   .pdp-urgency svg { color: var(--color-gold); flex-shrink: 0; }
   .pdp-urgency strong { font-weight: 700; }
 
-  /* ─── Back in Stock Notification ─────────── */
-  .pdp-notify {
-    margin: var(--space-md) 0;
-    padding: var(--space-md);
+  /* ─── Where it is / special order / sold ───────────────────────────────
+     Measured in the design audit (scratchpad audit.mjs): input edges ≥ 3:1 (WCAG 1.4.11),
+     text ≥ 4.5:1, targets ≥ 44px, no layout shift on send, focus never under a sticky bar.
+     Motion: in 320 ms, out 200 ms, the site's ease-out; reduced motion makes it instant
+     (global.css), and nothing depends on motion to be understood. */
+  .pdp-buy[hidden],
+  .pdp-delivery[hidden],
+  .sticky-bar[hidden],
+  .sticky-header[hidden] { display: none !important; }
+
+  /* Focused fields and jumped-to sections clear the fixed nav, the sticky header and the phone bar (WCAG 2.4.11). */
+  :global(html) { scroll-padding-top: 150px; }
+  /* Desktop: the nav, plus the sticky header below it while it shows. */
+  @media (min-width: 769px) { :global(html) { scroll-padding-top: 230px; } }
+  @media (max-width: 768px) { :global(html) { scroll-padding-bottom: 104px; } }
+
+  .pdp-where { display: flex; gap: 0.75rem; align-items: flex-start; margin: var(--space-md) 0; }
+  .pdp-where__icon { flex: none; display: inline-flex; margin-top: 0.05rem; color: var(--color-link); }
+  .pdp-where--special .pdp-where__icon { color: var(--color-charcoal); }
+  .pdp-where__text { display: flex; flex-direction: column; gap: 0.2rem; }
+  .pdp-where__line { font-size: 1rem; font-weight: 600; line-height: 1.4; color: var(--color-charcoal); }
+  .pdp-where__detail { font-size: 0.9rem; line-height: 1.55; color: var(--color-slate); max-width: 46ch; }
+
+  /* Request: a button where Add to Cart sits, opening into the form in place. */
+  .pdp-request { --rq-edge: #8F8A82; --rq-error: #A6421F; margin: var(--space-md) 0; scroll-margin-top: 150px; }
+  .pdp-request__open,
+  .pdp-request__submit {
+    width: 100%;
+    min-height: 54px;
+    justify-content: center;
+    padding: 1.1rem 2rem;
+    font-size: 0.9rem;
+  }
+  /* The button folds away as the form opens, so the page never jumps. */
+  .pdp-request__trigger {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 320ms var(--ease-out), opacity 200ms var(--ease-out);
+  }
+  .pdp-request[data-open='true'] .pdp-request__trigger { grid-template-rows: 0fr; opacity: 0; }
+  .pdp-request__clip--ring { padding: 6px; margin: -6px; } /* room for the focus ring inside the fold */
+  .pdp-request__panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 320ms var(--ease-out);
+  }
+  .pdp-request[data-open='true'] .pdp-request__panel { grid-template-rows: 1fr; }
+  .pdp-request__clip { min-height: 0; overflow: hidden; }
+  .pdp-request__card {
+    padding: 1.5rem;
     background: var(--color-warm-white);
     border: 1px solid var(--color-cream-dark);
+    border-radius: 8px;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
   }
-
-  .pdp-notify__text {
-    font-size: 0.85rem;
-    color: var(--color-slate);
-    margin: 0 0 0.75rem;
-    line-height: 1.6;
+  .pdp-request[data-open='true'] .pdp-request__card {
+    opacity: 1;
+    transform: none;
+    transition: opacity 320ms var(--ease-out) 60ms, transform 320ms var(--ease-out) 60ms;
   }
-
-  .pdp-notify__btn {
-    padding: 0.75rem 1.25rem;
-    font-size: 0.78rem;
-    white-space: nowrap;
+  @media (max-width: 480px) { .pdp-request__card { padding: 1.25rem 1rem; } }
+  .pdp-request__title {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 400;
+    line-height: 1.2;
+    margin: 0 0 1.25rem;
+    color: var(--color-charcoal);
+  }
+  .pdp-request__title:focus,
+  .pdp-sold__title:focus,
+  .pdp-request__done:focus { outline: none; box-shadow: none; } /* moved to for screen readers; not controls */
+  .pdp-request__form { display: flex; flex-direction: column; gap: 1.25rem; }
+  .pdp-request__form[hidden] { display: none; }
+  .pdp-request__field { display: flex; flex-direction: column; gap: 0.45rem; }
+  .pdp-request__field label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-charcoal);
+  }
+  .pdp-request__optional { font-weight: 400; letter-spacing: 0.02em; text-transform: none; color: var(--color-slate); }
+  .pdp-request__hint { margin: -0.2rem 0 0; font-size: 0.875rem; line-height: 1.45; color: var(--color-slate); }
+  .pdp-request__field input,
+  .pdp-request__field textarea {
+    font: inherit;
+    font-size: 1rem; /* 16px: iOS Safari doesn't zoom the page on focus */
+    line-height: 1.45;
+    min-height: 50px;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--rq-edge);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--color-charcoal);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .pdp-request__field textarea {
+    min-height: calc(2lh + 1.5rem + 2px);
+    max-height: 14rem;
+    resize: vertical;
+    field-sizing: content; /* grows with the note where supported */
+  }
+  .pdp-request__field input::placeholder,
+  .pdp-request__field textarea::placeholder { color: #767370; opacity: 1; }
+  .pdp-request__field input:hover,
+  .pdp-request__field textarea:hover { border-color: var(--color-stone); }
+  .pdp-request__field input:focus-visible,
+  .pdp-request__field textarea:focus-visible { border-color: var(--color-charcoal); }
+  .pdp-request__field [aria-invalid='true'] { border-color: var(--rq-error); box-shadow: inset 0 0 0 1px var(--rq-error); }
+  .pdp-request__field [aria-invalid='true']:focus-visible { outline-color: var(--rq-error); box-shadow: inset 0 0 0 1px var(--rq-error), 0 0 0 4px #F6DDD3; }
+  .pdp-request__error {
+    display: flex;
+    gap: 0.4rem;
+    align-items: flex-start;
+    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--rq-error);
+    animation: rqIn 200ms var(--ease-out);
+  }
+  .pdp-request__error::before {
+    content: '';
+    flex: none;
+    width: 16px;
+    height: 16px;
+    margin-top: 0.1rem;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.25' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5M12 16.4v.1'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.25' stroke-linecap='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.5v5.5M12 16.4v.1'/%3E%3C/svg%3E") center / contain no-repeat;
+  }
+  .pdp-request__error[hidden],
+  .pdp-request__alert[hidden],
+  .pdp-request__reload[hidden],
+  .pdp-request__done[hidden] { display: none; }
+  .pdp-request__trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  .pdp-request__alert {
+    display: flex;
+    gap: 0.6rem;
+    align-items: flex-start;
+    padding: 0.85rem 1rem;
+    border-radius: 8px;
+    background: #FBEDE7;
+    color: #8A3518;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    animation: rqIn 200ms var(--ease-out);
+  }
+  .pdp-request__alert svg { flex: none; margin-top: 0.1rem; }
+  .pdp-request__reload {
     display: inline-flex;
-    justify-content: center;
+    align-items: center;
+    min-height: 44px;
+    margin-top: 0.4rem;
+    padding: 0 1rem;
+    border: 1.5px solid currentColor;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
   }
+  .pdp-request__submit { gap: 0.65rem; }
+  .pdp-request__spinner {
+    display: none;
+    width: 16px;
+    height: 16px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+  }
+  .pdp-request__submit[aria-busy='true'] { cursor: progress; }
+  .pdp-request__submit[aria-busy='true'] .pdp-request__spinner { display: inline-block; animation: rqSpin 700ms linear infinite; }
+  .pdp-request__suggest { margin: 0; font-size: 0.875rem; color: var(--color-charcoal); }
+  .pdp-request__suggest[hidden], .pdp-request__count[hidden] { display: none; }
+  .pdp-request__suggest-btn {
+    display: inline-flex; align-items: center; min-height: 44px; margin: -0.6rem 0; padding: 0 0.15rem;
+    border: 0; background: none; font: inherit; font-weight: 600; color: var(--color-link);
+    text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+  }
+  .pdp-request__count { margin: 0; font-size: 0.8125rem; color: var(--color-slate); text-align: right; font-variant-numeric: tabular-nums; }
+  .pdp-request__count.is-near { color: var(--rq-error); font-weight: 600; }
+  .pdp-request__steps { margin: 0.4rem 0 0; padding: 0; list-style: none; counter-reset: rq; text-align: left; max-width: 30rem; display: flex; flex-direction: column; gap: 0.55rem; }
+  .pdp-request__steps li { counter-increment: rq; display: grid; grid-template-columns: 1.6rem 1fr; gap: 0.6rem; font-size: 0.9rem; line-height: 1.45; color: var(--color-slate); }
+  .pdp-request__steps li::before {
+    content: counter(rq); display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+    background: var(--color-gold); color: var(--color-charcoal); font-size: 0.8rem; font-weight: 700;
+  }
+  .pdp-request__steps strong { color: var(--color-charcoal); font-weight: 600; }
+  .pdp-request__trigger[inert] { pointer-events: none; }
+  .pdp-request__promise { margin: 0.85rem 0 0; font-size: 0.875rem; line-height: 1.5; color: var(--color-slate); text-align: center; }
+  .pdp-request[data-sent='true'] .pdp-request__promise { display: none; }
+
+  /* Sent: the card keeps its height, so nothing on the page jumps (no layout shift). */
+  .pdp-request__done {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    text-align: center;
+  }
+  .pdp-request__check {
+    display: inline-grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    margin-bottom: 0.25rem;
+    border-radius: 50%;
+    background: var(--color-charcoal);
+    color: var(--color-gold);
+    animation: rqPop 420ms var(--ease-out) both;
+  }
+  .pdp-request__check path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: rqDraw 360ms var(--ease-out) 200ms forwards; }
+  .pdp-request__done > :not(.pdp-request__check) { animation: rqIn 360ms var(--ease-out) 120ms both; }
+  .pdp-request__done-title:focus { outline: none; }
+  .pdp-request__done-text :global(.nowrap) { white-space: nowrap; } /* added by the script, so unscoped */
+  .pdp-request__done-title { font-family: var(--font-display); font-size: 1.6rem; font-weight: 400; line-height: 1.2; margin: 0; color: var(--color-charcoal); }
+  .pdp-request__done-text { margin: 0; max-width: 34ch; font-size: 1rem; line-height: 1.55; color: var(--color-charcoal); }
+  .pdp-request__done-fine { margin: 0; font-size: 0.875rem; line-height: 1.5; color: var(--color-slate); }
+  .pdp-request__done-fine a { color: var(--color-link); text-decoration: underline; text-underline-offset: 3px; white-space: nowrap; }
+  /* The narrowest phones (320px): tighter, so the sent card still fits the form's height. */
+  @media (max-width: 360px) {
+    .pdp-request__done { gap: 0.4rem; }
+    .pdp-request__check { width: 44px; height: 44px; margin-bottom: 0; }
+    .pdp-request__done-title { font-size: 1.35rem; }
+    .pdp-request__done-text { font-size: 0.9375rem; line-height: 1.5; }
+    .pdp-request__steps { gap: 0.4rem; margin-top: 0.2rem; }
+    .pdp-request__steps li { font-size: 0.875rem; line-height: 1.4; }
+  }
+  @keyframes rqIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes rqPop { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+  @keyframes rqDraw { to { stroke-dashoffset: 0; } }
+  @keyframes rqSpin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    /* global.css turns animation off; the check must still show, the spinner sits still */
+    .pdp-request__check path { stroke-dashoffset: 0; }
+    .pdp-request__card { transform: none; }
+  }
+
+  /* Sold: said above the photo on a phone, and in place of the buy box everywhere. */
+  .pdp-sold-jump {
+    display: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 0.5rem;
+    margin: 0 0 0.75rem;
+    padding: 0.35rem 1rem;
+    border-radius: 8px;
+    background: var(--color-charcoal);
+    color: var(--color-cream);
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+  .pdp-sold-jump__icon { display: inline-flex; color: var(--color-gold); }
+  .pdp-sold-jump strong { font-weight: 600; }
+  .pdp-sold-jump a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--color-gold);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  @media (max-width: 767px) { .pdp-sold-jump { display: flex; } }
+
+  .pdp-sold {
+    margin: var(--space-md) 0;
+    padding: 1.5rem;
+    background: var(--color-warm-white);
+    border: 1px solid var(--color-cream-dark);
+    border-radius: 8px;
+    scroll-margin-top: 150px;
+  }
+  @media (max-width: 480px) { .pdp-sold { padding: 1.25rem 1rem; } }
+  .pdp-sold__title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 400; line-height: 1.2; margin: 0 0 0.35rem; color: var(--color-charcoal); }
+  .pdp-sold__text { margin: 0 0 1.1rem; font-size: 0.95rem; line-height: 1.5; color: var(--color-slate); }
+  .pdp-sold__grid { list-style: none; margin: 0 0 1.25rem; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem 0.9rem; }
+  .pdp-sold__alt { display: flex; flex-direction: column; gap: 0.25rem; color: inherit; text-decoration: none; }
+  .pdp-sold__alt-frame { display: block; aspect-ratio: 1; margin-bottom: 0.35rem; overflow: hidden; border-radius: 6px; background: #fff; }
+  .pdp-sold__alt-frame img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 600ms var(--ease-out); }
+  .pdp-sold__alt:hover .pdp-sold__alt-frame img { transform: scale(1.04); }
+  .pdp-sold__alt-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.35;
+    color: var(--color-charcoal);
+  }
+  .pdp-sold__alt:hover .pdp-sold__alt-title { text-decoration: underline; text-underline-offset: 3px; }
+  .pdp-sold__alt-price { font-size: 0.9rem; font-weight: 600; color: var(--color-charcoal); }
+  .pdp-sold__alt-where { display: flex; gap: 0.3rem; align-items: center; font-size: 0.8rem; line-height: 1.3; color: var(--color-slate); }
+  .pdp-sold__alt-where > span { display: inline-flex; flex: none; color: var(--color-link); }
+  .pdp-sold__help { display: flex; flex-direction: column; gap: 0.75rem; padding-top: 1.1rem; border-top: 1px solid var(--color-cream-dark); }
+  .pdp-sold__help p { margin: 0; font-size: 0.9rem; color: var(--color-slate); }
+  .pdp-sold__call { min-height: 50px; justify-content: center; }
 
   /* ─── Video Thumbnail ───────────────────── */
   .pdp-thumb--video { position: relative; }
@@ -1666,6 +2058,8 @@ const breadcrumbSchema = {
 
   .sticky-bar__btn {
     flex-shrink: 0;
+    min-height: 48px;
+    justify-content: center;
     padding: 0.75rem 1.5rem;
     font-size: 0.78rem;
   }
@@ -1703,7 +2097,7 @@ const breadcrumbSchema = {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem 0;
+    padding-block: 0.75rem; /* top and bottom only: the container keeps the page's side margins */
     gap: 1rem;
   }
 
@@ -1755,13 +2149,15 @@ const breadcrumbSchema = {
     gap: 0.35rem;
     font-size: 0.75rem;
     font-weight: 600;
-    color: #e67e22;
+    color: var(--color-charcoal); /* the orange text was 2.67:1 on cream; the dot keeps the orange */
     white-space: nowrap;
   }
 
-  .sticky-header__urgency svg { flex-shrink: 0; }
+  .sticky-header__urgency svg { flex-shrink: 0; color: #e67e22; }
 
   .sticky-header__atc {
+    min-height: 44px;
+    justify-content: center;
     padding: 0.7rem 1.75rem;
     font-size: 0.78rem;
     white-space: nowrap;
@@ -1851,6 +2247,7 @@ const breadcrumbSchema = {
 </style>
 
 <script>
+  import { STORE_PHONE, emailSuggestion, fieldError, splitContact } from '@/lib/special-order-request.mjs';
   import { addLines, buyNow, recentlyViewed } from '@/lib/cart-store';
 
   // Clean up previous keydown listener on re-init (View Transitions)
@@ -1859,7 +2256,7 @@ const breadcrumbSchema = {
   document.addEventListener('astro:page-load', () => {
   // ─── DOM refs ───────────────────────────────
   const thumbs = document.querySelectorAll('.pdp-thumb');
-  if (!thumbs.length && !document.getElementById('main-product-image')) return;
+  if (!document.getElementById('pdp-price-area')) return; // not a product page
   const mainImg = document.getElementById('main-product-image') as HTMLImageElement;
   const galleryMain = document.getElementById('gallery-main');
   const variantBtns = document.querySelectorAll('.pdp-variant-btn');
@@ -2312,7 +2709,7 @@ const breadcrumbSchema = {
     updateLightbox();
   }
 
-  galleryMain?.addEventListener('click', () => openLightbox(currentImageIdx));
+  galleryMain?.addEventListener('click', () => { if (imageUrls.length) openLightbox(currentImageIdx); });
   lightboxClose?.addEventListener('click', closeLightbox);
   lightbox?.addEventListener('click', (e) => {
     if (e.target === lightbox) closeLightbox();
@@ -2359,15 +2756,26 @@ const breadcrumbSchema = {
 
   // ─── Sticky mobile bar & desktop header ─────
   if (stickyBar || stickyHeader) {
+    const root = document.documentElement;
     const observer = new IntersectionObserver(
       ([entry]) => {
         const isHidden = !entry.isIntersecting;
-        if (stickyBar) stickyBar.classList.toggle('is-visible', isHidden);
-        if (stickyHeader) stickyHeader.setAttribute('aria-hidden', String(!isHidden));
+        if (stickyBar) { stickyBar.classList.toggle('is-visible', isHidden); stickyBar.inert = !isHidden; }
+        if (stickyHeader) {
+          stickyHeader.style.top = `${Math.max(0, document.querySelector('.nav')?.getBoundingClientRect().bottom ?? 0)}px`;
+          stickyHeader.setAttribute('aria-hidden', String(!isHidden));
+          stickyHeader.inert = !isHidden;
+        }
+        // The chat button rides above the phone bar instead of covering its button.
+        const barShown = isHidden && stickyBar && !stickyBar.hidden && getComputedStyle(stickyBar).display !== 'none';
+        root.style.setProperty('--bottom-bar', barShown ? `${stickyBar!.offsetHeight}px` : '0px');
       },
       { threshold: 0 }
     );
-    if (addToCartBtn) observer.observe(addToCartBtn);
+    document.addEventListener('astro:before-swap', () => { observer.disconnect(); root.style.removeProperty('--bottom-bar'); }, { once: true });
+    // Watch the action this page has: the cart when it's shown, else the request form.
+    const action = addToCartBtn && addToCartBtn.offsetParent ? addToCartBtn : document.getElementById('request');
+    if (action) observer.observe(action);
   }
 
   // Sticky header add to cart
@@ -2524,4 +2932,247 @@ const breadcrumbSchema = {
   }
 
   }); // end astro:page-load
+
+  // ─── Special-order request ───────────────────
+  // The rules are shared with the server (src/lib/special-order-request.mjs), so a shopper
+  // sees the server's words before sending. A box is checked when the shopper leaves it
+  // (Baymard, NN/g), never while they first type, and its error clears on the keystroke
+  // that fixes it. Runs on every page load: the site moves between pages without reloading.
+  document.addEventListener('astro:page-load', () => {
+    const section = document.getElementById('request') as HTMLElement | null;
+    const form = document.getElementById('request-form') as HTMLFormElement | null;
+    if (!section || !form) return;
+    const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+    const openBtn = $<HTMLButtonElement>('rq-open');
+    const panel = $<HTMLElement>('rq-panel');
+    const card = $<HTMLElement>('rq-card');
+    const title = $<HTMLElement>('pdp-request-title');
+    const submit = $<HTMLButtonElement>('rq-submit');
+    const submitLabel = $<HTMLElement>('rq-submit-label');
+    const alertBox = $<HTMLElement>('rq-alert');
+    const alertText = $<HTMLElement>('rq-alert-text');
+    const reloadBtn = $<HTMLButtonElement>('rq-reload');
+    const done = $<HTMLElement>('rq-done');
+    const doneText = $<HTMLElement>('rq-done-text');
+    const fields = { name: $<HTMLInputElement>('rq-name'), contact: $<HTMLInputElement>('rq-contact'), note: $<HTMLTextAreaElement>('rq-note') };
+    type Field = keyof typeof fields;
+    const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const finePointer = matchMedia('(pointer: fine)').matches;
+    const OPEN_MS = 320;
+
+    // ── Open: the button folds away and the form unfolds in its place.
+    const open = (from: 'button' | 'sticky') => {
+      if (section.dataset.open === 'true') {
+        if (from === 'sticky') section.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+        return;
+      }
+      section.dataset.open = 'true';
+      openBtn.setAttribute('aria-expanded', 'true');
+      panel.inert = false;
+      // The folded button can't be reached any more: focus never lands on something unseen.
+      (openBtn.closest('.pdp-request__trigger') as HTMLElement).inert = true;
+      if (from === 'sticky') section.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' });
+      // A mouse or keyboard goes straight to typing; on a phone the keyboard waits for a tap,
+      // and screen readers land on the form's heading.
+      window.setTimeout(() => (finePointer ? fields.name : title).focus({ preventScroll: true }), reduceMotion() ? 0 : OPEN_MS);
+    };
+    openBtn.addEventListener('click', () => open('button'));
+    document.querySelectorAll<HTMLAnchorElement>('[data-open-request]').forEach((a) => {
+      a.addEventListener('click', (e) => { e.preventDefault(); open('sticky'); });
+    });
+    // Arriving at /shop/…/#request (a link from an email or the sticky bar before the script ran)
+    if (location.hash === '#request') open('sticky');
+
+    // ── Checking boxes
+    const errorEl = (f: Field) => $<HTMLElement>(`rq-${f}-error`);
+    const setError = (f: Field, message: string | null) => {
+      const el = errorEl(f);
+      if (message) {
+        if (el.textContent !== message || el.hidden) { el.textContent = message; el.hidden = false; }
+        fields[f].setAttribute('aria-invalid', 'true');
+      } else {
+        el.hidden = true;
+        el.textContent = '';
+        fields[f].removeAttribute('aria-invalid');
+      }
+    };
+    const touched = new Set<Field>();
+    (Object.keys(fields) as Field[]).forEach((f) => {
+      fields[f].addEventListener('blur', () => {
+        if (!fields[f].value.trim() && !touched.has(f)) return; // passing through an empty box isn't a mistake yet
+        touched.add(f);
+        setError(f, fieldError(f, fields[f].value));
+      });
+      fields[f].addEventListener('input', () => {
+        // Only ever clears while typing: the keystroke that fixes it takes the message away.
+        if (fields[f].getAttribute('aria-invalid') === 'true' && !fieldError(f, fields[f].value)) setError(f, null);
+        if (!alertBox.hidden) alertBox.hidden = true;
+      });
+    });
+
+    /** Brings a box into view with its label and message (not just its edge under the nav), then focuses it. */
+    const focusField = (f: Field) => {
+      fields[f].closest('.pdp-request__field')?.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
+      fields[f].focus({ preventScroll: true });
+    };
+    /** Writes a message, with the store's number as a tap-to-call link. */
+    const withPhoneLink = (el: HTMLElement, message: string) => {
+      el.textContent = '';
+      message.split(STORE_PHONE).forEach((part, i) => {
+        // appendChild, not append: the worker types' Element.append (HTMLRewriter) takes only strings.
+        if (i) { const a = document.createElement('a'); a.href = `tel:+1${STORE_PHONE.replace(/\D/g, '')}`; a.textContent = STORE_PHONE; el.appendChild(a); }
+        el.appendChild(document.createTextNode(part));
+      });
+    };
+    const showAlert = (message: string, code?: string) => {
+      withPhoneLink(alertText, message);
+      reloadBtn.hidden = code !== 'reload';
+      alertBox.hidden = false;
+      const r = alertBox.getBoundingClientRect();
+      if (r.top < 120 || r.bottom > innerHeight - 24) alertBox.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
+    };
+    reloadBtn.addEventListener('click', () => location.reload());
+    const count = $<HTMLElement>('rq-note-count');
+    const NOTE_MAX = fields.note.maxLength;
+    fields.note.addEventListener('input', () => {
+      const left = NOTE_MAX - fields.note.value.length;
+      count.hidden = left > 150;
+      count.textContent = left === 1 ? '1 character left' : `${left} characters left`;
+      count.classList.toggle('is-near', left <= 20);
+    });
+
+    // A likely slip in an email's domain (gmial.com, .con): offered, never forced.
+    const suggest = $<HTMLElement>('rq-contact-suggest');
+    const suggestBtn = $<HTMLButtonElement>('rq-suggest-btn');
+    const offerFix = () => {
+      const fix = emailSuggestion(fields.contact.value);
+      suggest.hidden = !fix;
+      if (fix) suggestBtn.textContent = fix;
+    };
+    fields.contact.addEventListener('blur', offerFix);
+    fields.contact.addEventListener('input', () => { if (!suggest.hidden) offerFix(); });
+    suggestBtn.addEventListener('click', () => {
+      fields.contact.value = suggestBtn.textContent ?? fields.contact.value;
+      suggest.hidden = true;
+      setError('contact', fieldError('contact', fields.contact.value));
+      fields.contact.focus();
+    });
+    const root = document.documentElement;
+    /**
+     * Whatever gets focus in the form shows whole (its label, box and message), clear of the
+     * fixed nav at the top and the phone bar or keyboard at the bottom (WCAG 2.4.11). Done
+     * here because browsers differ: Safari's own scroll left a tabbed-to box 14px off screen.
+     */
+    const keepInView = (el: HTMLElement) => {
+      const box = (el.closest('.pdp-request__field') as HTMLElement | null) ?? el;
+      const r = box.getBoundingClientRect();
+      const viewH = window.visualViewport?.height ?? innerHeight;
+      const bars = [document.querySelector('.nav'), document.getElementById('sticky-header')]
+        .filter((b): b is HTMLElement => Boolean(b) && !(b as HTMLElement).hidden && getComputedStyle(b as HTMLElement).display !== 'none' && (b as HTMLElement).getAttribute('aria-hidden') !== 'true');
+      const top = Math.max(0, ...bars.map((b) => b.getBoundingClientRect().bottom)) + 16;
+      const bottom = viewH - 24;
+      const by = r.height > bottom - top ? r.top - top : r.bottom > bottom ? r.bottom - bottom : r.top < top ? r.top - top : 0;
+      if (Math.abs(by) > 1) window.scrollBy({ top: by, behavior: reduceMotion() ? 'auto' : 'smooth' });
+    };
+    form.addEventListener('focusin', (e) => {
+      root.dataset.typing = 'true';
+      const el = e.target as HTMLElement;
+      // After the browser's own scroll (and the phone keyboard) has settled.
+      window.setTimeout(() => { if (document.activeElement === el) keepInView(el); }, 60);
+    });
+    form.addEventListener('focusout', () => {
+      window.setTimeout(() => { if (!form.contains(document.activeElement)) delete root.dataset.typing; }, 0);
+    });
+    document.addEventListener('astro:before-swap', () => { delete root.dataset.typing; }, { once: true });
+
+    let sending = false;
+    const setSending = (on: boolean) => {
+      sending = on;
+      // aria-disabled, not disabled: the button keeps keyboard focus while it works.
+      submit.setAttribute('aria-disabled', String(on));
+      if (on) submit.setAttribute('aria-busy', 'true'); else submit.removeAttribute('aria-busy');
+      submitLabel.textContent = on ? 'Sending…' : 'Send request';
+    };
+
+    /** Shows one of the card's end states (sent, or just sold) in place of the form, at the
+     *  form's height so nothing on the page jumps, and moves focus to its heading. */
+    const finish = (endState: HTMLElement) => {
+      const style = getComputedStyle(card);
+      const inner = card.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+      endState.style.minHeight = `${inner}px`;
+      title.hidden = true;
+      form.hidden = true;
+      endState.hidden = false;
+      section.dataset.sent = 'true';
+      endState.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true });
+      // Nothing left to ask for: the sticky bar and header go, and the chat button settles back.
+      document.querySelectorAll<HTMLElement>('#sticky-bar, #sticky-header').forEach((el) => { el.hidden = true; });
+      document.documentElement.style.setProperty('--bottom-bar', '0px');
+    };
+
+    /** It came back in stock since this page was built: the cart takes over, right here. */
+    const backInStock = () => {
+      const buy = document.querySelector<HTMLElement>('.pdp-buy');
+      const add = document.getElementById('add-to-cart') as HTMLButtonElement | null;
+      if (!buy || !add) return false;
+      buy.hidden = false;
+      document.querySelector<HTMLElement>('.pdp-delivery')?.removeAttribute('hidden');
+      add.disabled = false;
+      add.textContent = 'Add to Cart';
+      section.hidden = true;
+      document.querySelectorAll<HTMLElement>('#sticky-bar, #sticky-header').forEach((el) => { el.hidden = true; });
+      const line = document.querySelector('.pdp-where__line');
+      if (line) line.textContent = 'Back in stock';
+      const detail = document.querySelector('.pdp-where__detail');
+      if (detail) detail.textContent = 'Good news: it’s back. You can buy it now.';
+      add.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' });
+      add.focus({ preventScroll: true });
+      return true;
+    };
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (sending) return;
+      alertBox.hidden = true;
+      const values = { name: fields.name.value, contact: fields.contact.value, note: fields.note.value };
+      const website = (form.elements.namedItem('website') as HTMLInputElement | null)?.value ?? '';
+      // Every box at once: each shows its own message, and focus goes to the first to fix.
+      const wrong = (Object.keys(fields) as Field[]).filter((f) => { touched.add(f); const m = fieldError(f, values[f]); setError(f, m); return Boolean(m); });
+      if (wrong.length) { focusField(wrong[0]); return; }
+
+      setSending(true);
+      try {
+        const res = await fetch('/api/special-order-request/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...values, website, handle: form.dataset.handle }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { error?: string; field?: string; code?: string; replyBy?: string };
+        if (!res.ok) {
+          if (body.code === 'back-in-stock' && backInStock()) return;
+          if (body.code === 'sold') return finish($<HTMLElement>('rq-sold'));
+          if (body.field && body.field in fields) { setError(body.field as Field, body.error ?? null); focusField(body.field as Field); }
+          else showAlert(body.error || `We couldn’t send your request just now. Try again in a minute, or call us at ${STORE_PHONE}.`, body.code);
+          return;
+        }
+        // Sent: says how and when we'll answer, what happens after, and that a copy is coming.
+        const by = body.replyBy ? `by ${body.replyBy}` : 'by the next business day';
+        const { email, phone } = splitContact(values.contact);
+        const how = document.createElement('span');
+        how.className = 'nowrap';
+        how.textContent = (email ?? phone) as string;
+        doneText.textContent = `We’ll ${email ? 'email' : 'call'} you at `;
+        doneText.appendChild(how);
+        doneText.appendChild(document.createTextNode(` ${by} with the price and arrival date.${email ? ' A copy of your request is on its way to your inbox.' : ''}`));
+        const step = document.getElementById('rq-step-reply');
+        if (step) step.textContent = `We ${email ? 'email' : 'call'} you ${by}.`;
+        finish(done);
+      } catch {
+        // No connection: the browser's own words ("Failed to fetch") never reach the shopper.
+        showAlert(`We couldn’t reach the store. Check your connection and try again, or call us at ${STORE_PHONE}.`);
+      } finally {
+        setSending(false);
+      }
+    });
+  });
 </script>

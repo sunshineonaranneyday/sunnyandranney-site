@@ -1,20 +1,17 @@
 ---
 import Base from '@/layouts/Base.astro';
 import { cfImage, cfSrcset, SIZES } from '@/lib/images';
-import { fetchShopData, buildProductDataMap } from '@/lib/shop-data';
+import { fetchShopData, type ShopProduct } from '@/lib/shop-data';
 import { formatPriceShort as fmt, type Product } from '@/lib/shopify';
+import { availabilityLine, schemaAvailability } from '@/lib/availability.mjs';
+import { availabilityIcon } from '@/lib/availability-icons.mjs';
 
 // Fully static — rebuilt via deploy hook when products/settings change
 export const prerender = true;
 
 // Fetch ALL products from enabled collections at build time
-const { products: rawProducts, hasShopify, productCollections, collectionTitles, collectionSubcategories, staffPickHandles } = await fetchShopData();
-
-// Sort sold-out products to the bottom
-const products = [...rawProducts].sort((a: Product, b: Product) => {
-  if (a.availableForSale === b.availableForSale) return 0;
-  return a.availableForSale ? -1 : 1;
-});
+// Already in grid order: in stock first, then special orders; pieces that are gone aren't here.
+const { products, hasShopify, productCollections, collectionTitles, collectionSubcategories, staffPickHandles } = await fetchShopData();
 
 // Mission card sits at a fixed slot (5th position) so it never jumps around.
 const missionIdx = products.length >= 4 ? 4 : -1;
@@ -31,7 +28,7 @@ const itemListSchema = hasShopify ? {
   '@type': 'ItemList',
   name: 'Shop All Products',
   numberOfItems: products.length,
-  itemListElement: products.slice(0, 50).map((p: Product, i: number) => ({
+  itemListElement: products.slice(0, 50).map((p: ShopProduct, i: number) => ({
     '@type': 'ListItem',
     position: i + 1,
     item: {
@@ -48,9 +45,7 @@ const itemListSchema = hasShopify ? {
         '@type': 'Offer',
         price: parseFloat(p.priceRange.minVariantPrice.amount).toFixed(2),
         priceCurrency: p.priceRange.minVariantPrice.currencyCode,
-        availability: p.availableForSale
-          ? 'https://schema.org/InStock'
-          : 'https://schema.org/OutOfStock',
+        availability: schemaAvailability(p.availability),
         shippingDetails: {
           '@type': 'OfferShippingDetails',
           shippingRate: {
@@ -175,6 +170,14 @@ const itemListSchema = hasShopify ? {
               <button class="toolbar__price-go" id="price-go" aria-label="Apply price filter">Go</button>
             </div>
           </div>
+          <!-- Availability -->
+          <div class="toolbar__panel-group">
+            <span class="toolbar__panel-label" id="stock-label">Availability</span>
+            <label class="toolbar__check">
+              <input type="checkbox" id="in-stock-only" aria-describedby="stock-label" />
+              <span>In stock now</span>
+            </label>
+          </div>
           <!-- View -->
           <div class="toolbar__panel-group">
             <label class="toolbar__panel-label">View</label>
@@ -205,10 +208,13 @@ const itemListSchema = hasShopify ? {
               const image2 = product.images.edges[1]?.node;
               const price = product.priceRange.minVariantPrice;
               const compareAt = product.compareAtPriceRange?.minVariantPrice;
-              const isOnSale = compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount);
+              // A special order's price is confirmed when it's ordered: no "was" price or sale on it.
+              const isOnSale = product.availability.state !== 'special' && compareAt && parseFloat(compareAt.amount) > parseFloat(price.amount);
               const isNewArrival = product.createdAt && (Date.now() - new Date(product.createdAt).getTime()) < 30 * 24 * 60 * 60 * 1000;
               const firstVariant = product.variants.edges[0]?.node;
               const totalQty = product.variants.edges.reduce((sum: number, e: { node: { quantityAvailable: number | null } }) => sum + (e.node.quantityAvailable ?? 0), 0);
+              const { state } = product.availability;
+              const inStock = state !== 'special';
 
               return (
                 <>
@@ -234,17 +240,17 @@ const itemListSchema = hasShopify ? {
                   data-tags={product.tags?.join(',').toLowerCase() || ''}
                   data-collections={(productCollections[product.handle] || []).join(',')}
                   data-created={product.createdAt || ''}
-                  data-available={String(product.availableForSale)}
+                  data-available={String(inStock)}
+                  data-state={state}
                   data-on-sale={String(!!isOnSale)}
                   data-total-qty={totalQty}
                   data-idx={idx}
                   data-page={Math.floor(idx / 12)}
                 >
                   <div class="product-card__image-container">
-                    {!product.availableForSale && <span class="product-card__badge product-card__badge--sold">Sold Out</span>}
-                    {product.availableForSale && isOnSale && <span class="product-card__badge">Sale</span>}
-                    {product.availableForSale && !isOnSale && staffPickHandles.has(product.handle) && <span class="product-card__badge product-card__badge--pick">Staff Pick</span>}
-                    {product.availableForSale && !isOnSale && !staffPickHandles.has(product.handle) && isNewArrival && <span class="product-card__badge product-card__badge--new">New</span>}
+                    {inStock && isOnSale && <span class="product-card__badge">Sale</span>}
+                    {inStock && !isOnSale && staffPickHandles.has(product.handle) && <span class="product-card__badge product-card__badge--pick">Staff Pick</span>}
+                    {inStock && !isOnSale && !staffPickHandles.has(product.handle) && isNewArrival && <span class="product-card__badge product-card__badge--new">New</span>}
                     <a href={`/shop/${product.handle}/`} class="product-card__image" aria-hidden="true" tabindex="-1">
                       {image ? (
                         <>
@@ -279,6 +285,7 @@ const itemListSchema = hasShopify ? {
                         </span>
                       )}
                     </div>
+                    <p class={`product-card__where product-card__where--${state}`}><span class="product-card__where-icon" set:html={availabilityIcon(state, 15)} />{availabilityLine(product.availability)}</p>
                   </div>
                 </div>
                 </>
@@ -712,8 +719,18 @@ const itemListSchema = hasShopify ? {
     gap: 0.6rem;
   }
 
+  .toolbar__check {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-height: 44px;
+    font-size: 0.9rem;
+    color: var(--color-charcoal);
+    cursor: pointer;
+  }
+  .toolbar__check input { width: 20px; height: 20px; margin: 0; accent-color: var(--color-charcoal); }
   .toolbar__panel-label {
-    font-size: 0.68rem;
+    font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -1341,6 +1358,20 @@ const itemListSchema = hasShopify ? {
     text-decoration: line-through;
   }
 
+  /* Where the piece is, or that it's a special order: one quiet line under the price,
+     an icon and words (never color alone), at 13px, the smallest text the card uses. */
+  .product-card__where {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0.35rem 0 0;
+    font-size: 0.8125rem;
+    line-height: 1.3;
+    color: var(--color-slate);
+  }
+  .product-card__where-icon { display: inline-flex; flex: none; color: var(--color-link); }
+  .product-card__where--special .product-card__where-icon { color: var(--color-charcoal); }
+
   /* No-image placeholder uses cream bg, not white */
   .product-card__image-ph {
     position: absolute;
@@ -1725,6 +1756,7 @@ const itemListSchema = hasShopify ? {
   let activeSearch = '';
   let activeCollection = '';
   let activeSale = false;
+  let activeInStock = false;
   let priceMin = 0;
   let priceMax = Infinity;
   let activeView = 'grid';
@@ -1741,6 +1773,7 @@ const itemListSchema = hasShopify ? {
     if (priceMax < Infinity) params.set('pmax', String(priceMax));
     if (sortSelect?.value && sortSelect.value !== 'best-selling') params.set('sort', sortSelect.value);
     if (activeSale) params.set('sale', 'true');
+    if (activeInStock) params.set('stock', 'now');
     if (activeView !== 'grid') params.set('view', activeView);
     const qs = params.toString();
     const url = qs ? `/shop/?${qs}` : '/shop/';
@@ -1802,6 +1835,15 @@ const itemListSchema = hasShopify ? {
       chips.push({ label: sortLabels[sortSelect.value] || sortSelect.value, action: () => {
         sortSelect.value = 'best-selling';
         sortSelect.dispatchEvent(new Event('change'));
+      }});
+    }
+
+    if (activeInStock) {
+      chips.push({ label: 'In stock now', action: () => {
+        activeInStock = false;
+        if (inStockBox) inStockBox.checked = false;
+        visiblePage = 0;
+        applyAll();
       }});
     }
 
@@ -2100,8 +2142,9 @@ const itemListSchema = hasShopify ? {
         desc.includes(activeSearch);
       const matchesPrice = cardPrice >= priceMin && cardPrice <= priceMax;
       const matchesSale = !activeSale || (card.dataset.onSale === 'true' && parseInt(card.dataset.totalQty || '0') > 0);
+      const matchesStock = !activeInStock || card.dataset.available !== 'false';
 
-      if (matchesCollection && matchesProductType && matchesSearch && matchesPrice && matchesSale) {
+      if (matchesCollection && matchesProductType && matchesSearch && matchesPrice && matchesSale && matchesStock) {
         matchingCards.push(card);
         matchCount++;
       } else {
@@ -2253,36 +2296,38 @@ const itemListSchema = hasShopify ? {
   priceMaxInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyPriceFilter(); });
 
   // ─── Sort ───────────────────────────────────
+  /**
+   * One comparison for every sort, from the menu or the URL. "Best selling" is the build's
+   * order (in stock first, then special orders); a sort the shopper picks is just that sort.
+   */
+  function compareCards(sortBy: string) {
+    return (a: HTMLElement, b: HTMLElement) => {
+      const priceA = parseFloat(a.dataset.price || '0');
+      const priceB = parseFloat(b.dataset.price || '0');
+      const idxA = parseInt(a.dataset.idx || '0');
+      const idxB = parseInt(b.dataset.idx || '0');
+      switch (sortBy) {
+        case 'price-asc': return priceA - priceB || idxA - idxB;
+        case 'price-desc': return priceB - priceA || idxA - idxB;
+        case 'title-asc': return (a.dataset.title || '').toLowerCase().localeCompare((b.dataset.title || '').toLowerCase());
+        case 'newest': return (b.dataset.created || '').localeCompare(a.dataset.created || '') || idxA - idxB;
+        default: return idxA - idxB;
+      }
+    };
+  }
+
+  const inStockBox = document.getElementById('in-stock-only') as HTMLInputElement | null;
+  inStockBox?.addEventListener('change', () => {
+    activeInStock = inStockBox.checked;
+    visiblePage = 0;
+    applyAll();
+  });
+
   sortSelect?.addEventListener('change', () => {
     const cards = getCards();
     const sortBy = sortSelect.value;
 
-    cards.sort((a, b) => {
-      // Always push sold-out items to the bottom
-      const availA = a.dataset.available !== 'false' ? 1 : 0;
-      const availB = b.dataset.available !== 'false' ? 1 : 0;
-      if (availA !== availB) return availB - availA;
-
-      const priceA = parseFloat(a.dataset.price || '0');
-      const priceB = parseFloat(b.dataset.price || '0');
-      const titleA = (a.dataset.title || '').toLowerCase();
-      const titleB = (b.dataset.title || '').toLowerCase();
-      const idxA = parseInt(a.dataset.idx || '0');
-      const idxB = parseInt(b.dataset.idx || '0');
-
-      switch (sortBy) {
-        case 'price-asc': return priceA - priceB;
-        case 'price-desc': return priceB - priceA;
-        case 'title-asc': return titleA.localeCompare(titleB);
-        case 'newest': {
-          const dateA = a.dataset.created || '';
-          const dateB = b.dataset.created || '';
-          // Newest first — reverse chronological
-          return dateB.localeCompare(dateA) || idxA - idxB;
-        }
-        default: return idxA - idxB;
-      }
-    });
+    cards.sort(compareCards(sortBy));
 
     cards.forEach(card => grid?.appendChild(card));
     applyAll();
@@ -2349,27 +2394,15 @@ const itemListSchema = hasShopify ? {
       sortSelect.value = sortParam;
       // Sort cards without triggering change event (we'll call applyAll once at end)
       const cards = getCards();
-      cards.sort((a, b) => {
-        const priceA = parseFloat(a.dataset.price || '0');
-        const priceB = parseFloat(b.dataset.price || '0');
-        const titleA = (a.dataset.title || '').toLowerCase();
-        const titleB = (b.dataset.title || '').toLowerCase();
-        const idxA = parseInt(a.dataset.idx || '0');
-        const idxB = parseInt(b.dataset.idx || '0');
-        switch (sortParam) {
-          case 'price-asc': return priceA - priceB;
-          case 'price-desc': return priceB - priceA;
-          case 'title-asc': return titleA.localeCompare(titleB);
-          case 'newest': {
-            const dateA = a.dataset.created || '';
-            const dateB = b.dataset.created || '';
-            return dateB.localeCompare(dateA) || idxA - idxB;
-          }
-          default: return idxA - idxB;
-        }
-      });
+      cards.sort(compareCards(sortParam));
       cards.forEach(card => grid?.appendChild(card));
     }
+  }
+
+  // In stock now
+  if (params.get('stock') === 'now') {
+    activeInStock = true;
+    if (inStockBox) inStockBox.checked = true;
   }
 
   // Sale

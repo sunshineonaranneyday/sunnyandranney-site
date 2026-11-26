@@ -3,6 +3,7 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { json, readJson, requireRole } from '@/lib/admin-http';
 import { MEDUSA_PATH, MedusaProblem, medusaFetch } from '@/lib/medusa-admin';
+import { pokeRebuild } from '@/lib/rebuild';
 
 /**
  * The browser's way to Medusa's purchasing, warehouse and label routes. Managers
@@ -42,6 +43,9 @@ export const ALL: APIRoute = async (context) => {
       })();
       return json({ error: message ?? `Medusa answered ${res.status}` }, res.status);
     }
+    // A vendor's lead time decides which sold-out pieces the website offers as special
+    // orders, so a saved vendor rebuilds the site.
+    if (method === 'POST' && res.ok && path.startsWith('purchasing/vendors')) await pokeRebuild(context.locals.runtime.env, 'vendor saved');
     return new Response(text, { status: res.status, headers: { 'Content-Type': type, 'Cache-Control': 'no-store' } });
   } catch (err) {
     if (err instanceof MedusaProblem) return json({ error: err.message }, err.status);
