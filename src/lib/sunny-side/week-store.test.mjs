@@ -4,7 +4,7 @@ import { Miniflare } from 'miniflare';
 import { clean, forKind } from './special.mjs';
 import { cleanWall } from './wall.mjs';
 import { cleanEvent } from './events.mjs';
-import { clearWeek, getWeek, otherWeek, pastWeeks, photoInKitEmail, putWeek, scheduledRefusal, setKit, weekToWorkOn, wentOut } from './week-store.mjs';
+import { clearWeek, createExtra, extrasAhead, getWeek, otherWeek, pastWeeks, photoInKitEmail, putWeek, scheduledRefusal, setKit, weekToWorkOn, wentOut, workRefusal } from './week-store.mjs';
 import { addPhoto, deletePhoto, listPhotos } from './photo-store.mjs';
 import { cleanParts } from './parts.mjs';
 import { deleteEvent, eventsFrom, getEvent, putEvent } from './event-store.mjs';
@@ -152,6 +152,71 @@ test('a deleted photo leaves the library; its file stays only for an email sched
     assert.equal(await deletePhoto(DB, 'spare0photo01'), true);
     assert.equal(await deletePhoto(DB, 'spare0photo01'), false);
     assert.deepEqual((await listPhotos(DB)).map((p) => p.id).sort(), ['draftphoto001', 'sentphoto0001']);
+  } finally {
+    await mf.dispose();
+  }
+});
+
+// ─── More than one email a week (Peter, 2026-11-25) ──────────────────
+test('an extra email starts from the last email’s products and photos, with its own subject and sale', async () => {
+  const { DB, mf } = await freshDb();
+  try {
+    const parts = cleanParts({ subject: 'Cozy week', preheader: 'Come in', hero: 'aaaaaaaaaaaaaaaa1', kid: 'ava', off: ['events'] });
+    await putWeek(DB, { send: '2026-11-24', special, wall, parts, by: 'staci@x', now: 't1', since: null });
+    // Next week's, being worked on, has no products yet: the extra starts from the one that does
+    await putWeek(DB, { send: '2026-12-01', special: null, wall: null, parts: cleanParts({ subject: 'Next' }), by: 'staci@x', now: 't2', since: null });
+    assert.equal((await createExtra(DB, { send: '2026-11-27', by: 'holly@x', now: 't3' })).ok, true);
+    const extra = await getWeek(DB, '2026-11-27');
+    assert.equal(extra.special, null, 'its sale is its own');
+    assert.deepEqual(extra.wall, wall);
+    assert.equal(extra.parts.subject, '', 'so is its subject line');
+    assert.equal(extra.parts.preheader, '');
+    assert.equal(extra.parts.hero, 'aaaaaaaaaaaaaaaa1');
+    assert.equal(extra.parts.kid, 'ava');
+    assert.deepEqual(extra.parts.off, ['events']);
+    assert.equal(extra.updatedBy, 'holly@x');
+    // One email a day: a second extra that day is refused, and the first stays as it was
+    assert.equal((await createExtra(DB, { send: '2026-11-27', by: 'staci@x', now: 't4' })).ok, false);
+    assert.equal((await getWeek(DB, '2026-11-27')).updatedBy, 'holly@x');
+    await assert.rejects(() => createExtra(DB, { send: '2026-12-01', by: 'staci@x', now: 't5' }), /Not an extra email's day/);
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test('extras still to go are listed soonest first, and drop off once they go out', async () => {
+  const { DB, mf } = await freshDb();
+  try {
+    for (const send of ['2026-11-26', '2026-11-27', '2026-11-29', '2026-12-01']) await putWeek(DB, { send, special: null, wall: null, by: 'staci@x', now: 't1', since: null });
+    const now = Date.parse('2026-11-27T13:00:00Z');
+    assert.deepEqual((await extrasAhead(DB, '2026-11-27', now)).map((w) => w.send), ['2026-11-27', '2026-11-29'], 'from today on, and never the weekly one');
+    await setKit(DB, { send: '2026-11-27', id: 9, at: 't2', by: 'staci@x', sendAt: '2026-11-27T12:00:00Z' });
+    assert.deepEqual((await extrasAhead(DB, '2026-11-27', now)).map((w) => w.send), ['2026-11-29'], 'one that went out is in Sent emails');
+    await setKit(DB, { send: '2026-11-29', id: 10, at: 't2', by: 'staci@x', sendAt: '2026-11-29T12:00:00Z' });
+    assert.deepEqual((await extrasAhead(DB, '2026-11-27', now)).map((w) => w.send), ['2026-11-29'], 'one scheduled ahead still shows, to cancel');
+  } finally {
+    await mf.dispose();
+  }
+});
+
+test('only the weekly email being worked on, or an extra still to go, can change or go', async () => {
+  const { DB, mf } = await freshDb();
+  try {
+    const now = Date.parse('2026-11-26T15:00:00Z');
+    await putWeek(DB, { send: '2026-11-24', special, wall, by: 'staci@x', now: 't1', since: null });
+    await setKit(DB, { send: '2026-11-24', id: 1, at: 't1', by: 'staci@x', sendAt: '2026-11-24T21:30:00Z' });
+    assert.equal((await workRefusal(DB, '2026-12-01', '2026-11-26', now)).refused, null, 'next week’s, once this week’s went');
+    assert.match((await workRefusal(DB, '2026-11-24', '2026-11-26', now)).refused, /has gone out/);
+    assert.match((await workRefusal(DB, '2026-11-27', '2026-11-26', now)).refused, /was deleted/, 'an extra has to be started first');
+    await putWeek(DB, { send: '2026-11-27', special: null, wall: null, by: 'staci@x', now: 't2', since: null });
+    const ok = await workRefusal(DB, '2026-11-27', '2026-11-26', now);
+    assert.equal(ok.refused, null);
+    assert.equal(ok.week.send, '2026-11-27');
+    assert.match((await workRefusal(DB, '2026-11-27', '2026-11-28', now)).refused, /day has passed/);
+    await setKit(DB, { send: '2026-11-27', id: 2, at: 't3', by: 'staci@x', sendAt: '2026-11-27T12:00:00Z' });
+    assert.equal((await workRefusal(DB, '2026-11-27', '2026-11-26', now)).refused, null, 'scheduled, it can still be cancelled');
+    assert.match((await workRefusal(DB, '2026-11-27', '2026-11-27', Date.parse('2026-11-27T13:00:00Z'))).refused, /has gone out/);
+    assert.equal((await workRefusal(DB, 'soon', '2026-11-26', now)).refused, 'Invalid request');
   } finally {
     await mf.dispose();
   }

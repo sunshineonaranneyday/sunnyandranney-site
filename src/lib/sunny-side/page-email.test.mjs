@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Miniflare } from 'miniflare';
 import { Email, lines, plain, render, usePhotoOrigin } from './email.mjs';
-import { NO_MARKETING_TAG, STORE_SEGMENT, STORE_TAG, audienceOf, broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, statusOf, storeSegmentId, subscriberCount, templateFor, usualTime } from './kit.mjs';
+import { NO_MARKETING_TAG, STORE_SEGMENT, STORE_TAG, audienceOf, broadcastUrl, cancel, kitClient, readyTester, schedule, sendTest, sentEmail, sentEmails, signUp, statusOf, storeSegmentId, subscriberCount, templateFor, usualTime } from './kit.mjs';
 import { KID_PHOTOS, cfIdOf, kidFor, missionOf, photosDate, photosOf, revealedKids, roomsPhrase, tilePhotoFor } from './kids.mjs';
 import { cleanEvent, toBriefEvent } from './events.mjs';
 import { kitProblems, pageEmail } from './page-email.mjs';
-import { DEFAULT_HERO, arrangeCollage, blankParts, briefParts, checkParts, cleanParts, linesOf } from './parts.mjs';
+import { DEFAULT_HERO, NO_SALE, arrangeCollage, blankParts, briefParts, checkParts, cleanParts, linesOf } from './parts.mjs';
 import { addPhoto, isJpeg, listPhotos, newPhotoId, photosByIds, setAlt } from './photo-store.mjs';
 import { check, clean, draftSale, toSale } from './special.mjs';
 import { addPerson, listPeople, logTest, recentTests, removePerson, testsSince } from './test-store.mjs';
@@ -193,6 +193,30 @@ test('it can go only when it’s finished, and says what’s left, each with the
   assert.deepEqual(kitProblems({ ...ready, kids: [] }), [{ text: 'The charity’s kids didn’t load, so the charity section can’t be drawn. Reload the page to try again.', section: 'em-charity' }]);
 });
 
+test('a section turned off leaves the email, and nothing in it has to be finished for it to go', () => {
+  const off = (keys, extra = {}) => story(2, { off: keys, ...extra });
+  // The sale off: no gold band, its photo goes to the shop, and the subject can't promise a discount
+  const noSale = pageEmail({ sale, wall: wallOf(4), parts: off(['sale'], { subject: 'New this week' }), photos, kids, catalog, events: [], impact, send: SEND, site: SITE });
+  assert.deepEqual(noSale.sections, ['masthead', 'hero', 'wall', 'story', 'mission', 'visit', 'footer']);
+  assert.equal(noSale.brief.sale, null);
+  const html = render(noSale.brief, noSale.sections);
+  assert.doesNotMatch(html, /offer-button/);
+  assert.match(html, /href="https:\/\/sunnyandranney\.com\/shop\/\?[^"]*utm_content=hero-photo"/);
+  // Photos off takes the top photo and the collage; products, events and the charity each take their own
+  const lean = pageEmail({ sale, wall: wallOf(4), parts: off(['photos', 'products', 'charity', 'events']), photos, kids, catalog, events: [{ title: 'x' }], impact, send: SEND, site: SITE });
+  assert.deepEqual(lean.sections, ['masthead', 'offer', 'visit', 'footer']);
+  // Nothing in a section that's off holds the email up: no sale set, two products, a photo with no words
+  const ready = { special: null, sale: null, wall: wallOf(2), parts: off(['sale', 'products', 'photos'], { subject: 'Hello' }), photos: new Map([[ids[0], { ...photos.get(ids[0]), alt: '' }]]), kids, catalog, send: SEND, check, checkWall, checkParts };
+  assert.deepEqual(kitProblems(ready), []);
+  // A subject that promises the sale that's off is caught by its field
+  assert.deepEqual(kitProblems({ ...ready, parts: off(['sale', 'products', 'photos'], { subject: '20% off everything' }) }), [{ text: 'Fix the subject line.', section: 'em-lines' }]);
+  assert.match(checkParts(cleanParts({ subject: 'Save {upto}', off: ['sale'] }), { sale: NO_SALE }).subject, /has no sale/);
+  // Everything off is nothing to send
+  assert.deepEqual(kitProblems({ ...ready, parts: off(['sale', 'products', 'photos', 'events', 'charity'], { subject: 'Hello' }) }), [{ text: 'Every section is off. Turn at least one back on.', section: 'em-sale' }]);
+  // Only the sections there are switches for are kept
+  assert.deepEqual(cleanParts({ off: ['charity', 'footer', 'sale', 'sale'] }).off, ['sale', 'charity']);
+});
+
 /** A stand-in Kit: answers from `routes` ("METHOD /path"), and keeps every call. */
 function fakeKit(routes) {
   const calls = [];
@@ -239,6 +263,38 @@ test('nothing goes to Kit without the store’s sender: Kit would send it as the
   await assert.rejects(schedule(kit, { ...msg, from: '', sendAt: '2026-11-17T15:00:00.000Z', audience: { type: 'segment', ids: [1] } }), /KIT_SENDER/);
   await assert.rejects(sendTest(kit, { ...msg, from: undefined, tagIds: [1] }), /KIT_SENDER/);
   assert.equal(calls.length, 0);
+});
+
+/** Kit for the site's signup form: the store's tag is 25380314, the no-marketing tag 25389847. */
+const SIGNUP = {
+  'POST /subscribers': (b) => ({ subscriber: { id: 7, state: 'active', email_address: b.email_address } }),
+  'POST /tags': (b) => ({ tag: { id: b.name === STORE_TAG ? 25380314 : b.name === NO_MARKETING_TAG ? 25389847 : 1, name: b.name } }),
+  'POST /tags/25380314/subscribers/7': { subscriber: { id: 7 } },
+  'DELETE /tags/25389847/subscribers/7': null,
+};
+
+test('signing up on the site puts them on the store’s tag and takes them off “Shopify: no marketing”, so they get the weekly email', async () => {
+  const { kit, calls } = fakeKit(SIGNUP);
+  assert.deepEqual(await signUp(kit, 'a@x.com'), { id: 7, state: 'active' });
+  assert.equal(calls.find((c) => c.key === 'POST /subscribers').body.email_address, 'a@x.com');
+  assert.deepEqual(calls.filter((c) => c.key === 'POST /tags').map((c) => c.body.name).sort(), [NO_MARKETING_TAG, STORE_TAG].sort());
+  assert.deepEqual(calls.slice(3).map((c) => c.key), ['POST /tags/25380314/subscribers/7', 'DELETE /tags/25389847/subscribers/7']);
+});
+
+test('signing up works for someone who never had the no-marketing tag', async () => {
+  const { 'DELETE /tags/25389847/subscribers/7': _, ...notOnIt } = SIGNUP; // Kit answers 404
+  const { kit, calls } = fakeKit(notOnIt);
+  assert.deepEqual(await signUp(kit, 'a@x.com'), { id: 7, state: 'active' });
+  assert.equal(calls.at(-1).key, 'DELETE /tags/25389847/subscribers/7');
+});
+
+test('a signup Kit didn’t finish fails, so the form says to try again', async () => {
+  const { 'POST /tags/25380314/subscribers/7': _, ...noTagging } = SIGNUP;
+  await assert.rejects(signUp(fakeKit(noTagging).kit, 'a@x.com'), /Kit said no \(404\)/);
+  // Kit down when the no-marketing tag comes off: they'd be left out, so it isn't a signup
+  const down = { ...SIGNUP, 'DELETE /tags/25389847/subscribers/7': () => { throw new Error('down'); } };
+  await assert.rejects(signUp(fakeKit(down).kit, 'a@x.com'), /Kit didn’t answer/);
+  await assert.rejects(signUp(fakeKit({ ...SIGNUP, 'POST /subscribers': { subscriber: null } }).kit, 'a@x.com'), /no subscriber/);
 });
 
 test('someone who unsubscribed from the store’s emails isn’t signed back up for a test', async () => {

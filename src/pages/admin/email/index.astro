@@ -5,9 +5,9 @@ import EmailApp from '@/components/email/EmailApp';
 import type { AppProps } from '@/components/email/model';
 import '@/components/email/email.css';
 import AdminBase from '@/layouts/AdminBase.astro';
-import { STORE_TIERS, USUAL_PERCENT, sendLabel, usualEnds } from '@/lib/sunny-side/special.mjs';
+import { EXTRA_WITHIN_DAYS, STORE_TIERS, USUAL_PERCENT, sendLabel, usualEnds } from '@/lib/sunny-side/special.mjs';
 import { eventsFrom } from '@/lib/sunny-side/event-store.mjs';
-import { pastWeeks, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
+import { extrasAhead, pastWeeks, setKit, weekToWorkOn } from '@/lib/sunny-side/week-store.mjs';
 import { IMPACT_PAGE, impactFromPage } from '@/lib/sunny-side/impact.mjs';
 import { broadcastUrl, kitClient, statusOf, subscriberCount, usualTime } from '@/lib/sunny-side/kit.mjs';
 import { againView } from '@/lib/sunny-side/again.mjs';
@@ -19,18 +19,30 @@ import { testPeople } from '@/lib/sunny-side/testers.mjs';
 import { listPeople, recentTests } from '@/lib/sunny-side/test-store.mjs';
 import { listReports } from '@/lib/sunny-side/layout-store.mjs';
 import { viewFor } from '@/lib/admin/nav.mjs';
-import { localDate } from '@/lib/time-clock/hours.mjs';
+import { addDays, localDate } from '@/lib/time-clock/hours.mjs';
+import { readStoreHours } from '@/lib/schedule/store';
 
 const admin = Astro.locals.admin;
 if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
 
-// One email at a time: this week's until it has gone out, then next week's (weekToWorkOn). This
-// week's stays until its Saturday, so one that missed its Tuesday can still go out (sendDays). The
-// ones already sent are read-only, at /admin/email/sent/. An old address naming a week comes here.
+// One weekly email at a time: this week's until it has gone out, then next week's (weekToWorkOn).
+// This week's stays until its Saturday, so one that missed its Tuesday can still go out (sendDays).
+// Beside it, any extra emails still to go, each on a day of its own (?extra=YYYY-MM-DD; special.mjs
+// isExtraDate). The ones already sent are read-only, at /admin/email/sent/. An old address naming a
+// week, or an extra that's gone out or was deleted, comes here.
 if (Astro.url.searchParams.has('send')) return Astro.redirect('/admin/email/', 302);
 const db = Astro.locals.runtime.env.DB;
 const today = localDate(new Date().toISOString());
-const { send, week: record } = await weekToWorkOn(db, today);
+const [weekly, extras] = await Promise.all([weekToWorkOn(db, today), extrasAhead(db, today)]);
+const wanted = Astro.url.searchParams.get('extra');
+const picked = wanted ? extras.find((w) => w.send === wanted) : null;
+if (wanted && !picked) return Astro.redirect('/admin/email/', 302);
+const extra = Boolean(picked);
+const { send, week: record } = picked ? { send: picked.send, week: picked } : weekly;
+const emails = [
+  { send: weekly.send, label: sendLabel(weekly.send), extra: false, href: '/admin/email/', scheduled: Boolean(weekly.week?.kit) },
+  ...extras.map((w) => ({ send: w.send, label: sendLabel(w.send), extra: true, href: `/admin/email/?extra=${w.send}`, scheduled: Boolean(w.kit) })),
+].sort((a, b) => a.send.localeCompare(b.send));
 
 /** The charity's numbers for the preview's impact strip, cached an hour; the Kit draft reads them fresh. */
 async function impactNow() {
@@ -71,7 +83,7 @@ async function revealsNow() {
   }
 }
 
-const [past, events, testList, library, impact, kids, reveals, usual, subscribers] = await Promise.all([
+const [past, events, testList, library, impact, kids, reveals, usual, subscribers, hours] = await Promise.all([
   pastWeeks(db, send, 12),
   eventsFrom(db, today),
   listPeople(db),
@@ -81,6 +93,8 @@ const [past, events, testList, library, impact, kids, reveals, usual, subscriber
   revealsNow(),
   fromKit('usual time', () => usualTime(kit!)),
   fromKit('subscriber count', () => subscriberCount(kit!)),
+  // The store's hours as Google has them (the hours-sync worker keeps them in D1), as the email sent reads them
+  readStoreHours(db),
 ]);
 const parts = record?.parts ?? blankParts();
 // The library, plus any older photo this email still uses
@@ -97,8 +111,8 @@ if (record?.kit && kitStatus?.status === 'gone') {
   await setKit(db, { send, id: null });
   record.kit = null;
 }
-// And whether it goes again to the people who don't open it (again.mjs)
-const againRow = record?.kit ? await getAgain(db, send) : null;
+// And whether it goes again to the people who don't open it (again.mjs); an extra never does
+const againRow = record?.kit && !extra ? await getAgain(db, send) : null;
 const kitSend = record?.kit ? { ...record.kit, url: broadcastUrl(record.kit.id), status: kitStatus?.status ?? 'scheduled', again: againRow && againView(againRow, { owner }) } : null;
 // What each ready-made sale opens with: the store's last of its kind, else the usual (special.mjs)
 const lastOf = (kind: string) => past.find((r) => r.special?.kind === kind)?.special ?? null;
@@ -111,6 +125,9 @@ const presets = { percent: lastOf('percent')?.percent ?? USUAL_PERCENT, tiers: l
 const props = {
   send,
   label: sendLabel(send),
+  extra,
+  emails,
+  extraMax: addDays(today, EXTRA_WITHIN_DAYS),
   today,
   record: record ? { special: record.special, wall: record.wall, updatedAt: record.updatedAt, updatedBy: record.updatedBy } : null,
   presets,
@@ -126,6 +143,7 @@ const props = {
   usualTime: usual,
   subscribers: Number.isFinite(subscribers) ? subscribers : null,
   impact,
+  hours,
   local: import.meta.env.DEV,
   owner,
   layoutReports,
@@ -134,7 +152,7 @@ const props = {
 const data = JSON.stringify(props).replace(/</g, '\\u003c');
 ---
 
-<AdminBase title="Weekly email">
+<AdminBase title={extra ? `Extra email, ${sendLabel(send)}` : 'Weekly email'}>
   <div id="email-root"><EmailApp {...props} /></div>
   <script type="application/json" id="email-data" set:html={data} />
 </AdminBase>

@@ -7,17 +7,25 @@
  * with its live numbers, the visit band and the footer. No Node or browser APIs.
  */
 
+import { emailHours } from '../store-hours.mjs';
 import { SECTIONS, lines } from './email.mjs';
-import { briefParts } from './parts.mjs';
+import { NO_SALE, briefParts, isOff, sectionsOff } from './parts.mjs';
 import { PICKS, previewWall } from './wall.mjs';
 
 /**
- * @param {{ sale: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], reveals?: any[], catalog: Map<string, any> | null, events: any[], impact: { rooms: string, children: string } | null, send: string, site: string }} week
- *   sale as the email takes it (toSale/draftSale); events already brief events; photos the library by id.
+ * @param {{ sale: any, wall: any, parts: any, photos: Map<string, any>, kids: any[], reveals?: any[], catalog: Map<string, any> | null, events: any[], impact: { rooms: string, children: string } | null, hours?: import('../store-hours.mjs').StoreHours | null, send: string, site: string }} week
+ *   sale as the email takes it (toSale/draftSale); events already brief events; photos the library by id;
+ *   hours the store's as Google has them (settings:hours, store-hours.mjs).
  */
-export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catalog, events, impact, send, site }) {
+export function pageEmail({ sale: setSale, wall, parts, photos, kids, reveals = [], catalog, events, impact, hours = null, send, site }) {
+  // The sections turned off (parts.mjs SWITCHES): a sale that's off isn't in the email, and the
+  // subject line can't promise one
+  const off = sectionsOff(parts);
+  const sale = off.includes('offer') ? null : setSale;
   /** @type {Record<string, any>} */
   const brief = { send_date: send, sale, ...briefParts(parts, { sale, photos, kids, reveals }) };
+  const shownHours = emailHours(hours, send);
+  if (shownHours) brief.hours = shownHours;
   // A subject that promises more than the sale can't be drawn; the page says why beside the field
   try {
     lines(brief);
@@ -31,8 +39,8 @@ export function pageEmail({ sale, wall, parts, photos, kids, reveals = [], catal
   if (events.length) brief.events = events;
   // In the email's own order (SECTIONS), so the preview and the email sent can't drift from it: a
   // second list here kept the story above the reveal after the email's moved (Nov 17, 2026)
-  const has = { wall: wallReady, story: Boolean(brief.story), reveal: Boolean(brief.reveal), events: events.length > 0, mission: Boolean(brief.mission) };
-  const sections = SECTIONS.filter((s) => has[s] ?? true);
+  const has = { offer: Boolean(sale), wall: wallReady, story: Boolean(brief.story), reveal: Boolean(brief.reveal), events: events.length > 0, mission: Boolean(brief.mission) };
+  const sections = SECTIONS.filter((s) => (has[s] ?? true) && !off.includes(s));
   return { brief, sections, wallReady };
 }
 
@@ -49,7 +57,7 @@ export const PAGE_SECTIONS = ['em-lines', 'em-sale', 'em-products', 'em-reveal',
 /** The fields each section of the page holds, by the first part of an error's key (check, checkWall, checkParts). */
 const FIELDS = {
   'em-lines': ['subject', 'preheader'],
-  'em-sale': ['kind', 'tiers', 'percent', 'ends'],
+  'em-sale': ['kind', 'tiers', 'percent', 'ends', 'name', 'windows'],
   'em-reveal': ['reveal'],
   'em-photos': ['photos', 'story'],
   'em-products': ['picks', 'label', 'headline'],
@@ -79,14 +87,22 @@ export const pagePlace = (section) => {
 export function kitProblems({ special, wall, parts, photos, kids, reveals = null, catalog, send, check, checkWall, checkParts, sale }) {
   const out = [];
   const add = (text, section) => out.push({ text, section });
-  const e = checkParts(parts, { sale, photos, kids, reveals, ready: true });
+  // A section that's off (parts.mjs SWITCHES) needs nothing: the email goes without it
+  const saleOff = isOff(parts, 'sale');
+  const e = checkParts(parts, { sale: saleOff ? NO_SALE : sale, photos, kids, reveals, ready: true });
   if (e.subject || e.preheader) add(e.subject && !parts.subject ? 'Write the subject line.' : 'Fix the subject line.', 'em-lines');
   if (e.photos || e['story.photos']) add(e.photos || 'Fix the collage’s photos.', 'em-photos');
-  if (!special) add('Set the sale.', 'em-sale');
+  if (saleOff) {
+    // nothing to set
+  } else if (!special) add('Set the sale.', 'em-sale');
   else if (Object.keys(check(special, send)).length) add('Fix the sale.', 'em-sale');
   const n = wall?.picks.length ?? 0;
-  if (n < PICKS[0]) add(`Pick ${PICKS[0] - n} more product${PICKS[0] - n === 1 ? '' : 's'}.`, 'em-products');
+  if (isOff(parts, 'products')) {
+    // nothing to pick
+  } else if (n < PICKS[0]) add(`Pick ${PICKS[0] - n} more product${PICKS[0] - n === 1 ? '' : 's'}.`, 'em-products');
   else if (Object.keys(checkWall(wall, { catalog: catalog ?? undefined, send })).length) add('Fix the products.', 'em-products');
+  // Everything a reader comes for turned off leaves the masthead, the visit row and the footer
+  if (['sale', 'products', 'photos', 'events', 'charity'].every((k) => isOff(parts, k)) && !parts.reveal) add('Every section is off. Turn at least one back on.', 'em-sale');
   if (e.reveal) add(e.reveal, 'em-reveal');
   // A reveal invite can't go out after the reveal
   const reveal = parts.reveal && reveals?.find((r) => r.slug === parts.reveal);

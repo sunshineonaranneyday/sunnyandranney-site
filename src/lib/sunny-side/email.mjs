@@ -8,7 +8,7 @@
  *
  *   the photographer's photos -> brief.hero, brief.story.photo
  *   the store's products      -> brief.wall.photos (4-9), read live from their pages by the build
- *   Staci's special           -> brief.sale    kind: "tiers" (2-4) | "percent" | "headline"
+ *   Staci's special           -> brief.sale    kind: "tiers" (2-4) | "percent" | "times" (2-4) | "headline"
  *   Staci's events            -> brief.events  each with dated items; past dates drop out, and the
  *                                                line under the title is written from the dates left
  *   a reveal still ahead      -> brief.reveal  the charity's invite to watch it live, right after the products
@@ -273,13 +273,24 @@ export function offerLine(sale) {
     return shown.map(([spend, off]) => `Spend $${dollars(spend)}, save ${off}%.`).join(' ');
   }
   if (sale?.kind === 'percent') return `${sale.percent}% off ${plain(sale.what)}`;
+  // A sale by the hour: its best percent and its days ("Up to 30% off Friday and Saturday.")
+  if (sale?.kind === 'times') return `Up to ${mostOff(sale)} off ${dayList(sale.days ?? [])}.`;
   throw new Error('The brief asks for {offer}, but this week has no discount.');
 }
 
+/** "Friday", "Friday and Saturday", "Friday through Sunday". */
+const dayList = (days) => (days.length <= 1 ? days[0] || 'this week' : days.length === 2 ? `${days[0]} and ${days[1]}` : `${days[0]} through ${days[days.length - 1]}`);
+
+/** Every percent a sale gives, or none. */
+const percentsOf = (sale) =>
+  sale?.kind === 'tiers' ? sale.tiers.map(([, off]) => off) : sale?.kind === 'percent' ? [sale.percent] : sale?.kind === 'times' ? sale.windows.map(([off]) => off) : [];
+
 function mostOff(sale) {
-  if (sale?.kind === 'tiers') return `${Math.max(...sale.tiers.map(([, off]) => off))}%`;
-  if (sale?.kind === 'percent') return `${sale.percent}%`;
-  throw new Error('The brief asks for {upto}, but this week has no discount.');
+  const offs = percentsOf(sale);
+  if (!offs.length) throw new Error('The brief asks for {upto}, but this week has no discount.');
+  // While a percent is still being typed ("?"), the most is the biggest typed so far
+  const typed = offs.filter((o) => typeof o === 'number');
+  return `${typed.length ? Math.max(...typed) : '?'}%`;
 }
 
 /** The subject and preheader as they go out, with {offer} and {upto} written from the offer. Throws if either promises what the offer doesn't give. */
@@ -301,8 +312,8 @@ const MONEY = String.raw`\$(\d[\d,]*(?:\.\d+)?)(k)?`;
 /** @returns {string[]} what the line says that the offer doesn't give, in words */
 export function offerClaims(line, sale, where) {
   const text = plain(String(line || ''));
-  const offs = sale?.kind === 'tiers' ? sale.tiers.map(([, off]) => off) : sale?.kind === 'percent' ? [sale.percent] : [];
-  const gives = offs.length ? `the sale gives ${offs.map((o) => `${o}%`).join(', ')}` : 'this week has no discount';
+  const offs = percentsOf(sale);
+  const gives = offs.length ? `the sale gives ${[...new Set(offs)].map((o) => `${o}%`).join(', ')}` : 'this week has no discount';
   const problems = [];
   for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s?%(?!\s+of\b)/gi)) {
     if (!offs.includes(Number(m[1]))) problems.push(`The ${where} says ${m[1]}%, but ${gives}.`);
@@ -561,7 +572,8 @@ export class Email {
   }
 
   hero() {
-    return this.fullPhoto(this.b.hero, 600, 300, SITE + this.b.sale.url, 'hero-photo');
+    // To the sale, or the shop in an email without one
+    return this.fullPhoto(this.b.hero, 600, 300, SITE + (this.b.sale?.url || '/shop/'), 'hero-photo');
   }
 
   tiers(tiers) {
@@ -586,6 +598,28 @@ export class Email {
     return Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"');
   }
 
+  /**
+   * A sale by the hour, in the tiers' row: each column its percent, then "off Fri" over its hours
+   * ("10am–1pm", "all day"), on a computer at a tier's caption size, on a phone at 13px. In a narrow
+   * column the hours break after their dash ("10:30am–" over "12:30pm"), never inside a time.
+   */
+  windows(rows) {
+    const n = rows.length;
+    if (!(n >= 2 && n <= 4)) throw new Error(`sale.windows: the offer shows 2 to 4 times, not ${n}`);
+    const size = TIER_SIZE[n][2];
+    let tds = '';
+    rows.forEach(([percent, dayName, hours], k) => {
+      const rule = k ? `border-left:2px solid ${CHARCOAL};padding-left:14px;` : '';
+      const clear = k < n - 1 ? `padding-right:${S1}px;` : '';
+      tds +=
+        Email.td('top', `width="${pct(100 / n)}%"`, `${rule}${clear}`) +
+        Email.text(`${percent}%`, { size, lh: size, weight: 700, cls: `tier${n}`, track: '-0.04em', mb: 4 }) +
+        Email.text(`off&nbsp;${dayName}<br>${hours}`, { size: 13, lh: 18, weight: 700, cls: 'cap4' }) +
+        '</td>';
+    });
+    return Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"');
+  }
+
   offer() {
     const s = this.b.sale;
     let out = Email.label(s.name);
@@ -597,8 +631,9 @@ export class Email {
         Email.text(s.what, { size: 32, lh: 36, weight: 700, mb: S3, cls: 'mega2', track: '-0.025em' });
     } else {
       // 26/30 on a phone, 32/36 on a computer (.h1)
-      out += Email.text(noWidow(s.headline), { size: 26, lh: 30, weight: 700, mb: s.kind === 'tiers' ? S3 : S2, tag: 'h1', cls: 'h1', track: '-0.015em' });
+      out += Email.text(noWidow(s.headline), { size: 26, lh: 30, weight: 700, mb: s.kind === 'tiers' || s.kind === 'times' ? S3 : S2, tag: 'h1', cls: 'h1', track: '-0.015em' });
       if (s.kind === 'tiers') out += this.tiers(s.tiers) + Email.gap(S3);
+      if (s.kind === 'times') out += this.windows(s.windows) + Email.gap(S3);
     }
     out += this.button(`${s.cta} &#8594;`, SITE + s.url, 'offer-button', CHARCOAL, WHITE);
     // fine print after the button, so it never pushes the button down
@@ -1140,12 +1175,27 @@ export class Email {
     );
   }
 
+  /**
+   * The store's hours as Google has them (store-hours.mjs), read when the email is built: the usual
+   * week, then in bold the days of the email's week that aren't usual (a holiday, a short day). An
+   * email built with no hours (a stress-test brief) leaves them out rather than guess.
+   */
+  hours() {
+    const h = this.b.hours;
+    if (!h?.week?.length) return '';
+    const line = (l) => noWidow(escape(l).replace(/\u2013/g, '&#8211;').replace(/ &amp; /g, '&nbsp;&amp;&nbsp;'));
+    return (
+      Email.text(h.week.map(line).join('<br>'), { size: 16, lh: 24 }) +
+      (h.special?.length ? Email.text(h.special.map(line).join('<br>'), { size: 16, lh: 24, weight: 700, cls: 'hours-special' }) : '')
+    );
+  }
+
   visit() {
     const left =
       Email.label('Visit the showroom') +
       Email.h2('109A Oak Street', { mb: 4 }) +
       Email.text('Roswell, GA', { size: 16, lh: 24, weight: 700, mb: S1 }) +
-      Email.text('Tue&#8211;Sat, 10am&#8211;5pm<br>Closed Sun&nbsp;&amp;&nbsp;Mon', { size: 16, lh: 24 }) +
+      this.hours() +
       Email.text(
         `<a href="tel:+16788885140" style="display:inline-block;padding:10px 0;color:${CHARCOAL};` +
           `text-decoration:underline;text-underline-offset:3px;">678.888.5140</a>`,
