@@ -1,6 +1,7 @@
 ---
 import type { AdminRole } from '@/lib/admin-auth';
-import { ICONS, SIDEBAR, allLinks, currentHref as findCurrentHref, navFor, phoneNav } from '@/lib/admin/nav.mjs';
+import { ICONS, SIDEBAR, allLinks, currentHref as findCurrentHref, navFor, viewFor } from '@/lib/admin/nav.mjs';
+import { loadNavStatus } from '@/lib/admin/nav-status.mjs';
 
 interface Props {
   title: string;
@@ -8,19 +9,30 @@ interface Props {
 
 const { title } = Astro.props;
 const admin = Astro.locals.admin;
-const role: AdminRole | undefined = admin?.role;
+// On the email address everyone sees what an email-only login sees: the email is all that opens there.
+const view = viewFor(admin, Astro.url.hostname.toLowerCase());
+const role: AdminRole | undefined = view.role;
 const path = Astro.url.pathname;
 
-const nav = navFor({ role, owner: admin?.owner });
-const { sections, settings: settingsLink } = nav;
+const nav = navFor(view);
+const { sections } = nav;
 const links = allLinks(nav);
 const currentHref = findCurrentHref(path, links);
-const phone = phoneNav(nav, currentHref);
+// Work waiting, on the link where it's done. Managers only: the store tablet's two pages have none.
+const marks =
+  role === 'manager' && admin ? await loadNavStatus(Astro.locals.runtime.env.DB, { now: new Date().toISOString(), myEmail: admin.email }) : {};
+// On a phone the menu button gets a dot while any page in the menu has work, so the closed menu never hides it.
+const waiting = Object.values(marks);
+const menuMark = waiting.length ? (waiting.some((mark) => mark.tone === 'alert') ? 'alert' : 'plain') : null;
+// A marked link is heard with its work: "Hours, 1 shift missing a clock-out". It starts with the
+// label you see, so voice control still finds it by name (WCAG 2.5.3).
+const spoken = (label: string, mark?: { spoken: string }) => (mark ? `${label}, ${mark.spoken}` : undefined);
 // The sidebar's sizes come from the nav module, whose test holds the sidebar to one screen.
 const sidebarSizes = `--row:${SIDEBAR.row}px;--touch-row:${SIDEBAR.touchRow}px;--heading:${SIDEBAR.heading}px;--section-gap:${SIDEBAR.gap}px`;
-const roleLabel = admin?.owner ? 'Owner' : role === 'manager' ? 'Manager' : role === 'kiosk' ? 'Store tablet' : '';
+const roleLabel = view.owner ? 'Owner' : role === 'manager' ? 'Manager' : role === 'kiosk' ? 'Store tablet' : role === 'email' ? 'Weekly email' : '';
 // Ends the Cloudflare Access session, so a shared computer doesn't stay signed in. Not for the store tablet.
 const SIGN_OUT = '/cdn-cgi/access/logout';
+const signsOut = role === 'manager' || role === 'email';
 // The store's logo, from its Cloudflare Images account (allowed by the admin's CSP).
 const LOGO = 'https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ';
 const icon = (name: string) =>
@@ -44,6 +56,16 @@ const icon = (name: string) =>
     {links.length > 0 && <a class="skip-link" href="#main">Skip to content</a>}
     <div class="shell">
       <header class="sidebar" style={sidebarSizes}>
+        {/* On a phone or an upright iPad, opens the sidebar below as a slide-in menu (lib/admin/shell.ts). */}
+        {
+          sections.length > 0 && (
+            <button type="button" class="menu-button" aria-controls="side-menu" aria-expanded="false" aria-label={menuMark ? 'Menu, has work waiting' : 'Menu'}>
+              <svg class="menu-icon-open" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" /></svg>
+              <svg class="menu-icon-close" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+              {menuMark && <span class="menu-mark" data-tone={menuMark} aria-hidden="true" />}
+            </button>
+          )
+        }
         <a class="brand" href="/admin/" aria-label="Sunny & Ranney Admin, home">
           <picture>
             <img
@@ -69,67 +91,72 @@ const icon = (name: string) =>
           )
         }
 
-        {
-          sections.length > 0 && (
-            <nav class="side-nav" aria-label="Admin">
-              {sections.map((section) => (
-                <div class="side-section" role="group" aria-labelledby={`side-${section.heading.toLowerCase()}`}>
-                  <p class="side-heading" id={`side-${section.heading.toLowerCase()}`}>{section.heading}</p>
-                  {section.links.map((link) => {
-                    // Sub-pages show under their page while you're anywhere in it, as in Shopify's admin.
-                    const inChild = link.children?.some((child) => child.href === currentHref) ?? false;
-                    return (
-                      <Fragment>
-                        <a
-                          href={link.href}
-                          class:list={['side-link', { 'side-parent-current': inChild }]}
-                          aria-current={link.href === currentHref ? 'page' : undefined}
-                        >
-                          <Fragment set:html={icon(link.icon)} />
-                          <span>{link.label}</span>
-                        </a>
-                        {link.children && (
-                          <div class:list={['side-children', { 'side-children-open': inChild || link.href === currentHref }]}>
-                            {link.children.map((child) => (
-                              <a href={child.href} class="side-link side-child" aria-current={child.href === currentHref ? 'page' : undefined}>
-                                <span>{child.label}</span>
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </div>
-              ))}
-            </nav>
-          )
-        }
+        {/* The sidebar's pages and who's signed in: beside the page on a wide screen, a slide-in menu on a phone. */}
+        <div class="side-menu" id="side-menu">
+          {
+            sections.length > 0 && (
+              <nav class="side-nav" aria-label="Admin">
+                {sections.map((section) => (
+                  <div
+                    class="side-section"
+                    role={section.heading ? 'group' : undefined}
+                    aria-labelledby={section.heading ? `side-${section.heading.toLowerCase()}` : undefined}
+                  >
+                    {section.heading && <p class="side-heading" id={`side-${section.heading.toLowerCase()}`}>{section.heading}</p>}
+                    {section.links.map((link) => {
+                      const mark = marks[link.href];
+                      // Sub-pages show under their page while you're anywhere in it, as in Shopify's admin.
+                      const inChild = link.children?.some((child) => child.href === currentHref) ?? false;
+                      return (
+                        <Fragment>
+                          <a
+                            href={link.href}
+                            class:list={['side-link', { 'side-parent-current': inChild }]}
+                            aria-current={link.href === currentHref ? 'page' : undefined}
+                            aria-label={spoken(link.label, mark)}
+                          >
+                            {link.icon && <Fragment set:html={icon(link.icon)} />}
+                            <span class="side-label">{link.label}</span>
+                            {mark && <span class="nav-mark" data-tone={mark.tone} title={mark.spoken} aria-hidden="true">{mark.text}</span>}
+                          </a>
+                          {link.children && (
+                            <div class:list={['side-children', { 'side-children-open': inChild || link.href === currentHref }]}>
+                              {link.children.map((child) => (
+                                <a href={child.href} class="side-link side-child" aria-current={child.href === currentHref ? 'page' : undefined}>
+                                  <span class="side-label">{child.label}</span>
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </div>
+                ))}
+              </nav>
+            )
+          }
 
-        {
-          admin && (
-            <div class="side-foot">
-              {settingsLink && (
-                <a href={settingsLink.href} class="side-link" aria-current={settingsLink.href === currentHref ? 'page' : undefined}>
-                  <Fragment set:html={icon(settingsLink.icon)} />
-                  <span>{settingsLink.label}</span>
-                </a>
-              )}
-              <div class="who">
-                <span class="who-avatar" aria-hidden="true">{admin.email.slice(0, 1).toUpperCase()}</span>
-                <span class="who-text">
-                  <span class="who-email">{admin.email}</span>
-                  <span class="who-role">{roleLabel}</span>
-                </span>
-                {role === 'manager' && (
-                  <a class="who-out" href={SIGN_OUT} aria-label="Sign out" title="Sign out">
-                    <Fragment set:html={icon('signout')} />
-                  </a>
-                )}
+          {
+            admin && (
+              <div class="side-foot">
+                <div class="who">
+                  <span class="who-avatar" aria-hidden="true">{admin.email.slice(0, 1).toUpperCase()}</span>
+                  <span class="who-text">
+                    <span class="who-email">{admin.email}</span>
+                    <span class="who-role">{roleLabel}</span>
+                  </span>
+                  {signsOut && (
+                    <a class="who-out" href={SIGN_OUT} aria-label="Sign out" title="Sign out">
+                      <Fragment set:html={icon('signout')} />
+                    </a>
+                  )}
+                </div>
               </div>
-            </div>
-          )
-        }
+            )
+          }
+        </div>
+        {sections.length > 0 && <div class="menu-scrim" aria-hidden="true" />}
       </header>
 
       <main class="main" id="main" tabindex="-1">
@@ -139,49 +166,6 @@ const icon = (name: string) =>
       </main>
     </div>
 
-    {
-      links.length > 0 && (
-        <nav class="tabbar" aria-label="Admin">
-          {phone.tabs.map((link) => (
-            <a
-              href={link.href}
-              class="tab"
-              aria-current={link.href === currentHref ? 'page' : link.href === phone.activeTab ? 'true' : undefined}
-            >
-              <Fragment set:html={icon(link.icon)} />
-              <span>{link.short}</span>
-            </a>
-          ))}
-          {(phone.groups.length > 0 || role === 'manager') && (
-            <details class="tab-more">
-              <summary class:list={['tab', { 'tab-current': phone.moreActive }]}>
-                <Fragment set:html={icon('more')} />
-                <span>More</span>
-              </summary>
-              <div class="more-sheet">
-                {[...phone.groups, ...(role === 'manager' && !settingsLink ? [[]] : [])].map((group, index, all) => (
-                  <div class="more-group">
-                    {group.map((link) => (
-                      <a href={link.href} class="more-link" aria-current={link.href === currentHref ? 'page' : undefined}>
-                        <Fragment set:html={icon(link.icon)} />
-                        <span>{link.label}</span>
-                      </a>
-                    ))}
-                    {/* Sign out ends the sheet, with Gusto settings when there is one. */}
-                    {role === 'manager' && index === all.length - 1 && (
-                      <a href={SIGN_OUT} class="more-link">
-                        <Fragment set:html={icon('signout')} />
-                        <span>Sign out</span>
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </details>
-          )}
-        </nav>
-      )
-    }
   </body>
 </html>
 
@@ -228,6 +212,8 @@ const icon = (name: string) =>
     --r-lg: 16px;
     --ease: cubic-bezier(0.16, 1, 0.3, 1);
     --sidebar: 248px;
+    /* The phone's top bar, which sticky page bars stop under. None beside a sidebar. */
+    --topbar: 0px;
 
     /* Older names the pages still use. */
     --bg-card: var(--panel);
@@ -311,8 +297,6 @@ const icon = (name: string) =>
     color: var(--ink-3);
   }
 
-  .side-nav, .side-foot { display: none; }
-
   /* ── Search, toasts, shortcuts (lib/admin/shell.ts) ───── */
   /* On a phone or an upright iPad, search is an icon in the top bar, as in Shopify's app. */
   .search-button {
@@ -333,7 +317,7 @@ const icon = (name: string) =>
     text-align: left;
   }
   .search-button span, .search-button .search-kbd { display: none; }
-  .search-button:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); }
+  @media (hover: hover) { .search-button:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); } }
   kbd, .search-kbd {
     display: inline-block;
     min-width: 1.5em;
@@ -360,7 +344,6 @@ const icon = (name: string) =>
     max-width: calc(100vw - 2rem);
     pointer-events: none;
   }
-  body.has-nav .toasts { bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px)); }
   @media (min-width: 1024px) { body.has-nav .toasts { bottom: 1.5rem; left: calc(50% + var(--sidebar) / 2); } }
   .toast {
     padding: 0.75rem 1.125rem;
@@ -438,77 +421,248 @@ const icon = (name: string) =>
     margin: 0 auto;
     padding: 1.5rem 1rem calc(2.5rem + env(safe-area-inset-bottom, 0px));
   }
-  body.has-nav .main-inner { padding-bottom: calc(6rem + env(safe-area-inset-bottom, 0px)); }
 
-  .tabbar {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 30;
-    display: grid;
-    grid-auto-columns: 1fr;
-    grid-auto-flow: column;
-    background: color-mix(in srgb, var(--panel) 92%, transparent);
-    backdrop-filter: saturate(1.4) blur(14px);
-    -webkit-backdrop-filter: saturate(1.4) blur(14px);
-    border-top: 1px solid var(--line);
-    padding: 0.375rem 0.25rem calc(0.375rem + env(safe-area-inset-bottom, 0px));
+  /* Work waiting (lib/admin/nav-status.mjs), at the end of its link. Plain is a quiet
+     count or date; alert, when something's wrong or due soon, is a clay pill. */
+  .nav-mark {
+    flex: none;
+    margin-left: auto;
+    padding: 0 0.125rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    line-height: 1.125rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    color: var(--ink-3);
   }
-  .tab {
+  .nav-mark[data-tone='alert'] { padding: 0 0.4375rem; border-radius: 999px; background: var(--clay-soft); color: var(--clay); }
+  /* A label never wraps, so every row keeps the height nav.mjs counts on. */
+  .side-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── The sidebar's pages, beside the page or in the phone's menu ── */
+  /* Sized to Shopify's admin, measured 2026-11-12: 30px rows, 13px type, 16px icons, every item
+     on screen with no scrollbar. DM Sans runs small, so 14px here. Windows too short for the
+     list get a thin scrollbar rather than the system's 15px one. */
+  .side-nav {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 0.125rem;
-    padding: 0.375rem 0;
-    min-height: 52px;
-    justify-content: center;
-    color: var(--ink-3);
-    text-decoration: none;
-    font-size: 0.6875rem;
-    font-weight: 600;
-    border-radius: var(--r-sm);
-  }
-  .tab[aria-current], .tab-current { color: var(--teal); }
-  .tab[aria-current] svg, .tab-current svg { color: var(--teal); stroke-width: 2.25; }
-
-  .tab-more summary { list-style: none; cursor: pointer; }
-  .tab-more summary::-webkit-details-marker { display: none; }
-  .tab-more[open] summary { color: var(--ink); }
-  .more-sheet {
-    position: fixed;
-    right: 0.5rem;
-    bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
-    min-width: 13rem;
-    max-height: calc(100vh - 5.5rem - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
-    max-height: calc(100dvh - 5.5rem - env(safe-area-inset-bottom, 0px) - env(safe-area-inset-top, 0px));
+    gap: var(--section-gap);
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 0.375rem;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow);
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
   }
-  .more-group + .more-group { margin-top: 0.1875rem; padding-top: 0.1875rem; border-top: 1px solid var(--line); }
-  .more-link {
+  .side-section { display: flex; flex-direction: column; }
+  .side-heading {
+    padding: 0 0.625rem 2px;
+    font-size: 0.6875rem;
+    line-height: calc(var(--heading) - 2px);
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .side-link {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    min-height: 44px;
-    padding: 0 0.875rem;
-    border-radius: 10px;
-    color: var(--ink);
+    gap: 0.625rem;
+    min-height: var(--row);
+    padding: 0 0.625rem;
+    border-radius: var(--r-sm);
+    color: var(--ink-2);
     text-decoration: none;
-    font-weight: 600;
+    font-weight: 500;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
   }
-  .more-link svg { color: var(--ink-3); }
-  .more-link:hover, .more-link[aria-current='page'] { background: var(--sunk); }
+  .side-link svg { color: var(--ink-3); flex: none; width: 16px; height: 16px; }
+  @media (hover: hover) { .side-link:hover { background: var(--panel); color: var(--ink); } }
+  /* Inside the scrolling list an outside ring would be clipped, so it sits inside the row. */
+  .side-link:focus-visible { outline-offset: -2px; }
+
+  /* When the list scrolls (an iPad, a short window), fade the edge that has more, since Safari hides scrollbars. */
+  .side-nav.more-below { -webkit-mask-image: linear-gradient(#000 calc(100% - 2.5rem), transparent); mask-image: linear-gradient(#000 calc(100% - 2.5rem), transparent); }
+  .side-nav.more-above { -webkit-mask-image: linear-gradient(transparent, #000 2.5rem); mask-image: linear-gradient(transparent, #000 2.5rem); }
+  .side-nav.more-above.more-below {
+    -webkit-mask-image: linear-gradient(transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
+    mask-image: linear-gradient(transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
+  }
+  .side-link[aria-current='page'], .side-parent-current { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
+  .side-link[aria-current='page'] svg, .side-parent-current svg { color: var(--teal); }
+
+  /* Sub-pages: no icon, lined up with their page's label, lighter until chosen. */
+  .side-children { display: none; flex-direction: column; }
+  .side-children-open { display: flex; }
+  .side-child { padding-left: calc(0.625rem + 16px + 0.625rem); color: var(--ink-3); }
+  .side-child[aria-current='page'] { background: none; box-shadow: none; }
+  .side-link[aria-current='page']::after {
+    content: '';
+    flex: none;
+    margin-left: auto;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 0 3px var(--teal-soft);
+  }
+  /* Work waiting takes the place of the current-page dot. */
+  .side-link[aria-current='page']:has(.nav-mark)::after { display: none; }
+
+  .side-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--line);
+  }
+  .side-foot .who {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0 0.5rem;
+    min-width: 0;
+  }
+  .who-avatar {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--panel);
+    box-shadow: inset 0 0 0 1px var(--line);
+    font-weight: 700;
+    font-size: 0.8125rem;
+    flex: none;
+  }
+  .who-text { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
+  .who-out {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: var(--r-sm);
+    color: var(--ink-3);
+  }
+  .who-out svg { width: 16px; height: 16px; }
+  @media (hover: hover) { .who-out:hover { background: var(--panel); color: var(--ink); } }
+  .who-email { font-size: 0.8125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who-role { font-size: 0.75rem; color: var(--ink-3); }
+
+
+  /* ── Phone and upright iPad: the same sidebar, slid in from the menu button ── */
+  .menu-button, .menu-scrim { display: none; }
+  @media (max-width: 1023.98px) {
+    /* The bar is this tall for everyone, so the menu and the pages' sticky bars can line up under it.
+       It stays above every page's own bars (the email's, a Save bar), which stop under it. */
+    :root { --topbar: calc(69px + env(safe-area-inset-top, 0px)); }
+    .sidebar { min-height: var(--topbar); z-index: 30; }
+    .brand { margin-right: auto; }
+    .menu-button {
+      position: relative;
+      display: grid;
+      place-items: center;
+      flex: none;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      color: var(--ink-2);
+      cursor: pointer;
+    }
+    @media (hover: hover) { .menu-button:hover { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 25%, var(--line)); } }
+    .menu-icon-close, .menu-button[aria-expanded='true'] .menu-icon-open { display: none; }
+    .menu-button[aria-expanded='true'] .menu-icon-close { display: block; }
+    /* Work waiting on a page in the menu: a dot on the button's corner, clay when it's due soon or wrong. */
+    .menu-mark {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--ink-2);
+      box-shadow: 0 0 0 2px var(--panel);
+    }
+    .menu-mark[data-tone='alert'] { background: var(--clay); }
+    .menu-button[aria-expanded='true'] .menu-mark { display: none; }
+
+    /* It opens below the top bar, so the button that opened it closes it from the same spot. */
+    .side-menu {
+      position: fixed;
+      top: var(--topbar);
+      bottom: 0;
+      left: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      width: min(18rem, 86vw);
+      padding: 0.75rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom, 0px)) calc(0.75rem + env(safe-area-inset-left, 0px));
+      background: var(--sunk);
+      border-right: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      transform: translateX(-100%);
+      visibility: hidden;
+      transition: transform 0.28s var(--ease), visibility 0s linear 0.28s;
+    }
+    /* A phone is short: the whole menu scrolls, and who's signed in ends it, as Sign out ended the old
+       More sheet, so the pages get that room. The edge with more fades, as the sidebar's list does. */
+    .side-nav { flex: none; overflow: visible; }
+    .side-foot { margin-top: 0.75rem; }
+    .side-menu::before, .side-menu::after {
+      content: '';
+      position: sticky;
+      z-index: 1;
+      display: block;
+      flex: none;
+      height: 2.5rem;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s var(--ease);
+    }
+    /* Each takes no room: it lies over the rows at the edge it fades. */
+    .side-menu::before { top: 0; margin-bottom: -2.5rem; background: linear-gradient(var(--sunk), transparent); }
+    .side-menu::after { bottom: 0; margin-top: -2.5rem; background: linear-gradient(transparent, var(--sunk)); }
+    .side-menu.more-above::before, .side-menu.more-below::after { opacity: 1; }
+    .menu-scrim {
+      display: block;
+      position: fixed;
+      inset: var(--topbar) 0 0;
+      z-index: 1;
+      background: var(--scrim);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.28s var(--ease), visibility 0s linear 0.28s;
+    }
+    /* Open, the menu is above everything on the page, which is inert under it: a page's popover,
+       editor, toast or Save bar never paints over it or takes a tap meant for it. */
+    html.menu-open .sidebar { z-index: 200; }
+    .menu-open .side-menu { transform: none; visibility: visible; transition: transform 0.28s var(--ease); }
+    .menu-open .menu-scrim { opacity: 1; visibility: visible; transition: opacity 0.28s var(--ease); }
+    /* The page under the open menu holds still. */
+    html.menu-open { overflow: hidden; }
+
+    /* Fingers get Apple's 44pt rows, as on an iPad in landscape. */
+    .side-link { min-height: var(--touch-row); font-size: 0.9375rem; }
+    .side-link svg { width: 20px; height: 20px; }
+    .side-child { padding-left: calc(0.625rem + 20px + 0.625rem); }
+    .who-out { width: var(--touch-row); height: var(--touch-row); }
+  }
+  @media (max-width: 1023.98px) and (prefers-reduced-motion: reduce) {
+    .side-menu, .menu-scrim, .menu-open .side-menu, .menu-open .menu-scrim { transition: none; }
+  }
 
   @media (min-width: 1024px) {
     .shell { display: grid; grid-template-columns: var(--sidebar) 1fr; }
-    .tabbar { display: none; }
-    body.has-nav .main-inner { padding-bottom: 4rem; }
+    .side-menu { display: contents; }
 
     .sidebar {
       position: sticky;
@@ -528,116 +682,6 @@ const icon = (name: string) =>
     .search-button { width: auto; height: auto; justify-content: flex-start; margin-bottom: 0.625rem; padding: 0.3125rem 0.625rem; font-size: 0.875rem; }
     .search-button span { display: block; flex: 1; }
     .search-button .search-kbd { display: inline-block; }
-
-    /* Sized to Shopify's admin, measured 2026-11-12: 30px rows, 13px type, 16px icons, every item
-       on screen with no scrollbar. DM Sans runs small, so 14px here. Windows too short for the
-       list get a thin scrollbar rather than the system's 15px one. */
-    .side-nav {
-      display: flex;
-      flex-direction: column;
-      gap: var(--section-gap);
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
-      overscroll-behavior: contain;
-      scrollbar-width: thin;
-      scrollbar-color: var(--line) transparent;
-    }
-    .side-section { display: flex; flex-direction: column; }
-    .side-heading {
-      padding: 0 0.625rem 2px;
-      font-size: 0.6875rem;
-      line-height: calc(var(--heading) - 2px);
-      font-weight: 700;
-      letter-spacing: 0.15em;
-      text-transform: uppercase;
-      color: var(--ink-3);
-    }
-    .side-link {
-      display: flex;
-      align-items: center;
-      gap: 0.625rem;
-      min-height: var(--row);
-      padding: 0 0.625rem;
-      border-radius: var(--r-sm);
-      color: var(--ink-2);
-      text-decoration: none;
-      font-weight: 500;
-      font-size: 0.875rem;
-      line-height: 1.25rem;
-      transition: background-color 0.15s var(--ease), color 0.15s var(--ease);
-    }
-    .side-link svg { color: var(--ink-3); flex: none; width: 16px; height: 16px; }
-    .side-link:hover { background: var(--panel); color: var(--ink); }
-    /* Inside the scrolling list an outside ring would be clipped, so it sits inside the row. */
-    .side-link:focus-visible { outline-offset: -2px; }
-
-    /* When the list scrolls (an iPad, a short window), fade the edge that has more, since Safari hides scrollbars. */
-    .side-nav.more-below { -webkit-mask-image: linear-gradient(#000 calc(100% - 2.5rem), transparent); mask-image: linear-gradient(#000 calc(100% - 2.5rem), transparent); }
-    .side-nav.more-above { -webkit-mask-image: linear-gradient(transparent, #000 2.5rem); mask-image: linear-gradient(transparent, #000 2.5rem); }
-    .side-nav.more-above.more-below {
-      -webkit-mask-image: linear-gradient(transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
-      mask-image: linear-gradient(transparent, #000 2.5rem, #000 calc(100% - 2.5rem), transparent);
-    }
-    .side-link[aria-current='page'], .side-parent-current { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--line); }
-    .side-link[aria-current='page'] svg, .side-parent-current svg { color: var(--teal); }
-
-    /* Sub-pages: no icon, lined up with their page's label, lighter until chosen. */
-    .side-children { display: none; flex-direction: column; }
-    .side-children-open { display: flex; }
-    .side-child { padding-left: calc(0.625rem + 16px + 0.625rem); color: var(--ink-3); }
-    .side-child[aria-current='page'] { background: none; box-shadow: none; }
-    .side-link[aria-current='page']::after {
-      content: '';
-      margin-left: auto;
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--teal);
-      box-shadow: 0 0 0 3px var(--teal-soft);
-    }
-
-    .side-foot {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-      margin-top: 0.5rem;
-      padding-top: 0.5rem;
-      border-top: 1px solid var(--line);
-    }
-    .who {
-      display: flex;
-      align-items: center;
-      gap: 0.625rem;
-      padding: 0 0.5rem;
-      min-width: 0;
-    }
-    .who-avatar {
-      display: grid;
-      place-items: center;
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      background: var(--panel);
-      box-shadow: inset 0 0 0 1px var(--line);
-      font-weight: 700;
-      font-size: 0.8125rem;
-      flex: none;
-    }
-    .who-text { display: flex; flex: 1; flex-direction: column; min-width: 0; line-height: 1.25; }
-    .who-out {
-      display: grid;
-      place-items: center;
-      width: 28px;
-      height: 28px;
-      flex: none;
-      border-radius: var(--r-sm);
-      color: var(--ink-3);
-    }
-    .who-out svg { width: 16px; height: 16px; }
-    .who-out:hover { background: var(--panel); color: var(--ink); }
-    .who-email { font-size: 0.8125rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .who-role { font-size: 0.75rem; color: var(--ink-3); }
 
     .main-inner { padding: 2.25rem 2.5rem 4rem; }
   }
@@ -693,17 +737,17 @@ const icon = (name: string) =>
     transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.1s var(--ease);
     white-space: nowrap;
   }
-  .btn:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); }
+  @media (hover: hover) { .btn:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); } }
   .btn:active:not(:disabled) { transform: translateY(1px); }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
   .btn-primary { background: var(--gold); border-color: var(--gold); color: var(--on-gold); }
-  .btn-primary:hover { background: color-mix(in srgb, var(--gold) 88%, #000); border-color: color-mix(in srgb, var(--gold) 88%, #000); color: var(--on-gold); }
+  @media (hover: hover) { .btn-primary:hover { background: color-mix(in srgb, var(--gold) 88%, #000); border-color: color-mix(in srgb, var(--gold) 88%, #000); color: var(--on-gold); } }
   .btn-dark { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-  .btn-dark:hover { background: color-mix(in srgb, var(--ink) 85%, var(--bg)); color: var(--bg); }
+  @media (hover: hover) { .btn-dark:hover { background: color-mix(in srgb, var(--ink) 85%, var(--bg)); color: var(--bg); } }
   .btn-danger { color: var(--red); }
-  .btn-danger:hover { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 40%, var(--line)); color: var(--red); }
+  @media (hover: hover) { .btn-danger:hover { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 40%, var(--line)); color: var(--red); } }
   .btn-ghost { background: transparent; border-color: transparent; box-shadow: none; }
-  .btn-ghost:hover { background: var(--sunk); border-color: transparent; }
+  @media (hover: hover) { .btn-ghost:hover { background: var(--sunk); border-color: transparent; } }
   .btn-icon { width: 44px; padding: 0; }
   .btn-small { min-height: 36px; padding: 0.375rem 0.75rem; font-size: 0.75rem; }
   /* On a touch screen (the store's iPad, a phone) every button is at least 44pt (Apple HIG). */
@@ -716,7 +760,7 @@ const icon = (name: string) =>
   .btn-group .btn:last-child { border-radius: 0 8px 8px 0; }
   .btn-group .btn + .btn { margin-left: -1px; }
   .btn-group .btn-label { cursor: default; font-weight: 600; min-width: 7.5rem; }
-  .btn-group .btn-label:hover { border-color: var(--line); }
+  @media (hover: hover) { .btn-group .btn-label:hover { border-color: var(--line); } }
 
   /* ── Surfaces ──────────────────────────────────────────── */
   .card {
@@ -935,7 +979,7 @@ const icon = (name: string) =>
     transition: border-color 0.15s var(--ease), background-color 0.15s var(--ease);
   }
   .period svg { color: var(--ink-3); }
-  .period:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); background: var(--sunk); }
+  @media (hover: hover) { .period:hover { border-color: color-mix(in srgb, var(--ink) 28%, var(--line)); background: var(--sunk); } }
   .period:first-child { border-color: color-mix(in srgb, var(--gold) 60%, var(--line)); }
 
   /* ── Tables ────────────────────────────────────────────── */

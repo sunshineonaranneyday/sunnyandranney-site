@@ -28,7 +28,7 @@
 
 import { SEND_HOUR_ET, dueDate, dueMonth, eastern, monthName, readMonth } from './figures.mjs';
 import { esc, readyEmail, reminderEmail, salesCsv, salesPdf } from './report.mjs';
-import { daysUntil, ensureTable } from './status.mjs';
+import { REMIND_DAYS, daysUntil, ensureTable } from './status.mjs';
 
 export const FROM = { email: 'reports@mail.sunnyandranney.com', name: 'Sunny & Ranney' };
 export const ADMIN_ORIGIN = 'https://admin.sunnyandranney.com';
@@ -39,7 +39,6 @@ const MIN = 60e3;
 // 20 minutes lets each run retry and still keeps two runs at once from both sending.
 const RETRY_MS = 20 * MIN;
 const ALERT_AFTER_MS = 2 * 60 * MIN;
-export const REMIND_DAYS = 3;
 
 export const addresses = (v) =>
   String(v || '')

@@ -163,6 +163,8 @@ Cloudflare Pages variables, `/admin` denies everyone:
 | `CF_ACCESS_AUD` | The Access application's audience tag |
 | `ADMIN_MANAGER_EMAILS` | Comma-separated manager logins |
 | `ADMIN_KIOSK_EMAILS` | The tablet's login. It can only reach the clock |
+| `ADMIN_EMAIL_EMAILS` | Logins that help with the weekly email and reach nothing else |
+| `CF_ACCESS_EMAIL_AUD` | The audience tag of the "Sunny & Ranney weekly email" Access application |
 
 The admin lives at **https://admin.sunnyandranney.com**. The store's own DNS
 records (`sunnyandranney.com`, `www`) are DNS-only, so Access can't guard them;
@@ -177,6 +179,20 @@ app also verifies the Access token itself, so an address Access misses still
 denies everyone. Sessions last a month (policy "Sunny & Ranney Admin
 managers").
 
+People who only help with the weekly email sign in at
+**https://email.sunnyandranney.com**, a second proxied CNAME to the Pages
+project with its own Access application ("Sunny & Ranney weekly email") and
+policy, so the admin's Access application never lets them in. The app accepts
+that application's token only on that address (`CF_ACCESS_EMAIL_AUD`,
+`audienceFor` in `src/lib/admin-identity.mjs`), serves
+only `/admin/email/` and `/api/admin/email/` there, and refuses an
+`ADMIN_EMAIL_EMAILS` login anywhere else (`inScope` in `src/lib/admin-host.mjs`,
+checked in the middleware before any page runs). `src/lib/email-login.test.mjs`
+walks every page and call under `src/pages` against those rules, with real
+signed tokens. To add a
+helper, put their email in both that policy and `ADMIN_EMAIL_EMAILS`; to remove
+one, take it out of both and revoke their Access session.
+
 ### Gusto connection
 
 **Who counts as store staff.** Gusto holds the store and the charity as one
@@ -188,7 +204,7 @@ off it. Other clock choices a manager makes stay. People who leave stay store
 staff, so their past pay stays on Payroll, but Staff hides them unless "Show
 all" is on.
 
-An owner connects Gusto once at `/admin/gusto/`. After that, Staff and Payroll
+An owner connects Gusto once at `/admin/payroll/gusto/`. After that, Staff and Payroll
 check Gusto for changes each time they open, and update in place if there were any. There are two routes, and the MCP settings win if both
 are present.
 

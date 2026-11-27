@@ -1,6 +1,9 @@
 import { verifyAccessJwt } from '@/lib/access-jwt.mjs';
+import { EMAIL_HOST } from '@/lib/admin-host.mjs';
+import { audienceFor, identityFor, identityFrom } from '@/lib/admin-identity.mjs';
 
-export type AdminRole = 'manager' | 'kiosk';
+/** A manager runs the store; the kiosk is the store tablet; email may only work on the weekly email. */
+export type AdminRole = 'manager' | 'kiosk' | 'email';
 
 export interface AdminIdentity {
   email: string;
@@ -12,7 +15,11 @@ export interface AdminIdentity {
 interface AdminEnv {
   CF_ACCESS_TEAM_DOMAIN?: string;
   CF_ACCESS_AUD?: string;
+  /** The audience of the email address's own Access application, the only one accepted there. */
+  CF_ACCESS_EMAIL_AUD?: string;
   ADMIN_MANAGER_EMAILS?: string;
+  /** Logins that may work on the weekly email and reach nothing else. */
+  ADMIN_EMAIL_EMAILS?: string;
   ADMIN_KIOSK_EMAILS?: string;
   /** Access service token client IDs that act as a store tablet, like the registers' time clock. */
   ADMIN_KIOSK_SERVICE_TOKENS?: string;
@@ -44,25 +51,6 @@ async function getKeys(teamDomain: string, kid: string): Promise<JsonWebKey[]> {
   return fetchCerts(teamDomain);
 }
 
-function emailList(value: string | undefined): string[] {
-  return (value ?? '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function roleFor(email: string, env: AdminEnv): AdminRole | null {
-  if (emailList(env.ADMIN_MANAGER_EMAILS).includes(email)) return 'manager';
-  if (emailList(env.ADMIN_KIOSK_EMAILS).includes(email)) return 'kiosk';
-  return null;
-}
-
-function identityFor(email: string, env: AdminEnv): AdminIdentity | null {
-  const role = roleFor(email, env);
-  if (!role) return null;
-  return { email, role, owner: role === 'manager' && emailList(env.ADMIN_OWNER_EMAILS).includes(email) };
-}
-
 /** Returns who is calling, or null. Anything unconfigured or invalid is denied. */
 export async function authenticate(request: Request, env: AdminEnv): Promise<AdminIdentity | null> {
   // Removed from production builds: Vite replaces DEV with false at build time.
@@ -70,10 +58,13 @@ export async function authenticate(request: Request, env: AdminEnv): Promise<Adm
     return identityFor(env.ADMIN_DEV_EMAIL.toLowerCase(), env);
   }
 
+  // A sign-in counts only at the address whose Access application issued it: the email
+  // address's token is refused everywhere else, and the admin's is refused there.
+  const host = new URL(request.url).hostname.toLowerCase();
   const teamDomain = env.CF_ACCESS_TEAM_DOMAIN ?? '';
-  const audience = env.CF_ACCESS_AUD ?? '';
+  const audience = audienceFor(host, env);
   if (!/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(teamDomain) || !audience) {
-    console.error('Admin auth is not configured: set CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUD');
+    console.error(`Admin auth is not configured: set CF_ACCESS_TEAM_DOMAIN and ${host === EMAIL_HOST ? 'CF_ACCESS_EMAIL_AUD' : 'CF_ACCESS_AUD'}`);
     return null;
   }
 
@@ -84,13 +75,5 @@ export async function authenticate(request: Request, env: AdminEnv): Promise<Adm
   });
   if (!verified) return null;
 
-  if ('serviceToken' in verified) {
-    // A service token is only ever a store tablet: it can use the time clock and
-    // nothing a manager does, whatever else is configured.
-    const allowed = (env.ADMIN_KIOSK_SERVICE_TOKENS ?? '').split(',').map((id) => id.trim()).filter(Boolean);
-    return allowed.includes(verified.serviceToken)
-      ? { email: `service-token:${verified.serviceToken}`, role: 'kiosk', owner: false }
-      : null;
-  }
-  return identityFor(verified.email, env);
+  return identityFrom(verified, host, env);
 }

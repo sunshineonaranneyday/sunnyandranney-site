@@ -27,6 +27,12 @@ const stats = [
   { value: '100%', label: 'Of Profits Donated' },
 ];
 
+// Peter & Holly's story video, on Cloudflare Stream. Named "LIVE on
+// sunnyandranney.com/about, do not delete" there. It plays as the Stream
+// MP4 in a <video> on this page: the visitor's tap starts it, so it plays
+// with sound. Stream's own iframe player starts muted.
+const ABOUT_VIDEO = 'https://customer-cuav5h47lgfe96ql.cloudflarestream.com/2cc59789d78389f533b6e54bb12bb2cd';
+
 const DEFAULT_KIDS_HEADING = 'The Kids Who Inspire Us';
 const DEFAULT_KIDS_SUBHEADING = 'Every room starts with a dream. These are the children who remind us why we do what we do.';
 const DEFAULT_KIDS = [
@@ -197,7 +203,7 @@ const team = teamSetting?.members?.length ? teamSetting.members : DEFAULT_TEAM;
             aria-label="Play video: Peter and Holly share why they started Sunny & Ranney"
           >
             <img
-              src="https://customer-cuav5h47lgfe96ql.cloudflarestream.com/7d7459064cd569cd7a3d806914f7aec7/thumbnails/thumbnail.jpg?height=1080"
+              src={`${ABOUT_VIDEO}/thumbnails/thumbnail.jpg?height=1080`}
               alt="Peter and Holly Ranney — founders of Sunny & Ranney"
               width="338" height="600" loading="lazy" decoding="async"
               style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;"
@@ -212,15 +218,17 @@ const team = teamSetting?.members?.length ? teamSetting.members : DEFAULT_TEAM;
             </span>
             <span class="ab-video__watch-label" aria-hidden="true">Watch the story</span>
           </button>
-          <iframe
-            id="cf-player"
-            src=""
-            allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
-            allowfullscreen
-            title="Peter and Holly share why they started Sunny & Ranney"
-            class="ab-video__iframe"
+          <video
+            id="ab-video"
+            class="ab-video__video"
+            data-src={`${ABOUT_VIDEO}/downloads/default.mp4`}
+            poster={`${ABOUT_VIDEO}/thumbnails/thumbnail.jpg?height=1080`}
+            preload="none"
+            controls
+            playsinline
+            aria-label="Peter and Holly share why they started Sunny & Ranney"
             hidden
-          ></iframe>
+          ></video>
         </div>
         <div class="ab-video__caption" aria-hidden="true">
           <span>60 seconds</span>
@@ -540,10 +548,12 @@ const team = teamSetting?.members?.length ? teamSetting.members : DEFAULT_TEAM;
     transform: scale(1.01);
     box-shadow: 0 0 0 1px rgba(212,175,55,0.3), 0 56px 100px rgba(0,0,0,0.75), 0 0 60px rgba(212,175,55,0.1);
   }
-  .ab-video__iframe {
-    position: absolute; inset: 0; width: 100%; height: 100%; border: none;
+  .ab-video__video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; background: #0d0b09;
   }
-  .ab-video__iframe[hidden] { display: none; }
+  .ab-video__video[hidden],
+  .ab-video__thumb[hidden] { display: none; }
   .ab-video__thumb {
     display: block; position: absolute; inset: 0;
     width: 100%; height: 100%; border: none; padding: 0;
@@ -1067,26 +1077,35 @@ const team = teamSetting?.members?.length ? teamSetting.members : DEFAULT_TEAM;
 <script>
   function initAbout() {
     const openBtn = document.getElementById('ab-video-open') as HTMLButtonElement | null;
-    const player = document.getElementById('cf-player') as HTMLIFrameElement | null;
-    const VIDEO_SRC = 'https://customer-cuav5h47lgfe96ql.cloudflarestream.com/7d7459064cd569cd7a3d806914f7aec7/iframe?autoplay=true&muted=false';
+    const player = document.getElementById('ab-video') as HTMLVideoElement | null;
 
     // Reset video state on re-visit (View Transitions)
-    if (player) { player.src = ''; player.hidden = true; }
+    if (player) { player.pause(); player.hidden = true; }
     if (openBtn) { openBtn.hidden = false; }
 
+    // play() runs inside the tap itself, so every browser (iPhone Safari
+    // included) lets it play with sound.
     openBtn?.addEventListener('click', () => {
       if (!player || !openBtn) return;
-      player.src = VIDEO_SRC;
+      if (!player.getAttribute('src')) player.src = player.dataset.src!;
       player.hidden = false;
       openBtn.hidden = true;
+      player.play().catch(() => { /* the native controls stay up to press play */ });
     });
 
+    // Pause when scrolled away; resume on return only if the scroll paused it.
     if (player) {
+      let pausedByScroll = false;
       const observer = new IntersectionObserver(
         ([entry]) => {
-          if (!player.src) return;
-          const msg = entry.isIntersecting ? '{"method":"play"}' : '{"method":"pause"}';
-          player.contentWindow?.postMessage(msg, 'https://customer-cuav5h47lgfe96ql.cloudflarestream.com');
+          if (player.hidden) return;
+          if (!entry.isIntersecting && !player.paused) {
+            pausedByScroll = true;
+            player.pause();
+          } else if (entry.isIntersecting && pausedByScroll) {
+            pausedByScroll = false;
+            player.play().catch(() => {});
+          }
         },
         { threshold: 0.25 }
       );

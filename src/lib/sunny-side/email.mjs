@@ -8,9 +8,10 @@
  *
  *   the photographer's photos -> brief.hero, brief.story.photo
  *   the store's products      -> brief.wall.photos (4-9), read live from their pages by the build
- *   Staci's special           -> brief.sale    kind: "tiers" (2-4) | "percent" | "headline"
+ *   Staci's special           -> brief.sale    kind: "tiers" (2-4) | "percent" | "times" (2-4) | "headline"
  *   Staci's events            -> brief.events  each with dated items; past dates drop out, and the
  *                                                line under the title is written from the dates left
+ *   a reveal still ahead      -> brief.reveal  the charity's invite to watch it live, right after the products
  *   the latest reveal         -> brief.mission
  *
  * Design: bold color blocks and edge-to-edge photos, like a bright weekly flyer.
@@ -20,20 +21,32 @@
  *   Color:  only colors the live sunnyandranney.com shows. One color, one job:
  *           gold = buy, teal = events, charcoal for words. The one exception is the charity section,
  *           which wears Sunshine on a Ranney Day's own identity (Peter, 2026-11-11), taken from
- *           sunshineonaranneyday.com and its brand guide at /branding/: the site's hero (Warm Gray,
- *           a Libre Baskerville headline with a highlighted italic word, a rounded photo, a yellow
- *           pill) over its impact strip (Dark Deep with Sunshine Yellow numbers).
+ *           sunshineonaranneyday.com and its brand guide at /branding/, laid out like the charity's
+ *           own emails (Peter, 2026-11-16): a Dark Deep top with its logo and a Libre Baskerville
+ *           headline whose key words are yellow italic, the family's photo, a cream story, and its
+ *           impact strip (Dark Deep with Sunshine Yellow numbers).
  *   Type:   DM Sans (the site's font). Outlook falls back to Arial, Gmail to Helvetica.
  *   Space:  8 / 16 / 24 / 32 / 40 px; 40 becomes 32 on phones. Radius: 8 buttons, 12 cards. Photos square.
  *   Grid:   words and cards sit on one 536px column (32px sides; 20px on phones). Photos run the full
  *           600px. The photo wall's 4px gutters live inside its cells, split so the outer tiles touch
  *           both edges, because Gmail strips the negative margins that would otherwise do it.
+ *   Phones first: every size written inline is a phone's (type, padding, gaps), and a computer's
+ *           comes from the style block (min-width:621px) and from Outlook's own block. Some mail apps
+ *           throw the style block away (the Gmail app with a Yahoo, Outlook or iCloud account), so
+ *           whatever must fit a 320px phone can't depend on it: without it the email reads as it
+ *           does on a phone, at any width. Rows that sit side by side on a computer (the visit
+ *           row, the charity's numbers) wrap by their own widths, with no media query (FAB_FOUR,
+ *           statColumns). verify.mjs renders every email with the style block and without it, at
+ *           every width from 320 to 700px.
  *   First screen: on a phone, the sale button lands within the first 600px (verify.mjs fails it otherwise).
  *   Contrast (WCAG AA): charcoal on white 14.0, on gold 9.9; white on teal 4.9; SOARD Dark on Warm
  *                       Gray 10.6, Muted on it 6.2; Sunshine Yellow on Dark Deep 12 -> all any size.
  * Every store link carries its own utm_content, so Kit's click report shows which slot was tapped.
  */
 
+import { icsUrl, photoPath } from './addresses.mjs';
+import { CLASSIC, LAYOUTS, layoutOf, paddings, solve } from './collage-layouts.mjs';
+import { photoSource } from './photo-store.mjs';
 import { money } from './product.mjs';
 
 // ── Tokens ──────────────────────────────────────────────────────────────────
@@ -41,6 +54,24 @@ export const GOLD = '#FFD400', TEAL = '#2B7A96';
 export const CHARCOAL = '#2C2C2C', STONE = '#6B6B68', WHITE = '#FFFFFF';
 const SANS = "'DM Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const S1 = 8, S2 = 16, S3 = 24, S4 = 32, S5 = 40; // spacing scale
+const PHONE_SIDE = 20; // the column's sides on a phone (32 on a computer)
+/** The email's full width and its column on a computer: 600px less 32px each side. */
+const WIDTH = 600, COLUMN = WIDTH - 2 * S4;
+/** Wider than this, the style block's computer sizes apply (min-width); this wide or narrower, a phone's. */
+const DESKTOP = 621;
+/** The visit row's button column, beside the address on a computer. */
+const VISIT_BUTTON = 210;
+/**
+ * The phone size and line height of the charity's numbers: 32/36 while every one has three digits at
+ * most, 24/28 once one has more, so the widest still fits a third of a 320px phone (Email#impact).
+ */
+export const statSize = (nums) => (nums.every((t) => String(t).replace(/\D/g, '').length <= 3) ? [32, 36] : [24, 28]);
+/**
+ * The space a text link carries over and under its words (padding:12px 0), so a thumb gets the 44px it
+ * needs. It's space you see, so where a link starts or ends a band or a card, the band's own padding gives
+ * it back, and what you see over the first words and under the last is the same (verify.mjs, "uneven").
+ */
+const TAP = 12;
 const R_BTN = 8, R_CARD = 12;
 const LABEL_LH = 16; // line height of the small uppercase labels
 const GUTTER = 4; // between photo wall tiles
@@ -48,6 +79,21 @@ const GUTTER = 4; // between photo wall tiles
 export const SITE = 'https://sunnyandranney.com';
 const MAP = 'https://maps.app.goo.gl/QXwgPyiX93HkwjwDA';
 const CF = 'https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ';
+// The store's own files on Shopify's CDN: the only source the domain's image resizing accepts.
+export const SHOP_FILES = 'https://cdn.shopify.com/s/files/1/0930/2117/6092/';
+// Cloudflare's image resizing for the domain (on since Nov 12, 2026). It runs only on hostnames
+// Cloudflare proxies, and sunnyandranney.com itself is DNS-only to the Pages site, so it's served
+// from shop.sunnyandranney.com, the proxied hostname that redirects old shop links.
+export const RESIZE = 'https://shop.sunnyandranney.com/cdn-cgi/image';
+// The store's own uploads (the week's top photo, the story's collage) live on the site, at
+// /media/email/<id>.jpg/ (photoPath), and go out through the same resizing, cropped around what's in them.
+let photoOrigin = SITE;
+let photoDirect = false;
+/** For the admin run locally, whose uploads aren't on the live site: show them as they are. */
+export function usePhotoOrigin(origin, { direct = false } = {}) {
+  photoOrigin = origin;
+  photoDirect = direct;
+}
 const LOGO = `${CF}/logo-tagline-light-bg/w=360,h=144,fit=scale-down,format=png`; // 1000x400 original, 2.5:1
 const PIG = `${CF}/logo-tagline-light-bg/trim=2;300;192;230,w=192,format=png`; // the flying pig, 192x84
 const GREG = `${CF}/team/greg-ranney/w=88,h=88,fit=cover,gravity=auto,quality=70,format=jpeg`;
@@ -58,24 +104,26 @@ const GREG = `${CF}/team/greg-ranney/w=88,h=88,fit=cover,gravity=auto,quality=70
 // for section backgrounds, Dark Deep for its impact strip, and its muted text.
 export const SOARD_YELLOW = '#FFDA24', SOARD_DARK = '#373A36', SOARD_DEEP = '#1E1F25';
 export const SOARD_WARM = '#F5F4F0', SOARD_MUTED = '#5A5B61';
-const SERIF = "'Libre Baskerville', Georgia, 'Times New Roman', serif";
-// Numbers fall back to Times New Roman, not Georgia: Georgia's figures are old-style, so in Gmail
-// (no web fonts) "$0" read as "$o" and "295" dropped below the line.
-const NUMERALS = "'Libre Baskerville', 'Times New Roman', Times, serif";
+// Two more as the charity's own emails draw them (its reveal invite, measured in Gmail on Nov 16, 2026):
+// the cream its story sections sit on, and the soft white of the italic line over its headline.
+export const SOARD_CREAM = '#FEFCF5', SOARD_SOFT = '#E4E4E5';
+// The charity's serif, for its headlines and its numbers alike. Gmail and Outlook load no web fonts, so
+// what they show is the next font here the device has, and every one of them draws its digits the same
+// height on the line (measured Nov 18, 2026): Baskerville, built into every Mac, iPhone and iPad and the
+// face Libre Baskerville was drawn from ("218+" 2.29em wide against its 2.28); Palatino Linotype, on
+// every Windows; Times New Roman only after those. Never Georgia: its figures are old-style, so "$0"
+// read as "$o" and "295" dropped below the line; and Times New Roman first made the numbers in Gmail
+// a different face from the headline over them (Peter, Nov 18, 2026: "the fonts (See the numbers ...").
+export const SERIF = "'Libre Baskerville', Baskerville, 'Palatino Linotype', Palatino, 'Times New Roman', serif";
 const OUTFIT = "'Outfit', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-// The guide's alternate logo (no tagline: "for smaller uses"), for light backgrounds, laid on the
-// band's Warm Gray with 20px of its own margin (the 600x600 file's logo at 102-498 by 98-458, cut at
-// 82-518 by 78-478: 436x400, shown at 132). The file is that crop of brand-logo-light-bg-display on
-// #F5F4F0, uploaded as its own image. Its lettering is dark on a transparent background, and Gmail
-// and Outlook darken backgrounds in dark mode but never images, so a transparent logo lost "on a
-// Ranney Day" there; on its own tile it stays readable, and in light mode the tile is invisible.
-// It's served as the "public" variant because Cloudflare turns resized opaque PNGs into JPEGs,
-// which smudge the warm gray around the lettering.
-const SOARD_LOGO = `${CF}/email/soard-logo-warm-tile/public`;
-const LOGO_INSET = 6; // the tile's margin at 132px wide (20 of 436), taken out of the padding around it
+// The logo the charity's own emails open with on their Dark Deep (its reveal invite, Nov 16, 2026):
+// the guide's display logo for dark backgrounds with "Dreams Built Here", the 600x600 file's logo
+// (102-499 by 98-470) cut with 10px of its own margin to 417x392, shown at 96x90 on a computer, as
+// the charity shows it, and 80 on a phone (its brand guide's smallest digital size is 75). Its
+// artwork is yellow and white, so it stays readable when a mail app darkens the page.
+const SOARD_LOGO_DARK = `${CF}/brand-logo-dark-bg-tagline-display/trim=88;91;120;92,w=192,format=png`;
+const SOARD_LOGO_DARK_W = 96, SOARD_LOGO_DARK_H = 90;
 const SOARD_HOME = 'https://sunshineonaranneyday.com/';
-// The site's highlighter behind its key italic word: Sunshine Yellow at 30% over the lower half.
-const HIGHLIGHT = 'linear-gradient(rgba(255,218,36,0) 52%, rgba(255,218,36,0.3) 52%)';
 
 /** The phone width the first-screen rule is measured at, and how far down the sale button may sit. */
 export const FIRST_SCREEN = 600;
@@ -96,31 +144,73 @@ function encode(s, keep) {
   }
   return out;
 }
-/** Brief text as plain text, for calendar notes: no tags, entities decoded. */
-const plain = (s) =>
+/**
+ * Brief text as plain text, for anything that isn't HTML: calendar notes, and the subject and preview
+ * line Kit takes as plain text (an inbox shows "Santa&#8217;s" as it's written). No tags, every entity
+ * the email writes decoded, &amp; last so nothing is decoded twice.
+ */
+export const plain = (s) =>
   String(s)
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 /** A form-encoded query string: spaces become +. */
 function formEncode(params) {
   return Object.entries(params).map(([k, v]) => `${encode(k, ' ').replace(/ /g, '+')}=${encode(v, ' ').replace(/ /g, '+')}`).join('&');
 }
 
 /**
- * Joins the last two words, so a wide line (headlines, the "when" line) never ends with one word
- * alone. Not for narrow columns, where the joined pair would force an earlier, worse break.
+ * Joins the last two words, so a line never ends with one word alone ("Terrace 4 Door" over
+ * "Cabinet" in a phone's product tile, Nov 17, 2026). In a narrow column, `max` is the most
+ * characters the joined pair may have: a longer one would force an earlier, worse break, so it's
+ * left to break where it falls.
  */
-export function noWidow(t) {
+export function noWidow(t, max = Infinity) {
   let inside = 0;
   for (let i = t.length - 1; i >= 0; i--) {
     if (t[i] === '>') inside++;
     else if (t[i] === '<') inside--;
-    else if (t[i] === ' ' && !inside) return t.slice(0, i) + '&nbsp;' + t.slice(i + 1);
+    else if (t[i] === ' ' && !inside) {
+      // The pair as a reader sees it: no tags, each HTML code one character
+      const before = t.slice(0, i).replace(/<[^>]*>/g, '').replace(/&#?\w+;/g, '.').split(/\s+/).pop() ?? '';
+      const after = t.slice(i + 1).replace(/<[^>]*>/g, '').replace(/&#?\w+;/g, '.');
+      return before.length + 1 + after.length <= max ? t.slice(0, i) + '&nbsp;' + t.slice(i + 1) : t;
+    }
   }
   return t;
+}
+
+/** How much of a family's summary the email shows, in letters, before "Read more" (the charity's run 180–220). */
+export const LEAD = 140;
+const SENTENCE_END = /(?<!\b(?:Dr|Mr|Mrs|Ms|St|Jr|Sr|Mt|Ft))[.!?](?:&#8221;|&#8217;)?(?=(?:\s|&nbsp;)+(?:[A-Z0-9]|&#8220;|&#8216;))/g;
+/**
+ * The start of a summary the charity wrote (HTML text, as typeset): its whole sentences while they fit
+ * in LEAD letters, and at least the first. A first sentence longer than that (two of the charity's 18,
+ * Nov 17, 2026, are one 205-letter sentence) is cut at a word, with an ellipsis.
+ */
+export function lead(t, max = LEAD) {
+  const s = String(t).trim();
+  const letters = (x) => x.replace(/&#?\w+;/g, '_').length;
+  let out = '';
+  for (const m of s.matchAll(SENTENCE_END)) {
+    const next = s.slice(0, m.index + m[0].length);
+    if (out && letters(next) > max) break;
+    out = next;
+  }
+  // The last sentence has no sentence after it to find it by: the whole summary, when it all fits
+  if (!out || letters(s) <= max) out = s;
+  if (letters(out) <= max) return out;
+  // Too long: up to the last word that fits, without the comma or dash it ended on
+  const bits = out.match(/&#?\w+;|[\s\S]/g);
+  let n = 0;
+  let cut = 0;
+  for (let i = 0; i < bits.length && n < max; i++, n++) if (bits[i] === ' ' || bits[i] === '&nbsp;') cut = i;
+  return bits.slice(0, cut).join('').replace(/(?:[,;:–—-]|&#8212;|&#8211;|&mdash;|&ndash;)+$/, '') + '&#8230;';
 }
 
 /** A CSS pixel length, keeping fractions (the wall's split gutters) and dropping trailing zeros. */
@@ -183,18 +273,32 @@ export function offerLine(sale) {
     return shown.map(([spend, off]) => `Spend $${dollars(spend)}, save ${off}%.`).join(' ');
   }
   if (sale?.kind === 'percent') return `${sale.percent}% off ${plain(sale.what)}`;
+  // A sale by the hour: its best percent and its days ("Up to 30% off Friday and Saturday.")
+  if (sale?.kind === 'times') return `Up to ${mostOff(sale)} off ${dayList(sale.days ?? [])}.`;
   throw new Error('The brief asks for {offer}, but this week has no discount.');
 }
 
+/** "Friday", "Friday and Saturday", "Friday through Sunday". */
+const dayList = (days) => (days.length <= 1 ? days[0] || 'this week' : days.length === 2 ? `${days[0]} and ${days[1]}` : `${days[0]} through ${days[days.length - 1]}`);
+
+/** Every percent a sale gives, or none. */
+const percentsOf = (sale) =>
+  sale?.kind === 'tiers' ? sale.tiers.map(([, off]) => off) : sale?.kind === 'percent' ? [sale.percent] : sale?.kind === 'times' ? sale.windows.map(([off]) => off) : [];
+
 function mostOff(sale) {
-  if (sale?.kind === 'tiers') return `${Math.max(...sale.tiers.map(([, off]) => off))}%`;
-  if (sale?.kind === 'percent') return `${sale.percent}%`;
-  throw new Error('The brief asks for {upto}, but this week has no discount.');
+  const offs = percentsOf(sale);
+  if (!offs.length) throw new Error('The brief asks for {upto}, but this week has no discount.');
+  // While a percent is still being typed ("?"), the most is the biggest typed so far
+  const typed = offs.filter((o) => typeof o === 'number');
+  return `${typed.length ? Math.max(...typed) : '?'}%`;
 }
 
 /** The subject and preheader as they go out, with {offer} and {upto} written from the offer. Throws if either promises what the offer doesn't give. */
+/** A subject or preheader with {offer} and {upto} written from the sale. */
+export const fillLine = (t, sale) => String(t || '').replace('{offer}', () => offerLine(sale)).replace('{upto}', () => mostOff(sale));
+
 export function lines(brief) {
-  const fill = (t) => String(t || '').replace('{offer}', () => offerLine(brief.sale)).replace('{upto}', () => mostOff(brief.sale));
+  const fill = (t) => fillLine(t, brief.sale);
   const subject = fill(brief.subject);
   const preheader = fill(brief.preheader);
   const claims = [...offerClaims(subject, brief.sale, 'subject'), ...offerClaims(preheader, brief.sale, 'preheader')];
@@ -208,8 +312,8 @@ const MONEY = String.raw`\$(\d[\d,]*(?:\.\d+)?)(k)?`;
 /** @returns {string[]} what the line says that the offer doesn't give, in words */
 export function offerClaims(line, sale, where) {
   const text = plain(String(line || ''));
-  const offs = sale?.kind === 'tiers' ? sale.tiers.map(([, off]) => off) : sale?.kind === 'percent' ? [sale.percent] : [];
-  const gives = offs.length ? `the sale gives ${offs.map((o) => `${o}%`).join(', ')}` : 'this week has no discount';
+  const offs = percentsOf(sale);
+  const gives = offs.length ? `the sale gives ${[...new Set(offs)].map((o) => `${o}%`).join(', ')}` : 'this week has no discount';
   const problems = [];
   for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s?%(?!\s+of\b)/gi)) {
     if (!offs.includes(Number(m[1]))) problems.push(`The ${where} says ${m[1]}%, but ${gives}.`);
@@ -241,15 +345,40 @@ export function offerClaims(line, sale, where) {
 const WALL_ROWS = { 4: [2, 2], 5: [1, 2, 2], 6: [2, 2, 2], 7: [1, 2, 2, 2], 8: [2, 2, 2, 2], 9: [1, 2, 2, 2, 2] };
 /** What each photo shows at 600px with the gutters taken out (3:2 for the lead, square for pairs). Outlook sizes images by these. */
 const SHAPE = { 1: [600, 400], 2: [298, 298] };
+/**
+ * The story's classic collage, by how many photos: one wide, then rows of two or three. It's the first
+ * of each count's layouts (collage-layouts.mjs), which the brief's story.layout picks from.
+ * @type {Record<number, number[]>}
+ */
+export const COLLAGE_ROWS = { 1: [1], 2: [2], 3: [1, 2], 4: [1, 3], 5: [1, 2, 2] };
+
+/**
+ * The parts of the email Staci writes or picks, each band tagged with its own (Email.band's `part`), so
+ * the admin's preview knows which section a too-wide word is in. Untagged bands (the masthead, the top
+ * photo, the visit row, the footer) are the email's own layout.
+ */
+export const PARTS = ['offer', 'wall', 'reveal', 'story', 'events', 'mission'];
+
+/** The web-font link as the email writes it, hidden from Outlook. */
+export const FONT_LINK = /<!--\[if !mso\]><!--><link href="https:\/\/fonts\.googleapis\.com[^>]*><!--<!\[endif\]-->/;
+
+/**
+ * The email as a mail app that drops its styling shows it (the Gmail app with a Yahoo, Outlook or
+ * iCloud address): no style block and no web fonts, only the inline styles. The email is written
+ * phones first, so it still fits. What "bare" means wherever it's checked: verify.mjs, the admin's
+ * preview and the tests, so they can't drift apart.
+ */
+export const bareEmail = (html) => html.replace(FONT_LINK, '').replace(/<style[\s\S]*?<\/style>/g, '');
 
 /** Every section, top to bottom. A preview can ask for just the first few. */
-export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'story', 'events', 'mission', 'visit', 'footer'];
+export const SECTIONS = ['masthead', 'hero', 'offer', 'wall', 'reveal', 'story', 'events', 'mission', 'visit', 'footer'];
 
 /** Builds one issue. Holds the brief so every link can be tagged for its slot. */
 export class Email {
   constructor(brief) {
     this.b = brief;
     this.campaign = 'sunny-side-' + brief.send_date;
+    this.lastBg = null; // the color of the last band drawn, for the edge above the next section (edge)
   }
 
   // ── links and images ──
@@ -261,27 +390,46 @@ export class Email {
   }
 
   static photo(src, w, h) {
+    if (src.startsWith('photo:')) {
+      // "photo:<id>", or "photo:<id>@0.42x0.31" with the part every crop keeps in view (photo-store.mjs)
+      const { id, gravity } = photoSource(src);
+      const file = `${photoOrigin}${photoPath(id)}`;
+      return photoDirect ? file : `${RESIZE}/width=${w},height=${h},fit=cover,gravity=${gravity},quality=64,format=jpeg/${file}`;
+    }
     if (src.startsWith('cf:')) return `${CF}/${src.slice(3)}/w=${w},h=${h},fit=cover,gravity=auto,quality=64,format=jpeg`;
-    return `${src}${src.includes('?') ? '&' : '?'}width=${w}&height=${h}&crop=center&quality=64`;
+    // The store's own Shopify files (SHOP_FILES, the only source it accepts) go through Cloudflare's
+    // resizing on the store's domain (RESIZE), which sends exactly the shape asked for, as a JPEG, on
+    // white where anything is see-through. Shopify's own resizing did neither every time: it skips the
+    // crop when a photo is smaller than the size asked for (the lead product's 1000px photo, asked for
+    // at 1200x800, came back an uncropped 800x800, and the email showed it square in the 3:2 spot, Nov
+    // 17, 2026), and it won't send a PNG saved with a transparency channel as a JPEG, even when nothing
+    // in it is see-through (49 of the 51 PNG-only products in stock on Nov 12, 2026 were Mac
+    // screenshots, which all save one). verify.mjs fetches every image as sent and checks its shape.
+    if (src.startsWith(SHOP_FILES)) return `${RESIZE}/width=${w},height=${h},fit=cover,gravity=center,quality=64,format=jpeg,background=white/${src}`;
+    return `${src}${src.includes('?') ? '&' : '?'}width=${w}&height=${h}&crop=center&quality=64&format=jpg`;
   }
 
-  img(src, w, h, alt, href, slot, radius = 0, cls = '') {
+  /** A photo `w` by `h` (Outlook's size), as wide as its cell up to `max`: its own width, or the column's for a photo on the column. */
+  img(src, w, h, alt, href, slot, radius = 0, cls = '', max = w, shape = [w, h]) {
     const c = cls ? ` class="${cls}"` : '';
+    // A store photo shown straight from the site (the admin, run locally) isn't cropped by the
+    // resizing, so the browser crops it to the same shape, keeping the preview's measurements true
+    const crop = photoDirect && src.includes('/media/email/') ? `aspect-ratio:${shape[0]}/${shape[1]};object-fit:cover;` : '';
     const tag =
       `<img${c} src="${escape(src)}" width="${w}" height="${h}" alt="${escape(alt)}" style="display:block;width:100%;` +
-      `max-width:${w}px;height:auto;border:0;border-radius:${radius}px;">`;
+      `max-width:${typeof max === 'number' && !Number.isInteger(max) ? px(max) : `${max}px`};height:auto;${crop}border:0;border-radius:${radius}px;">`;
     if (!href) return tag;
     return `<a href="${escape(this.url(href, slot))}" target="_blank" style="display:block;color:${CHARCOAL};">${tag}</a>`;
   }
 
   /** An edge-to-edge photo band. */
-  fullPhoto(p, w, h, href, slot) {
-    return this.band(this.img(Email.photo(p.src, w * 2, h * 2), w, h, p.alt, href, slot), { top: 0, side: 0, bottom: 0 });
+  fullPhoto(p, w, h, href, slot, part = '') {
+    return this.band(this.img(Email.photo(p.src, w * 2, h * 2), w, h, p.alt, href, slot), { top: 0, side: 0, bottom: 0, part });
   }
 
-  link(text, href, slot, color = CHARCOAL, size = 15) {
+  link(text, href, slot, color = CHARCOAL, size = 15, pad = `${TAP}px 0`) {
     return (
-      `<a href="${escape(this.url(href, slot))}" target="_blank" style="display:inline-block;padding:12px 0;` +
+      `<a href="${escape(this.url(href, slot))}" target="_blank" style="display:inline-block;padding:${pad};` +
       `font-family:${SANS};font-size:${size}px;line-height:20px;font-weight:700;color:${color};` +
       `text-decoration:underline;text-underline-offset:3px;">${text}</a>`
     );
@@ -295,34 +443,60 @@ export class Email {
     const u = escape(this.url(href, slot));
     const width = 56 + 9 * [...text.replace(/&#8594;/g, 'x').replace(/&#8217;/g, "'").replace(/&amp;/g, '&')].length;
     const radius = pill ? 999 : R_BTN;
+    // In a full-width row of its own: a table with align= floats, and whatever came after it (the
+    // sale's fine print) sat beside the button on a computer instead of under it.
+    // Phones first: inline the button fills its row, so it does on a phone even when the mail app
+    // throws the style block away; the computer's rules (.btn) give it its own width back. Outlook,
+    // whose button is the VML shape, gets a table of its own width: a full-width one would paint
+    // the color across the whole row around the shape.
+    const attrs = `role="presentation" cellpadding="0" cellspacing="0" border="0" align="${align}" class="btn"`;
     return (
-      `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="${align}" class="btn" ` +
-      `style="border-collapse:separate;"><tr><td bgcolor="${bg}" style="border-radius:${radius}px;background-color:${bg};">` +
+      `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="${align}">` +
+      `<!--[if mso]><table ${attrs} style="border-collapse:separate;"><![endif]-->` +
+      `<!--[if !mso]><!--><table ${attrs} style="border-collapse:separate;width:100%;"><!--<![endif]-->` +
+      `<tr><td bgcolor="${bg}" style="border-radius:${radius}px;background-color:${bg};">` +
       `<!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" ` +
       `href="${u}" style="height:52px;v-text-anchor:middle;width:${width}px;" arcsize="${pill ? '50%' : '15%'}" stroke="f" fillcolor="${bg}">` +
       `<w:anchorlock/><center style="color:${fg};font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">${text}</center>` +
       `</v:roundrect><![endif]--><!--[if !mso]><!-->` +
-      `<a href="${u}" target="_blank" style="display:inline-block;padding:16px 28px;font-family:${font};font-size:16px;` +
+      `<a href="${u}" target="_blank" style="display:block;text-align:center;padding:16px 28px;font-family:${font};font-size:16px;` +
       `line-height:20px;font-weight:700;color:${fg};text-decoration:none;border-radius:${radius}px;border:2px solid ${bg};">${text}</a>` +
-      `<!--<![endif]--></td></tr></table>`
+      `<!--<![endif]--></td></tr></table></td></tr></table>`
     );
   }
 
   // ── layout primitives ──
+  /**
+   * A table cell aligned to its row's top, middle or bottom. Kit's template says
+   * `table td { vertical-align:top; }` (scripts/sunny-side/kit-wrapper.mjs), which beats a bare
+   * valign in every inbox that reads its style block: the issue date and "Shop all" sat at the top of
+   * their rows in Gmail (Nov 17, 2026). So the alignment is inline too, which no style block beats,
+   * and valign stays for Outlook. `rest` is the cell's other attributes and `style` its other styles.
+   */
+  static td(valign, rest = '', style = '') {
+    return `<td${rest ? ` ${rest}` : ''} valign="${valign}" style="vertical-align:${valign};${style}">`;
+  }
+
   static T(inner, attrs = 'width="100%"') {
     return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" ${attrs}>${inner}</table>`;
   }
 
   /**
-   * One full-width row of the email. Phone padding follows from desktop padding:
-   * 40 top/bottom -> 32 (pt, pb), 32 sides -> 20 (px); anything else stays as is.
+   * One full-width row of the email, padded as asked on a computer. Inline it's padded as on a phone,
+   * phones first: 40 top/bottom -> 32 (pt, pb), 32 sides -> 20 (px); anything else stays as is. The
+   * style block gives the computer its 40s and 32s back.
    */
-  band(inner, { bg = WHITE, top = S5, side = S4, bottom = S5, cls = '' } = {}) {
+  band(inner, { bg = WHITE, top = S5, side = S4, bottom = S5, cls = '', part = '' } = {}) {
     const c = [side === S4 ? 'px' : '', top === S5 ? 'pt' : '', bottom === S5 ? 'pb' : '', cls].filter(Boolean).join(' ');
-    const attr = c ? ` class="${c}"` : '';
+    // The part of the email a band holds (PARTS), so the admin's preview can say which section a word
+    // that's too wide is in, and send Staci there, instead of guessing from the page's structure
+    const attr = (c ? ` class="${c}"` : '') + (part ? ` data-part="${part}"` : '');
+    const phone = { top: top === S5 ? S4 : top, side: side === S4 ? PHONE_SIDE : side, bottom: bottom === S5 ? S4 : bottom };
+    this.lastBg = bg;
+    this.tail = 0;
     return (
       `<tr><td${attr} bgcolor="${bg}" style="background-color:${bg};color:${CHARCOAL};` +
-      `padding:${top}px ${side}px ${bottom}px;">${inner}</td></tr>`
+      `padding:${phone.top}px ${phone.side}px ${phone.bottom}px;">${inner}</td></tr>`
     );
   }
 
@@ -331,17 +505,38 @@ export class Email {
     return `<div${c} style="height:${h}px;line-height:${h}px;font-size:${h}px;">&nbsp;</div>`;
   }
 
-  /** White space between a photo and a block it doesn't belong to (40px, 32 on phones). */
-  breather() {
-    return this.band(Email.gap(S5, 'g40'), { top: 0, side: 0, bottom: 0 });
+  /**
+   * White space between a photo or words and a block they don't belong to (40px, 32 on phones: 32 inline,
+   * phones first), less what the band above already ends with (`less`): the products' last captions end
+   * with 24px of their own, and over the reveal the white came to 58px on a phone where every other
+   * section has 32 (measured Nov 18, 2026).
+   */
+  breather(less = 0) {
+    if (![0, S3].includes(less)) throw new Error(`breather: no computer size for ${less}px less`);
+    return this.band(Email.gap(S4 - less, `g${S5 - less}`), { top: 0, side: 0, bottom: 0 });
   }
 
-  static text(t, { size = 17, lh = 26, weight = 400, color = CHARCOAL, mb = 0, align = 'left', tag = 'p', cls = '', track = '', font = SANS } = {}) {
+  /**
+   * What goes above a section of color `bg`: nothing under a section of another color, a breather under
+   * white (a photo or words) or under its own color. Sections of color meet edge to edge, the way the
+   * charity's own emails stack their bands: a strip of white between the teal events and the
+   * charity's Dark Deep read as a seam, as if a section were missing (Peter, 2026-11-16, "remove the
+   * white gap"), and the reveal still had one on each side (Nov 17). Two of the same color, two events
+   * running, keep the white between them, or they'd read as one.
+   */
+  edge(bg) {
+    // Nothing above it (a section drawn on its own, as the admin's preview does): nothing to keep it from
+    if (!this.lastBg) return '';
+    return this.lastBg !== WHITE && this.lastBg !== bg ? '' : this.breather(this.tail || 0);
+  }
+
+  /** A paragraph. `size` and `lh` are a phone's (phones first); a class in the style block gives a computer bigger ones. */
+  static text(t, { size = 17, lh = 26, weight = 400, color = CHARCOAL, mb = 0, align = 'left', tag = 'p', cls = '', track = '', font = SANS, css = '' } = {}) {
     const c = cls ? ` class="${cls}"` : '';
     const ls = track ? `letter-spacing:${track};` : '';
     return (
       `<${tag}${c} style="margin:0 0 ${mb}px;font-family:${font};font-size:${size}px;line-height:${lh}px;` +
-      `font-weight:${weight};${ls}color:${color};text-align:${align};mso-line-height-rule:exactly;">${t}</${tag}>`
+      `font-weight:${weight};${ls}color:${color};text-align:${align};${css}mso-line-height-rule:exactly;">${t}</${tag}>`
     );
   }
 
@@ -352,46 +547,74 @@ export class Email {
     );
   }
 
+  /** A section headline: 26/30 on a phone, 30/34 on a computer (.h2). */
   static h2(t, { color = CHARCOAL, mb = 12 } = {}) {
-    return Email.text(noWidow(t), { size: 30, lh: 34, weight: 700, color, mb, tag: 'h2', cls: 'h2', track: '-0.015em' });
+    return Email.text(noWidow(t), { size: 26, lh: 30, weight: 700, color, mb, tag: 'h2', cls: 'h2', track: '-0.015em' });
   }
 
   // ── sections, top to bottom ──
   /** Slim, like a magazine masthead: the logo left, the newsletter's name and issue date right. */
   masthead() {
     const d = day(this.b.send_date);
+    // 120px on a phone, 150 on a computer (.logo); the width attribute is Outlook's
     const logo =
       `<a href="${escape(this.url(SITE + '/', 'masthead'))}" target="_blank" class="logo" ` +
-      `style="display:block;width:150px;color:${CHARCOAL};">` +
+      `style="display:block;width:120px;color:${CHARCOAL};">` +
       `<img class="logo" src="${LOGO}" width="150" height="60" alt="Sunny &amp; Ranney" ` +
-      `style="display:block;width:150px;height:auto;border:0;"></a>`;
+      `style="display:block;width:120px;height:auto;border:0;"></a>`;
     const name =
       Email.label('The Sunny Side', { mb: 2, align: 'right' }) +
       Email.text(`${monthShort(d)} ${d.getUTCDate()}, ${d.getUTCFullYear()}`, { size: 13, lh: 18, align: 'right' });
     return this.band(
-      Email.T(`<tr><td valign="middle">${logo}</td>` + `<td align="right" valign="middle" style="padding-left:${S2}px;">${name}</td></tr>`),
+      Email.T(`<tr>${Email.td('middle')}${logo}</td>` + `${Email.td('middle', 'align="right"', `padding-left:${S2}px;`)}${name}</td></tr>`),
       { top: S2, bottom: S2 },
     );
   }
 
   hero() {
-    return this.fullPhoto(this.b.hero, 600, 300, SITE + this.b.sale.url, 'hero-photo');
+    // To the sale, or the shop in an email without one
+    return this.fullPhoto(this.b.hero, 600, 300, SITE + (this.b.sale?.url || '/shop/'), 'hero-photo');
   }
 
   tiers(tiers) {
     const n = tiers.length;
     if (!(n >= 2 && n <= 4)) throw new Error(`sale.tiers: the offer shows 2 to 4 tiers, not ${n}`);
-    const size = TIER_SIZE[n][0];
+    // Phones first: inline, the size that fits the smallest phone; the style block grows it from 375px and again on a computer
+    const size = TIER_SIZE[n][2];
     const short = n === 4 || tiers.some(([spend]) => typeof spend === 'number' && spend >= 10000);
     let tds = '';
     tiers.forEach(([spend, percent], k) => {
       const rule = k ? `border-left:2px solid ${CHARCOAL};padding-left:14px;` : '';
       const clear = k < n - 1 ? `padding-right:${S1}px;` : '';
       const cap = [n >= 3 ? 'cap' : '', n === 4 ? 'cap4' : ''].filter(Boolean).join(' ');
+      // Under 375px "off" sits over the amount in every column (min-content), so the columns stay even
+      const caption = n === 4 ? { size: 13, lh: 18 } : { size: 15, lh: 20 };
       tds +=
-        `<td width="${pct(100 / n)}%" valign="top" style="${rule}${clear}">` +
+        Email.td('top', `width="${pct(100 / n)}%"`, `${rule}${clear}`) +
         Email.text(`${percent}%`, { size, lh: size, weight: 700, cls: `tier${n}`, track: '-0.04em', mb: 4 }) +
-        Email.text(`off ${amount(spend, short)}`, { size: 15, lh: 20, weight: 700, cls: cap }) +
+        Email.text(`off ${amount(spend, short)}`, { ...caption, weight: 700, cls: cap, css: n >= 3 ? 'width:min-content;' : '' }) +
+        '</td>';
+    });
+    return Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"');
+  }
+
+  /**
+   * A sale by the hour, in the tiers' row: each column its percent, then "off Fri" over its hours
+   * ("10am–1pm", "all day"), on a computer at a tier's caption size, on a phone at 13px. In a narrow
+   * column the hours break after their dash ("10:30am–" over "12:30pm"), never inside a time.
+   */
+  windows(rows) {
+    const n = rows.length;
+    if (!(n >= 2 && n <= 4)) throw new Error(`sale.windows: the offer shows 2 to 4 times, not ${n}`);
+    const size = TIER_SIZE[n][2];
+    let tds = '';
+    rows.forEach(([percent, dayName, hours], k) => {
+      const rule = k ? `border-left:2px solid ${CHARCOAL};padding-left:14px;` : '';
+      const clear = k < n - 1 ? `padding-right:${S1}px;` : '';
+      tds +=
+        Email.td('top', `width="${pct(100 / n)}%"`, `${rule}${clear}`) +
+        Email.text(`${percent}%`, { size, lh: size, weight: 700, cls: `tier${n}`, track: '-0.04em', mb: 4 }) +
+        Email.text(`off&nbsp;${dayName}<br>${hours}`, { size: 13, lh: 18, weight: 700, cls: 'cap4' }) +
         '</td>';
     });
     return Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"');
@@ -401,18 +624,22 @@ export class Email {
     const s = this.b.sale;
     let out = Email.label(s.name);
     if (s.kind === 'percent') {
+      // 76/74 on a phone, 92/88 on a computer (.mega); "what" 32/36, 40/44 (.mega2)
       out +=
-        `<h1 class="mega" style="margin:0;font-family:${SANS};font-size:92px;line-height:88px;font-weight:700;` +
+        `<h1 class="mega" style="margin:0;font-family:${SANS};font-size:76px;line-height:74px;font-weight:700;` +
         `letter-spacing:-0.045em;color:${CHARCOAL};mso-line-height-rule:exactly;">${s.percent}%&nbsp;off</h1>` +
-        Email.text(s.what, { size: 40, lh: 44, weight: 700, mb: S3, cls: 'mega2', track: '-0.025em' });
+        Email.text(s.what, { size: 32, lh: 36, weight: 700, mb: S3, cls: 'mega2', track: '-0.025em' });
     } else {
-      out += Email.text(noWidow(s.headline), { size: 32, lh: 36, weight: 700, mb: s.kind === 'tiers' ? S3 : S2, tag: 'h1', cls: 'h2', track: '-0.015em' });
+      // 26/30 on a phone, 32/36 on a computer (.h1)
+      out += Email.text(noWidow(s.headline), { size: 26, lh: 30, weight: 700, mb: s.kind === 'tiers' || s.kind === 'times' ? S3 : S2, tag: 'h1', cls: 'h1', track: '-0.015em' });
       if (s.kind === 'tiers') out += this.tiers(s.tiers) + Email.gap(S3);
+      if (s.kind === 'times') out += this.windows(s.windows) + Email.gap(S3);
     }
     out += this.button(`${s.cta} &#8594;`, SITE + s.url, 'offer-button', CHARCOAL, WHITE);
     // fine print after the button, so it never pushes the button down
-    if (s.details) out += Email.gap(S2) + Email.text(s.details, { size: 15, lh: 22 });
-    return this.band(out, { bg: GOLD, top: S4 });
+    // Never a word alone on its last line: "Ends Saturday, Nov" over "21." on a 390px phone (Nov 17, 2026)
+    if (s.details) out += Email.gap(S2) + Email.text(noWidow(s.details), { size: 15, lh: 22, cls: 'fine' });
+    return this.band(out, { bg: GOLD, part: 'offer' });
   }
 
   /**
@@ -426,8 +653,9 @@ export class Email {
       `<a href="${escape(this.url(ph.url, slot))}" target="_blank" style="display:block;color:${CHARCOAL};text-decoration:none;">` +
       `<img src="${escape(Email.photo(ph.src, cw * 2, ch * 2))}" width="${cw}" height="${ch}" alt="" ` +
       `style="display:block;width:100%;max-width:${cw}px;height:auto;border:0;">` +
-      `<span class="tile-cap" style="display:block;padding:10px 12px ${S3}px ${S4}px;">` +
-      `<span class="tile-name" style="display:block;font-family:${SANS};font-size:15px;line-height:20px;font-weight:700;color:${CHARCOAL};">${ph.name}</span>` +
+      // Inset by the column's side: 20px on a phone, 32 on a computer (.tile-cap)
+      `<span class="tile-cap" style="display:block;padding:10px ${S1}px ${S3}px ${PHONE_SIDE}px;">` +
+      `<span class="tile-name" style="display:block;font-family:${SANS};font-size:15px;line-height:20px;font-weight:700;color:${CHARCOAL};">${noWidow(ph.name, 14)}</span>` +
       `<span class="tile-price" style="display:block;font-family:${SANS};font-size:15px;line-height:20px;font-weight:400;color:${CHARCOAL};">${money(ph.price)}</span>` +
       `</span></a>`
     );
@@ -436,12 +664,21 @@ export class Email {
   wall() {
     const w = this.b.wall;
     const shop = SITE + (w.more || '/shop/'); // "Shop all" goes where the brief says the products come from
+    // The label and "Shop all" share a baseline at the foot of their row, and the link's 44px for a thumb
+    // is all over its words, in the band's top padding (pt-tap): with the link's height centered on the
+    // label, the label sat 45px under the sale where every section's sits at 32, and 12px over the
+    // headline where every other label sits 8 over its own (Nov 18, 2026)
+    const linkUp = 2 * TAP + 4; // the 44px row less the label's 16px line
     const head =
       Email.T(
-        `<tr><td valign="middle">${Email.label(w.label, { mb: 0 })}</td>` +
-          `<td align="right" valign="middle" style="white-space:nowrap;padding-left:${S2}px;">` +
-          `${this.link('Shop all &#8594;', shop, 'wall-shop-all')}</td></tr>`,
-      ) + Email.h2(w.headline, { mb: 0 });
+        `<tr>${Email.td('bottom')}${Email.label(w.label, { mb: 0 })}</td>` +
+          // No line of its own: Kit's template gives every table a line height of 1.5, and the cell's line
+          // under the link grew 2px past the link and pushed the label down inside Kit (kit-wrapper.mjs)
+          Email.td('bottom', 'align="right"', `white-space:nowrap;padding-left:${S2}px;font-size:0;line-height:0;`) +
+          `${this.link('Shop all &#8594;', shop, 'wall-shop-all', CHARCOAL, 15, `${linkUp}px 0 0`)}</td></tr>`,
+      ) +
+      Email.gap(S1) +
+      Email.h2(w.headline, { mb: 0 });
     let rows = '';
     let i = 0;
     WALL_ROWS[w.photos.length].forEach((n) => {
@@ -452,26 +689,150 @@ export class Email {
         // outer tiles touch the edges: tile k pads GUTTER*k/n on the left, the rest on the right.
         const left = (GUTTER * k) / n, right = (GUTTER * (n - 1 - k)) / n;
         tds +=
-          `<td width="${pct(100 / n)}%" valign="top" style="padding:0 ${px(right)} 0 ${px(left)};">` +
+          Email.td('top', `width="${pct(100 / n)}%"`, `padding:0 ${px(right)} 0 ${px(left)};`) +
           this.tile(ph, cw, ch, `wall-${i + k + 1}`) +
           '</td>';
       });
       rows += '<tr><td>' + Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"') + '</td></tr>';
       i += n;
     });
-    return this.band(head, { top: S5, bottom: S2 }) + this.band(Email.T(rows), { top: 0, side: 0, bottom: 0 });
+    const out = this.band(head, { top: S4 - linkUp, bottom: S2, cls: 'pt-tap', part: 'wall' }) + this.band(Email.T(rows), { top: 0, side: 0, bottom: 0, part: 'wall' });
+    // The last captions end with their own 24px (tile), so the white under them takes that off (breather)
+    this.tail = S3;
+    return out;
   }
 
+  /**
+   * The week's photos, edge to edge, after the reveal (Peter, 2026-11-17: "subject, sale, products,
+   * reveal, photos, events, charity, send"). There are no words over them: the story's are gone ("i
+   * want the "story" fuckong gone"), and a brief that still has some (a week saved before then, an
+   * old stress test) shows only its photos. They link to the store's page the week names (/visit/).
+   */
   story() {
     const s = this.b.story;
     if (!s) return '';
-    const href = SITE + s.cta[1];
-    return (
-      this.band(Email.label(s.label) + Email.h2(s.headline) + Email.text(s.body, { mb: S1 }) + this.link(`${s.cta[0]} &#8594;`, href, 'story-link'), {
-        top: S5,
-        bottom: S2,
-      }) + this.fullPhoto(s.photo, 600, 240, href, 'story-photo')
+    const href = SITE + (s.link || (Array.isArray(s.cta) ? s.cta[1] : '') || '/visit/');
+    if (s.photos?.length) return this.collage(s.photos, href, s.layout);
+    return s.photo ? this.fullPhoto(s.photo, 600, 240, href, 'story-photo', 'story') : '';
+  }
+
+  /**
+   * A charity reveal still ahead, its own section right after the products, before the story (Peter, 2026-11-17:
+   * "put the reveal after the prodcuts"): the charity's invite to watch it live, built like its own
+   * reveal email ("Join Us Live for Dylan’s Reveal Day!", Nov 16, 2026) in its identity: Dark Deep,
+   * its logo over a centered top, a Sunshine Yellow date, the Libre Baskerville line with the key words in yellow italic, the family's
+   * photo, When and Where side by side, the start of the family's story (lead()), and its calendar
+   * links, which hold the day, the time and the link to watch, never the family's address. "Get an
+   * email" goes to the reveal page's own sign-up (the charity emails the day before, an hour before
+   * and when it goes live). Tightened 2026-11-17 (Peter: "tigheting up the section about the reveal"):
+   * 1105px tall on a 390px phone with Dylan before.
+   */
+  reveal() {
+    const r = this.b.reveal;
+    if (!r) return '';
+    // When and where side by side, half the column each: the charity's invite stacks When, Where and
+    // Room (Peter, 2026-11-17: tighter; the room is in the family's words). The day leads on its own
+    // line, so the cells' text starts level with the link's, which is padded to the 44px a thumb needs.
+    const value = `font-family:${OUTFIT};font-size:17px;line-height:24px;font-weight:700;color:${WHITE};`;
+    const cell = (what, inner, pad) =>
+      `${Email.td('top', 'width="50%"', `padding:${pad};`)}${Email.label(what, { color: SOARD_YELLOW, mb: 0, font: OUTFIT, track: '0.12em' })}${inner}</td>`;
+    const details = Email.T(
+      `<tr>${cell('When', `<div style="padding-top:10px;${value}">${r.short}<br>${r.time}</div>`, '0 8px 0 0')}` +
+        cell(
+          'Where',
+          `<div style="${value}"><a href="${escape(this.url(r.live, 'reveal-where'))}" target="_blank" style="display:inline-block;padding:10px 0;${value}` +
+            `text-decoration:underline;text-underline-offset:3px;">Live online</a></div>`,
+          '0 0 0 8px',
+        ) +
+        '</tr>',
+      'width="100%" style="table-layout:fixed;"',
     );
+    // Three yellow pills sharing the column's width, so the row shrinks with a small phone instead of spilling off it.
+    // The charity's own calendar links, as they are (no tracking added: the file is the invite).
+    const pill = (text, href, pad) =>
+      `<td width="33.33%" style="padding:${pad};"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;">` +
+      `<tr><td align="center" bgcolor="${SOARD_YELLOW}" style="background-color:${SOARD_YELLOW};border-radius:999px;">` +
+      `<a href="${escape(href)}" target="_blank" style="display:block;padding:12px 4px;font-family:${OUTFIT};font-size:15px;line-height:20px;font-weight:700;` +
+      `color:${SOARD_DARK};text-decoration:none;border-radius:999px;white-space:nowrap;">${text}</a></td></tr></table></td>`;
+    const pills = Email.T(
+      `<tr>${pill('Google', r.calendar.google, '0 4px 0 0')}${pill('Apple', r.calendar.apple, '0 2px')}${pill('Outlook', r.calendar.outlook, '0 0 0 4px')}</tr>`,
+      'width="100%" style="table-layout:fixed;"',
+    );
+    const remind =
+      `<a href="${escape(this.url(r.live, 'reveal-remind') + '#remind')}" target="_blank" style="display:inline-block;padding:12px 0;` +
+      `font-family:${OUTFIT};font-size:16px;line-height:20px;font-weight:700;color:${SOARD_YELLOW};text-decoration:underline;text-underline-offset:3px;">` +
+      `Email me when it starts&nbsp;&#8594;</a>`;
+    // 26/32 on a phone, 30/36 on a computer (.soard-h)
+    const headline =
+      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:26px;line-height:32px;font-weight:700;letter-spacing:-0.02em;color:${WHITE};text-align:center;mso-line-height-rule:exactly;">` +
+      `<span style="display:block;margin-bottom:6px;font-size:20px;line-height:26px;font-weight:400;font-style:italic;color:${SOARD_SOFT};">Join us live for</span>` +
+      `${r.name}&#8217;s <em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_YELLOW};">Reveal&nbsp;Day</em>.</h2>`;
+    // The top centered under the charity's logo, as its own invite opens (Peter, 2026-11-17: "there
+    // needs to be the sunshine on a ranney day logo"; the invite in Gmail: 28px over the logo, 32 under it)
+    const top =
+      this.soardLogo('reveal-logo') +
+      Email.gap(S3) +
+      Email.label(`Reveal Day &middot; ${r.short}`, { color: SOARD_YELLOW, mb: S1, font: OUTFIT, track: '0.16em', align: 'center' }) +
+      headline;
+    const body =
+      `<div style="text-align:center;">${top}</div>` +
+      Email.gap(S3) +
+      // On the column, rounded like the charity's: 536 on a computer, up to 560 where the style block is gone
+      // 2:1, as the charity section's photo (Peter, 2026-11-17: tighter; it was 3:2)
+      this.img(Email.photo(r.photo.src, 1072, 536), COLUMN, COLUMN / 2, r.photo.alt, r.live, 'reveal-photo', 16, '', WIDTH - 2 * PHONE_SIDE) +
+      Email.gap(S2) +
+      details +
+      Email.gap(S2) +
+      Email.text(noWidow(lead(r.story)), { size: 16, lh: 24, color: WHITE, mb: S3, font: OUTFIT }) +
+      Email.text('Save it to your calendar', { size: 15, lh: 20, weight: 700, color: WHITE, mb: 12, font: OUTFIT }) +
+      pills +
+      Email.gap(S1) +
+      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:20px;">${remind}</p>`;
+    // As much under the link's words as over the logo (28): the link's own 12 and 16 more
+    return this.edge(SOARD_DEEP) + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4 - TAP, cls: 'soard', part: 'reveal' });
+  }
+
+  /**
+   * The story's photos, edge to edge, in the layout the brief names (story.layout, one of
+   * collage-layouts.mjs's for that many photos; the classic one when it names none): photos side by
+   * side are cells of one row, stacked photos rows of one table, each cut its own table. Every cell's
+   * share of the width and its padding come from solve(), so the photos on each side of a cut end
+   * level at every width, with the same 4px gutters as the wall, split inside the cells so the outer
+   * photos touch the edges. Each photo is cropped to its cell around what's in it, asked for at
+   * twice its size in its cell's exact shape, so it fills its cell to the pixel.
+   */
+  collage(photos, href, layout = CLASSIC) {
+    const n = photos.length;
+    if (!LAYOUTS[n]) throw new Error(`story.photos: the collage takes 1 to 5 photos, not ${n}`);
+    const chosen = layoutOf(layout, n);
+    if (!chosen) throw new Error(`story.layout: "${layout}" isn't a layout for ${n} photos (${LAYOUTS[n].map((l) => l.id).join(', ')})`);
+    let i = 0;
+    const fixed = 'width="100%" style="table-layout:fixed;"';
+    const draw = (t, s, w) => {
+      if (Array.isArray(t)) {
+        const ph = photos[i++];
+        const h = s.A * w;
+        const k = Math.max(1, Math.round((2 * w) / t[0]));
+        return this.img(Email.photo(ph.src, k * t[0], k * t[1]), Math.round(w), Math.round(h), ph.alt, href, `story-photo-${i}`, 0, '', w, t);
+      }
+      if (t.down) {
+        return Email.T(t.down.map((c, k) => `<tr><td${k ? ` style="padding-top:${GUTTER}px;"` : ''}>${draw(c, s.kids[k], w)}</td></tr>`).join(''), fixed);
+      }
+      // The gutter goes inside a cell of its own table, never on the shared row's cells: given a fixed
+      // row whose cells are padded unevenly, Chromium takes each cell's share of the row less all the
+      // padding, and WebKit takes the cell's own padding from its share, so a big photo beside a stack
+      // came out 1.3px narrower in Chromium than in WebKit. Inside a table of one cell, they agree.
+      const pads = paddings(s.c, GUTTER);
+      const tds = t.across.map((c, k) => {
+        const [left, right] = pads[k];
+        const inner = draw(c, s.kids[k], s.f[k] * w + s.c[k]);
+        const padded = left || right ? Email.T(`<tr><td style="padding:0 ${px(right)} 0 ${px(left)};">${inner}</td></tr>`, fixed) : inner;
+        return `${Email.td('top', `width="${pct(100 * s.f[k])}%"`)}${padded}</td>`;
+      });
+      return Email.T(`<tr>${tds.join('')}</tr>`, fixed);
+    };
+    const tree = chosen.tree;
+    return this.band(Email.T(`<tr><td>${draw(tree, solve(tree, GUTTER), 600)}</td></tr>`), { top: 0, side: 0, bottom: 0, part: 'story' });
   }
 
   /** The dates still ahead on send day, in order. Month, day and weekday all come from "date". */
@@ -528,36 +889,64 @@ export class Email {
     if (!items.slice(1).every((it, k) => daysBetween(items[k].d, it.d) === 7)) {
       throw new Error(`events: "${e.title}" has calendar links, but its dates aren't a week apart.`);
     }
+    const google = Email.google({
+      title: c.title,
+      start: c.start,
+      end: c.end,
+      day: items[0].d,
+      details: [c.intro, ...items.map((it) => `${monthShort(it.d)} ${it.d.getUTCDate()}: ${plain(it.what)}${it.note ? `. ${plain(it.note)}` : ''}`)].join('\n'),
+      weeks: items.length,
+    });
+    return Email.text(items.length > 1 ? 'Add every date to your calendar:' : 'Add it to your calendar:', { size: 15, lh: 20, color: WHITE }) + this.calendarLinks(google, c.ics, 'cal', WHITE);
+  }
+
+  /** Google Calendar's "add this event" link: one date, or `weeks` dates a week apart. */
+  static google({ title, start, end, day, details, weeks = 1 }) {
     const hms = (t) => {
       if (!/^\d{2}:\d{2}$/.test(t || '')) throw new Error(`events: the calendar's "start" and "end" are HH:MM, like "11:00".`);
       return t.replace(':', '') + '00';
     };
-    const day = items[0].d.toISOString().slice(0, 10).replace(/-/g, '');
+    const d = day.toISOString().slice(0, 10).replace(/-/g, '');
     const q = {
       action: 'TEMPLATE',
-      text: c.title,
-      dates: `${day}T${hms(c.start)}/${day}T${hms(c.end)}`,
+      text: title,
+      dates: `${d}T${hms(start)}/${d}T${hms(end)}`,
       ctz: 'America/New_York',
       location: 'Sunny & Ranney, 109A Oak Street, Roswell, GA',
-      details: [c.intro, ...items.map((it) => `${monthShort(it.d)} ${it.d.getUTCDate()}: ${plain(it.what)}${it.note ? `. ${plain(it.note)}` : ''}`)].join('\n'),
+      details,
     };
-    if (items.length > 1) q.recur = `RRULE:FREQ=WEEKLY;COUNT=${items.length}`;
-    const google = 'https://calendar.google.com/calendar/render?' + Object.entries(q).map(([k, v]) => `${k}=${encode(v, '/')}`).join('&');
-    const dot = `<span style="font-family:${SANS};color:${WHITE};">&nbsp;&nbsp;&middot;&nbsp;&nbsp;</span>`;
+    if (weeks > 1) q.recur = `RRULE:FREQ=WEEKLY;COUNT=${weeks}`;
+    return 'https://calendar.google.com/calendar/render?' + Object.entries(q).map(([k, v]) => `${k}=${encode(v, '/')}`).join('&');
+  }
+
+  /** Google, Apple and Outlook, the last two opening the calendar file. */
+  calendarLinks(google, ics, slot, color) {
+    const dot = `<span style="font-family:${SANS};color:${color};">&nbsp;&nbsp;&middot;&nbsp;&nbsp;</span>`;
     return (
-      Email.text(items.length > 1 ? 'Add every date to your calendar:' : 'Add it to your calendar:', { size: 15, lh: 20, color: WHITE }) +
-      this.link('Google', google, 'cal-google', WHITE) +
-      dot +
-      this.link('Apple', c.ics, 'cal-apple', WHITE) +
-      dot +
-      this.link('Outlook', c.ics, 'cal-outlook', WHITE)
+      this.link('Google', google, `${slot}-google`, color) + dot + this.link('Apple', ics, `${slot}-apple`, color) + dot + this.link('Outlook', ics, `${slot}-outlook`, color)
+    );
+  }
+
+  /**
+   * The event's next date on its own, in the card that leads the event: the date people are
+   * deciding on now, for any event (a weekly series also gets "every date" below, once there's
+   * more than one). Apple and Outlook get a file with just that date (icsUrl).
+   */
+  addOne(e, it) {
+    const c = e.one;
+    const date = it.d.toISOString().slice(0, 10);
+    const google = Email.google({ title: c.title, start: c.start, end: c.end, day: it.d, details: `${plain(it.what)}${it.note ? `. ${plain(it.note)}` : ''}` });
+    return (
+      Email.gap(S1) +
+      Email.text(`Add ${monthShort(it.d)} ${it.d.getUTCDate()} to your calendar:`, { size: 14, lh: 20 }) +
+      this.calendarLinks(google, icsUrl(c.site, c.id, date), 'next', CHARCOAL)
     );
   }
 
   static greg(it) {
     if (!it.greg) return '';
     return (
-      `<td width="52" align="right" valign="middle"><img src="${GREG}" width="44" height="44" ` +
+      `${Email.td('middle', 'width="52" align="right"')}<img src="${GREG}" width="44" height="44" ` +
       `alt="Greg, the store&#8217;s French bulldog" style="display:block;width:44px;height:44px;` +
       `border-radius:22px;border:0;"></td>`
     );
@@ -569,13 +958,17 @@ export class Email {
       const [first, rest, when] = this.upcoming(e);
       if (!first) continue;
       const spot = Email.T(
-        `<tr><td valign="top" bgcolor="${WHITE}" style="background-color:${WHITE};border-radius:${R_CARD}px;padding:${S2}px;">` +
+        // As much white under its last words as over its first: the links it ends with carry their own 12
+        `<tr>${Email.td('top', `bgcolor="${WHITE}"`, `background-color:${WHITE};border-radius:${R_CARD}px;padding:${S2}px ${S2}px ${e.one ? S2 - TAP : S2}px;`)}` +
           Email.T(
-            `<tr><td valign="middle">` +
+            `<tr>${Email.td('middle')}` +
               Email.label(when, { mb: 6 }) +
-              Email.text(noWidow(first.what), { size: 24, lh: 29, weight: 700, cls: 'spot' }) +
+              // 21/26 on a phone, 24/29 on a computer (.spot); 4px under it, so a two-line title's
+              // last line doesn't sit on the time under it
+              Email.text(noWidow(first.what), { size: 21, lh: 26, weight: 700, cls: 'spot', mb: 4 }) +
               (first.note ? Email.text(first.note, { size: 15, lh: 21 }) : '') +
               Email.text(`${first.time || e.time} at the showroom`, { size: 15, lh: 21, weight: 700 }) +
+              (e.one ? this.addOne(e, first) : '') +
               `</td>${Email.greg(first)}</tr>`,
           ) +
           '</td></tr>',
@@ -594,14 +987,15 @@ export class Email {
             Email.text(monthShort(it.d).toUpperCase() + `&nbsp;${it.d.getUTCDate()}`, { size: 15, lh: 22, weight: 700, color: WHITE, track: '0.06em' });
           const ownTime = it.time !== e.time ? it.time : undefined; // the series time is in "when"
           const whatCell =
-            Email.text(it.what, { size: 16, lh: 22, weight: 700, color: WHITE }) + // narrow column: no widow joins
+            // A narrow column (about 16 characters a line on a small phone beside Greg): joined only where the pair fits
+            Email.text(noWidow(it.what, 16), { size: 16, lh: 22, weight: 700, color: WHITE }) +
             (ownTime ? Email.text(ownTime, { size: 14, lh: 20, weight: 700, color: WHITE }) : '') +
-            (it.note ? Email.text(it.note, { size: 14, lh: 20, color: WHITE }) : '');
-          const level = days ? ` style="padding-top:${LABEL_LH + 2}px;"` : ''; // level with the date
+            (it.note ? Email.text(noWidow(it.note, 16), { size: 14, lh: 20, color: WHITE }) : '');
+          const level = days ? `padding-top:${LABEL_LH + 2}px;` : ''; // level with the date
           rows +=
             `<tr><td style="${rule}padding:12px 0;">` +
             Email.T(
-              `<tr><td width="76" valign="top" style="padding-right:${S1}px;">${dateCell}</td>` + `<td valign="top"${level}>${whatCell}</td>${Email.greg(it)}</tr>`,
+              `<tr>${Email.td('top', 'width="76"', `padding-right:${S1}px;`)}${dateCell}</td>` + `${Email.td('top', '', level)}${whatCell}</td>${Email.greg(it)}</tr>`,
             ) +
             '</td></tr>';
         });
@@ -612,64 +1006,188 @@ export class Email {
         Email.label(e.label ?? 'Coming up', { color: WHITE }) +
         Email.h2(e.title, { color: WHITE, mb: line ? 6 : S2 }) +
         (line ? Email.text(noWidow(line), { size: 16, lh: 24, color: WHITE, mb: S2 }) : '');
-      const foot = Email.gap(S2) + (e.calendar ? this.calendar(e, [first, ...rest]) : '');
-      out += this.breather() + this.band(head + spot + agenda + foot, { bg: TEAL, bottom: S4 });
+      // Every date, once there's more than the one the card already offers
+      const series = e.calendar && (rest.length || !e.one);
+      const foot = series ? Email.gap(S2) + this.calendar(e, [first, ...rest]) : '';
+      // Ending in links or the list's last row, each with 12px of its own under its words, the band takes
+      // that off its own (pb-tap); ending in the card, it's padded as it is on top
+      const tapEnd = Boolean(foot || agenda);
+      const bottom = tapEnd ? { bottom: S4 - TAP, cls: 'pb-tap' } : {};
+      out += this.edge(TEAL) + this.band(head + spot + agenda + foot, { bg: TEAL, ...bottom, part: 'events' });
     }
     return out;
   }
 
+  /** The charity's logo for its Dark Deep tops, linked to its site: 80px on a phone, 96 on a computer (.soard-mark); the width attribute is Outlook's. */
+  soardLogo(content) {
+    return (
+      `<a href="${escape(this.url(SOARD_HOME, content))}" target="_blank" class="soard-mark" style="display:inline-block;vertical-align:top;width:80px;color:${WHITE};">` +
+      `<img class="soard-logo soard-mark" src="${SOARD_LOGO_DARK}" width="${SOARD_LOGO_DARK_W}" height="${SOARD_LOGO_DARK_H}" alt="Sunshine on a Ranney Day" ` +
+      `style="display:block;width:80px;height:auto;border:0;margin:0 auto;font-family:${OUTFIT};font-size:14px;font-weight:700;color:${WHITE};"></a>`
+    );
+  }
+
   /**
-   * The charity's section, built the way sunshineonaranneyday.com builds its home page: a light hero
-   * (its logo, why it's here, a Libre Baskerville headline with the key words in highlighted italic,
-   * the latest reveal in a rounded photo with its caption, the story in two sentences, and the yellow
-   * pill), then its impact strip, Sunshine Yellow numbers on Dark Deep, read live from its site each
-   * week by the build. The `soard` class lets verify.mjs hold the section to the charity's palette and
-   * the rest of the email to the store's.
+   * The charity's section, one Dark Deep band (Peter, 2026-11-17: "the story is too long, would like to
+   * have a read more about them type thing and blend in the numbers with the section. overall id like
+   * to shorten this section", headed "see where your money goes"). It was three bands (a dark top, a
+   * cream story and a numbers strip), 903px tall on a 390px phone with Remi & Nico (Nov 17, 2026).
+   *   - centered, as the charity's own emails open: its logo, "100% of our profits" in Sunshine Yellow,
+   *     and "See where your *money goes*." in Libre Baskerville with the key words in yellow italic;
+   *   - the family's photo, the one picked, rounded on the column;
+   *   - the charity's caption and the start of its summary (lead()), then "Read more about <name>" to
+   *     their page on its site;
+   *   - under a muted rule, its numbers three across (impact()), in the same band.
+   * Phones first: every size inline is a phone's; the computer's come from the style block. The
+   * `soard` class lets verify.mjs hold the section to the charity's palette and the rest of the email
+   * to the store's.
    */
   mission() {
     const m = this.b.mission;
-    const logo =
-      `<a href="${escape(this.url(SOARD_HOME, 'charity-logo'))}" target="_blank" style="display:block;width:132px;color:${SOARD_DARK};">` +
-      `<img class="soard-logo" src="${SOARD_LOGO}" width="132" height="121" alt="Sunshine on a Ranney Day" ` +
-      `style="display:block;width:132px;height:auto;border:0;border-radius:8px;"></a>`;
-    // The logo's own row, its padding short by the tile's margin, so the lettering sits exactly where
-    // a transparent logo's would: on the column, 40px down (32 and 20 on phones, via ptl and pxl).
-    const logoRow = this.band(logo, { bg: SOARD_WARM, top: S5 - LOGO_INSET, side: S4 - LOGO_INSET, bottom: 0, cls: 'soard ptl pxl' });
+    // 32/36 on a phone, 38/42 on a computer (.soard-h)
     const headline =
-      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:34px;line-height:40px;font-weight:700;` +
-      `letter-spacing:-0.02em;color:${SOARD_DARK};mso-line-height-rule:exactly;">Every purchase builds a&nbsp;` +
-      `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_DARK};background-image:${HIGHLIGHT};">` +
-      `dream&nbsp;room</em>.</h2>`;
-    const hero = this.band(
-      Email.label('Where 100% of our profits go', { color: SOARD_MUTED, font: OUTFIT, track: '0.1em' }) +
-        headline +
-        Email.gap(S3) +
-        this.img(Email.photo(m.photo.src, 1072, 604), 536, 302, m.photo.alt, m.url, 'mission-photo', 24) +
-        (m.caption ? Email.gap(S1) + Email.text(m.caption, { size: 13, lh: 18, weight: 600, color: SOARD_MUTED, font: OUTFIT, mb: S2 }) : Email.gap(S3)) +
-        Email.text(m.story, { size: 17, lh: 27, color: SOARD_DARK, mb: S3, font: OUTFIT }) +
-        this.button(`${m.cta} &#8594;`, m.url, 'mission-button', SOARD_YELLOW, SOARD_DARK, 'left', { pill: true, font: OUTFIT }),
-      { bg: SOARD_WARM, top: S3 - LOGO_INSET, cls: 'soard' }, // 24px under the lettering, as before
-    );
-    return this.breather() + logoRow + hero + (m.impact ? this.impact(m.impact) : '');
+      `<h2 class="soard-h soard-serif" style="margin:0;font-family:${SERIF};font-size:32px;line-height:36px;font-weight:700;` +
+      `letter-spacing:-0.01em;color:${WHITE};text-align:center;mso-line-height-rule:exactly;">See where your ` +
+      `<em style="font-family:${SERIF};font-style:italic;font-weight:700;color:${SOARD_YELLOW};">money&nbsp;goes</em>.</h2>`;
+    const top =
+      this.soardLogo('charity-logo') +
+      Email.gap(S3) +
+      Email.label('100% of our profits', { color: SOARD_YELLOW, font: OUTFIT, track: '0.18em', align: 'center', mb: S1 }) +
+      headline;
+    // The caption leads, in white, as the admin shows the family's words
+    const words = (m.caption ? `<strong style="font-weight:700;color:${WHITE};">${m.caption}</strong> ` : '') + noWidow(lead(m.story));
+    const link =
+      `<p style="margin:0;font-family:${OUTFIT};font-size:16px;line-height:24px;">` +
+      // A text link, padded to the 44px a thumb needs
+      `<a href="${escape(this.url(m.url, 'mission-link'))}" target="_blank" style="display:inline-block;padding:10px 0;font-family:${OUTFIT};font-weight:700;` +
+      `color:${SOARD_YELLOW};text-decoration:underline;text-underline-offset:3px;">Read more about ${m.name || 'them'}&nbsp;&#8594;</a></p>`;
+    const body =
+      `<div style="text-align:center;">${top}</div>` +
+      Email.gap(S3) +
+      // On the column: 536px on a computer, and up to 560 where the style block is gone (20px sides at any width)
+      this.img(Email.photo(m.photo.src, 1120, 560), COLUMN, COLUMN / 2, m.photo.alt, m.url, 'mission-photo', 20, '', WIDTH - 2 * PHONE_SIDE) +
+      Email.gap(S2) +
+      Email.text(words, { size: 16, lh: 24, color: SOARD_SOFT, font: OUTFIT }) +
+      link +
+      (m.impact ? this.impact(m.impact) : '');
+    // Edge to edge under the events or a reveal, white under a photo (edge)
+    // 28 under its last words, as over the logo: under the numbers, or under Read more less the link's own 10
+    return this.edge(SOARD_DEEP) + this.band(body, { bg: SOARD_DEEP, top: S3 + 4, bottom: S3 + 4 - (m.impact ? 0 : 10), cls: 'soard', part: 'mission' });
   }
 
-  /** The charity's impact strip: its own numbers, as its site shows them, Sunshine Yellow on Dark Deep. */
+  /**
+   * The charity's numbers, as its site shows them, Sunshine Yellow on Dark Deep, centered, under a
+   * muted rule at the foot of its section: three across at any width from 320px up, each in a third of
+   * the column (statColumns), so they reach its edges as the words over them do; a label too long for
+   * one line breaks between its words ("Room / makeovers"), never inside one.
+   * Their size is the charity's own for them (its brand page: 32 to 44px). On a phone, 32px while every
+   * number has three digits at most ("999+" is 83px of a 320px phone's 93px third in Libre Baskerville
+   * Bold, its widest face), else 24 ("2,480+" is 85px there); 40px on a computer (.soard-stat), where
+   * "2,480+" is 141px of 178.
+   */
   impact(n) {
     const stats = [
       [n.rooms, 'Room makeovers'],
       [n.children, 'Children served'],
-      ['$0', 'Cost to families'],
+      // On a phone it breaks after "to", where a third of the column would have left "families" alone on
+      // its line (verify.mjs's rule); a computer's third holds it on one line, so the break is a phone's (.phone-br)
+      ['$0', 'Cost to <br class="phone-br">families'],
     ];
-    const tds = stats
-      .map(
-        ([num, what], k) =>
-          `<td width="${pct(100 / 3)}%" valign="top" style="${k < 2 ? `padding-right:${S1}px;` : ''}">` +
-          Email.text(num, { size: 40, lh: 44, weight: 700, color: SOARD_YELLOW, font: NUMERALS, cls: 'soard-stat soard-serif', track: '-0.02em', mb: 4 }) +
-          Email.label(what, { color: WHITE, mb: 0, font: OUTFIT, track: '0.08em' }) +
-          '</td>',
-      )
-      .join('');
-    return this.band(Email.T(`<tr>${tds}</tr>`, 'width="100%" style="table-layout:fixed;"'), { bg: SOARD_DEEP, top: S4, bottom: S4, cls: 'soard' });
+    const [size, lh] = statSize(stats.map(([num]) => num));
+    const cells = stats.map(
+      ([num, what]) =>
+        Email.text(num, { size, lh, weight: 700, color: SOARD_YELLOW, font: SERIF, cls: 'soard-stat soard-serif', track: '-0.02em', mb: 6, align: 'center' }) +
+        Email.label(what, { color: WHITE, mb: 0, font: OUTFIT, track: '0.06em', align: 'center' }),
+    );
+    return Email.gap(12) + Email.T(`<tr><td style="padding-top:${S3}px;border-top:1px solid ${SOARD_MUTED};">${Email.statColumns(cells)}</td></tr>`);
+  }
+
+  /** Markup only Outlook for Windows reads: the table it lays side by side columns out with (the "ghost table"). */
+  static ghost(s) {
+    return `<!--[if mso]>${s}<![endif]-->`;
+  }
+
+  /**
+   * Blocks side by side, each an equal share of the column (a third for three) at every width, so the
+   * first starts at the column's left edge and the last ends at its right, as the words above them do.
+   * Percent widths hold with no media query, so they hold in a mail app that throws the style block
+   * away. Outlook, which lays inline blocks out its own way, gets a table of its own (the "ghost table").
+   */
+  static statColumns(cells) {
+    const { ghost } = Email;
+    const w = Math.floor(COLUMN / cells.length);
+    // Rounded down, so the shares never add up to more than the column and push the last one down a line
+    const share = Math.floor((100 / cells.length) * 1000) / 1000;
+    return (
+      `<div style="font-size:0;line-height:0;text-align:center;">` +
+      ghost(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`) +
+      cells
+        .map(
+          (c) =>
+            ghost(Email.td('top', `width="${w}" align="center"`)) +
+            `<div class="stat" style="display:inline-block;vertical-align:top;width:${share}%;font-size:16px;line-height:24px;">${c}</div>` +
+            ghost('</td>'),
+        )
+        .join('') +
+      ghost('</tr></table>') +
+      '</div>'
+    );
+  }
+
+  /**
+   * Columns side by side on a computer and stacked, each the full width, on a phone, with no media
+   * query: Rémi Parmentier's "Fab Four" (min-width, max-width, width, calc). With less than `at` px of
+   * room, each column's width works out huge and max-width:100% holds it to the whole width; with `at`
+   * or more it works out below zero and min-width holds it to its own. The calc is written expanded,
+   * (at - 100%) * at as at²px - (at × 100)%, without the parentheses some mail apps reject; one that
+   * drops it keeps width:100%, so the columns stack, which still fits. Outlook gets a ghost table.
+   * min-width is a share of the row, not pixels: min-width beats max-width, so a 326px minimum held
+   * the address column at 326 on a 280px phone and pushed the email off the screen.
+   * `gap` px go between the columns while they're stacked, and none once they're side by side: a
+   * spacer as tall as the gap whose width works out the same way, the whole row while they stack and
+   * nothing beside them. A gap hidden by a media query showed from 576 to 620px, where the columns
+   * already sit side by side, and always with the style block gone, and pushed the button off the
+   * address's middle.
+   * @param {{ html: string, width: number, align?: string }[]} cols widths summing to `at`
+   */
+  static fabFour(cols, at = COLUMN, { gap = 0 } = {}) {
+    const { ghost } = Email;
+    // Rounded down, so the shares never add up to more than the row
+    const share = (w) => Math.floor((w / at) * 10000) / 100;
+    const spacer = gap
+      ? `<!--[if !mso]><!--><div class="fab-gap" style="display:inline-block;vertical-align:middle;min-width:0;max-width:100%;width:100%;` +
+        `width:calc(${at * at}px - ${at * 100}%);height:${gap}px;font-size:0;line-height:0;"></div><!--<![endif]-->`
+      : '';
+    return (
+      `<div style="font-size:0;line-height:0;">` +
+      ghost(`<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>`) +
+      cols
+        .map(
+          ({ html, width, align = 'left' }) =>
+            ghost(Email.td('middle', `width="${width}" align="${align}"`)) +
+            `<div style="display:inline-block;vertical-align:middle;min-width:${share(width)}%;max-width:100%;width:100%;` +
+            `width:calc(${at * at}px - ${at * 100}%);font-size:16px;line-height:24px;text-align:${align};">${html}</div>` +
+            ghost('</td>'),
+        )
+        .join(spacer) +
+      ghost('</tr></table>') +
+      '</div>'
+    );
+  }
+
+  /**
+   * The store's hours as Google has them (store-hours.mjs), read when the email is built: the usual
+   * week, then in bold the days of the email's week that aren't usual (a holiday, a short day). An
+   * email built with no hours (a stress-test brief) leaves them out rather than guess.
+   */
+  hours() {
+    const h = this.b.hours;
+    if (!h?.week?.length) return '';
+    const line = (l) => noWidow(escape(l).replace(/\u2013/g, '&#8211;').replace(/ &amp; /g, '&nbsp;&amp;&nbsp;'));
+    return (
+      Email.text(h.week.map(line).join('<br>'), { size: 16, lh: 24 }) +
+      (h.special?.length ? Email.text(h.special.map(line).join('<br>'), { size: 16, lh: 24, weight: 700, cls: 'hours-special' }) : '')
+    );
   }
 
   visit() {
@@ -677,18 +1195,27 @@ export class Email {
       Email.label('Visit the showroom') +
       Email.h2('109A Oak Street', { mb: 4 }) +
       Email.text('Roswell, GA', { size: 16, lh: 24, weight: 700, mb: S1 }) +
-      Email.text('Tue&#8211;Sat, 10am&#8211;5pm<br>Closed Sun&nbsp;&amp;&nbsp;Mon', { size: 16, lh: 24 }) +
+      this.hours() +
       Email.text(
         `<a href="tel:+16788885140" style="display:inline-block;padding:10px 0;color:${CHARCOAL};` +
           `text-decoration:underline;text-underline-offset:3px;">678.888.5140</a>`,
         { size: 16, lh: 24 },
       );
+    // The address beside the button on a computer; on a phone the button goes under it, full width,
+    // whether or not the mail app keeps the style block (fabFour, button)
+    const button = this.button('Get directions &#8594;', MAP, 'directions', GOLD, CHARCOAL, 'right');
+    // On a phone the button is last, 32 over the rule; on a computer the address column ends with the
+    // phone number's link, whose own padding the band takes off its 40 (pb-tap)
     return this.band(
-      Email.T(
-        `<tr><td class="stack" valign="middle">${left}</td>` +
-          `<td class="stack stack-gap" width="210" align="right" valign="middle">` +
-          `${this.button('Get directions &#8594;', MAP, 'directions', GOLD, CHARCOAL, 'right')}</td></tr>`,
+      Email.fabFour(
+        [
+          { html: left, width: COLUMN - VISIT_BUTTON },
+          { html: button, width: VISIT_BUTTON, align: 'right' },
+        ],
+        COLUMN,
+        { gap: S3 },
       ),
+      { bottom: S4, cls: 'pb-tap' },
     );
   }
 
@@ -705,15 +1232,22 @@ export class Email {
       )
       .join('&nbsp;&nbsp;&middot;&nbsp;&nbsp;');
     return this.band(
-      `<div style="height:1px;line-height:1px;font-size:1px;background-color:${STONE};margin:0 0 ${S3}px;">&nbsp;</div>` +
+      // As much white under the rule as over it: 32 on a phone, 40 on a computer (.rule-gap)
+      `<div class="rule-gap" style="height:1px;line-height:1px;font-size:1px;background-color:${STONE};margin:0 0 ${S4}px;">&nbsp;</div>` +
         `<img src="${PIG}" width="96" height="42" alt="" style="display:block;width:96px;height:auto;border:0;margin:0 auto ${S2}px;">` +
         Email.text('Designer finds. Better prices. A&nbsp;really&nbsp;good&nbsp;cause.', { size: 15, lh: 22, weight: 700, align: 'center', mb: 4 }) +
-        Email.text('100% of our profits fund dream rooms for kids with special&nbsp;needs.', { size: 14, lh: 20, align: 'center', mb: 4 }) +
-        Email.text(links, { size: 14, lh: 22, align: 'center', mb: 4 }) +
-        // Kit fills {{ address }}; wrapping it in a link stops Gmail turning it into a blue autolink
+        // The links carry 12px over and under their words for a thumb, so the space between the lines of
+        // links and the line over them comes out the same, about 30px (it was 21 over the links, 33 under)
+        Email.text('100% of our profits fund dream rooms for kids with special&nbsp;needs.', { size: 14, lh: 20, align: 'center', mb: S2 }) +
+        Email.text(links, { size: 14, lh: 22, align: 'center' }) +
+        // The store's mailing address, written in, as the site publishes it (SEO.astro): not Kit's
+        // {{ address }}, which showed as those words in any email Kit didn't send (a test, the
+        // preview) and would be the shared Kit account's (the charity's) when it did. A link keeps
+        // Gmail from turning it into a blue map link. Only the unsubscribe link is Kit's to fill.
         Email.text(
-          `<a href="${escape(this.url('https://sunshineonaranneyday.com/', 'footer-address'))}" target="_blank" ` +
-            `style="display:inline-block;padding:12px 0;color:${CHARCOAL};text-decoration:none;">{{ address }}</a><br>` +
+          `<a href="${escape(this.url(`${SITE}/visit/`, 'footer-address'))}" target="_blank" ` +
+            `style="display:inline-block;padding:12px 0;color:${CHARCOAL};text-decoration:none;">` +
+            `Sunny &amp; Ranney &middot; 109A Oak Street, Roswell, GA&nbsp;30075</a><br>` +
             `<a href="{{ unsubscribe_url }}" style="display:inline-block;padding:12px 4px;color:${CHARCOAL};` +
             `text-decoration:underline;">Unsubscribe</a>`,
           { size: 13, lh: 20, align: 'center' },
@@ -729,12 +1263,39 @@ export class Email {
     const { subject, preheader } = lines(b);
     const body = sections.map((name) => this[name]()).join('');
     const spacer = '&#847;&zwnj;&nbsp;'.repeat(60);
-    const tiers = Object.entries(TIER_SIZE)
-      .map(([n, [, phone]]) => `    .tier${n} { font-size:${phone}px !important; line-height:${phone}px !important; }`)
-      .join('\n');
-    const smallTiers = Object.entries(TIER_SIZE)
-      .map(([n, [, , small]]) => `    .tier${n} { font-size:${small}px !important; line-height:${small}px !important; }`)
-      .join('\n');
+    const tierRules = (k) =>
+      Object.entries(TIER_SIZE)
+        .map(([n, sizes]) => `    .tier${n} { font-size:${sizes[k]}px !important; line-height:${sizes[k]}px !important; }`)
+        .join('\n');
+    // Phones first: everything inline is a phone's, so the style block only makes things bigger, from
+    // 375px (the tiers, the charity's numbers) and on a computer. Outlook for Windows reads no media
+    // query, so it gets the computer's rules in a block of its own.
+    const computer = [
+      `    .px { padding-left:${S4}px !important; padding-right:${S4}px !important; }`,
+      `    .pt { padding-top:${S5}px !important; }`,
+      `    .pb { padding-bottom:${S5}px !important; }`,
+      `    .g40 { height:${S5}px !important; line-height:${S5}px !important; font-size:${S5}px !important; }`,
+      `    .g16 { height:${S2}px !important; line-height:${S2}px !important; font-size:${S2}px !important; }`,
+      // A band whose first row is a link's 44px (the products' "Shop all") or whose last line is a link's
+      // padded words: 40 over and under what you see, less the link's own space
+      `    .pt-tap { padding-top:${S5 - (2 * TAP + 4)}px !important; }`,
+      `    .pb-tap { padding-bottom:${S5 - TAP}px !important; }`,
+      `    .rule-gap { margin-bottom:${S5}px !important; }`,
+      '    .logo { width:150px !important; }',
+      '    .h1 { font-size:32px !important; line-height:36px !important; }',
+      '    .h2 { font-size:30px !important; line-height:34px !important; }',
+      '    .mega { font-size:92px !important; line-height:88px !important; }',
+      '    .mega2 { font-size:40px !important; line-height:44px !important; }',
+      tierRules(0),
+      '    .cap4 { font-size:15px !important; line-height:20px !important; }',
+      '    .spot { font-size:24px !important; line-height:29px !important; }',
+      '    .soard-h { font-size:38px !important; line-height:42px !important; }',
+      '    .soard-lead { font-size:24px !important; line-height:31px !important; }',
+      '    .soard-body { font-size:17px !important; line-height:29px !important; }',
+      '    .soard-mark { width:96px !important; }',
+      `    .tile-cap { padding-left:${S4}px !important; padding-right:12px !important; }`,
+      '    .soard-stat { font-size:40px !important; line-height:44px !important; }',
+    ].join('\n');
     return `<!DOCTYPE html>
 <html lang="en" dir="ltr" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
@@ -746,46 +1307,35 @@ export class Email {
 <meta name="color-scheme" content="light only">
 <meta name="supported-color-schemes" content="light only">
 <title>${escape(subject)}</title>
-<!--[if !mso]><!--><link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700&family=Libre+Baskerville:ital,wght@0,700;1,400&family=Outfit:wght@400;700&display=swap" rel="stylesheet"><!--<![endif]-->
+<!--[if !mso]><!--><link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400;1,700&family=Outfit:wght@400;700&display=swap" rel="stylesheet"><!--<![endif]-->
 <!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
-<!--[if mso]><style>body, table, td, p, a, h1, h2, span { font-family: Arial, Helvetica, sans-serif !important; } .soard-serif, .soard-serif em { font-family: Georgia, serif !important; } .soard-stat { font-family: 'Times New Roman', serif !important; }</style><![endif]-->
+<!--[if mso]><style>body, table, td, p, a, h1, h2, span { font-family: Arial, Helvetica, sans-serif !important; } .soard-serif, .soard-serif em { font-family: 'Palatino Linotype', Palatino, 'Times New Roman', serif !important; }
+${computer}
+</style><![endif]-->
 <style>
   :root { color-scheme: light only; supported-color-schemes: light only; }
   body { margin:0; padding:0; width:100% !important; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
   table { border-collapse:collapse; mso-table-lspace:0; mso-table-rspace:0; }
   img { -ms-interpolation-mode:bicubic; }
   a[x-apple-data-detectors] { color:inherit !important; text-decoration:none !important; }
-  @media (max-width:620px) {
-    .px { padding-left:20px !important; padding-right:20px !important; }
-    .pt { padding-top:${S4}px !important; }
-    .pb { padding-bottom:${S4}px !important; }
-    .g40 { height:${S4}px !important; line-height:${S4}px !important; font-size:${S4}px !important; }
-    .logo { width:120px !important; }
-    .h2 { font-size:26px !important; line-height:30px !important; }
-    .mega { font-size:76px !important; line-height:74px !important; }
-    .mega2 { font-size:32px !important; line-height:36px !important; }
-${tiers}
-    .cap4 { font-size:13px !important; line-height:18px !important; }
-    .spot { font-size:21px !important; line-height:26px !important; }
-    .pxl { padding-left:${20 - LOGO_INSET}px !important; padding-right:${20 - LOGO_INSET}px !important; }
-    .ptl { padding-top:${S4 - LOGO_INSET}px !important; }
-    .soard-h { font-size:28px !important; line-height:34px !important; }
-    .tile-cap { padding-left:20px !important; padding-right:8px !important; }
-    .soard-stat { font-size:32px !important; line-height:36px !important; }
-    .stack { display:block !important; width:100% !important; text-align:left !important; }
-    .stack-gap { padding-top:${S3}px !important; }
-    .btn { width:100% !important; float:none !important; }
-    .btn a { display:block !important; text-align:center !important; }
+  /* Kit's template sets ".email * { word-break: break-word; }" in the same style block as this one
+     (scripts/sunny-side/kit-wrapper.mjs): on a 320px phone the sale's tiers squeezed to a letter a
+     line, "off $5k+" in seven lines (Nov 17, 2026). The email breaks words as it was checked to. */
+  .sunny, .sunny * { word-break:normal !important; }
+  @media (min-width:375px) {
+${tierRules(1)}
+    .cap { width:auto !important; }
   }
-  @media (max-width:374px) {
-${smallTiers}
-    .cap { width:min-content !important; }   /* "off" over the amount in every column, not just the narrow ones */
-    .soard-stat { font-size:28px !important; line-height:32px !important; }
+  @media (min-width:${DESKTOP}px) {
+${computer}
+    .phone-br { display:none !important; }
+    .btn { width:auto !important; }
+    .btn a { display:inline-block !important; }
   }
 </style>
 </head>
 <body style="margin:0;padding:0;background-color:${WHITE};color:${CHARCOAL};">
-<div role="article" aria-roledescription="email" aria-label="${escape(subject)}" lang="en" dir="ltr">
+<div class="sunny" role="article" aria-roledescription="email" aria-label="${escape(subject)}" lang="en" dir="ltr">
 <div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;mso-hide:all;">${escape(preheader)}${spacer}</div>
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="${WHITE}" style="background-color:${WHITE};">
 <tr><td align="center" style="padding:0;">

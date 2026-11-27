@@ -87,6 +87,34 @@ export function suggestClockOut({ clockInAt, scheduledEnd, usualEnds, now }) {
 }
 
 /**
+ * The hours a manager has to deal with, by the rules Today lists them and the
+ * sidebar counts them on Hours. Open shifts are missed (clocked in before today,
+ * or longer than LONG_SHIFT_MINUTES) or still on the clock. Finished shifts
+ * waiting for approval are ready, or need a look when they're that long. A
+ * manager's own finished shifts are left out: someone else approves them.
+ * @param {Array<object>} entries time_entries joined with staff (display_name, email)
+ * @param {{ now: string, myEmail?: string | null }} options
+ */
+export function hoursToReview(entries, { now, myEmail }) {
+  const today = localDate(now);
+  const me = (myEmail ?? '').toLowerCase();
+  const isMine = (entry) => Boolean(me) && (entry.email ?? '').toLowerCase() === me;
+  const review = { missed: [], onClock: [], ready: [], needsLook: [] };
+  for (const entry of entries) {
+    if (entry.status === 'rejected') continue;
+    if (!entry.clock_out_at) {
+      const minutes = workedMinutes(entry.clock_in_at, now);
+      const missed = localDate(entry.clock_in_at) < today || minutes > LONG_SHIFT_MINUTES;
+      review[missed ? 'missed' : 'onClock'].push({ entry, minutes, isSelf: isMine(entry) });
+    } else if (entry.status === 'pending' && !entry.push_state && !isMine(entry)) {
+      const minutes = workedMinutes(entry.clock_in_at, entry.clock_out_at);
+      review[minutes > LONG_SHIFT_MINUTES ? 'needsLook' : 'ready'].push({ entry, minutes, isSelf: false });
+    }
+  }
+  return review;
+}
+
+/**
  * @param {object} input
  * @param {Array<object>} input.entries time_entries joined with staff (display_name, email, overtime_eligible)
  * @param {Array<{id:string, display_name:string}>} input.people store people on the clock or the schedule
@@ -100,49 +128,37 @@ export function buildToday({ entries, people, schedule, now, myEmail, usualEnds 
   const weekStart = workweekStart(today);
   const weekEnd = addDays(weekStart, 6);
   const nowMinutes = localMinutes(now);
-  const me = (myEmail ?? '').toLowerCase();
   const nameOf = new Map(people.map((person) => [person.id, person.display_name]));
   for (const entry of entries) if (!nameOf.has(entry.staff_id)) nameOf.set(entry.staff_id, entry.display_name);
 
   const live = entries.filter((entry) => entry.status !== 'rejected');
+  const review = hoursToReview(entries, { now, myEmail });
 
   // Open shifts: still working, or a clock-out someone forgot.
-  const missedClockOuts = [];
-  const onClock = [];
   const shiftOn = new Map(schedule.map((s) => [`${s.staff_id}|${s.date}`, s]));
-  for (const entry of live.filter((e) => !e.clock_out_at)) {
-    const minutes = workedMinutes(entry.clock_in_at, now);
-    const item = { id: entry.id, version: entry.version, staffId: entry.staff_id, name: entry.display_name, clockInAt: entry.clock_in_at, minutes };
-    if (localDate(entry.clock_in_at) < today || minutes > LONG_SHIFT_MINUTES) {
-      const shift = shiftOn.get(`${entry.staff_id}|${localDate(entry.clock_in_at)}`);
-      const isSelf = Boolean(me) && (entry.email ?? '').toLowerCase() === me;
-      missedClockOuts.push({
-        ...item,
-        isSelf,
-        suggestion: isSelf
-          ? null
-          : suggestClockOut({
-              clockInAt: entry.clock_in_at,
-              scheduledEnd: shift && !shift.away ? shift.end_min : null,
-              usualEnds: usualEnds.get(entry.staff_id) ?? [],
-              now,
-            }),
-      });
-    } else onClock.push(item);
-  }
+  const item = ({ entry, minutes }) => ({ id: entry.id, version: entry.version, staffId: entry.staff_id, name: entry.display_name, clockInAt: entry.clock_in_at, minutes });
+  const missedClockOuts = review.missed.map((open) => {
+    const { entry, isSelf } = open;
+    const shift = shiftOn.get(`${entry.staff_id}|${localDate(entry.clock_in_at)}`);
+    return {
+      ...item(open),
+      isSelf,
+      suggestion: isSelf
+        ? null
+        : suggestClockOut({
+            clockInAt: entry.clock_in_at,
+            scheduledEnd: shift && !shift.away ? shift.end_min : null,
+            usualEnds: usualEnds.get(entry.staff_id) ?? [],
+            now,
+          }),
+    };
+  });
+  const onClock = review.onClock.map(item);
 
   // Finished shifts waiting for review. Clean ones can be approved together; the rest need a look.
-  const pending = live.filter((e) => e.status === 'pending' && e.clock_out_at && !e.push_state);
-  const ready = [];
-  const needsLook = [];
-  for (const entry of pending) {
-    const minutes = workedMinutes(entry.clock_in_at, entry.clock_out_at);
-    const isSelf = Boolean(me) && (entry.email ?? '').toLowerCase() === me;
-    const item = { id: entry.id, version: entry.version, staffId: entry.staff_id, name: entry.display_name, clockInAt: entry.clock_in_at, clockOutAt: entry.clock_out_at, minutes, isSelf };
-    if (isSelf) continue;
-    if (minutes > LONG_SHIFT_MINUTES) needsLook.push({ ...item, reason: 'long' });
-    else ready.push(item);
-  }
+  const finished = (done) => ({ ...item(done), clockOutAt: done.entry.clock_out_at, isSelf: false });
+  const ready = review.ready.map(finished);
+  const needsLook = review.needsLook.map((done) => ({ ...finished(done), reason: 'long' }));
 
   // This week: hours so far, what's still scheduled, and who will pass 40.
   const weekEntries = live.filter((e) => {

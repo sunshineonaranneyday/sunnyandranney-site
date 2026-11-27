@@ -96,7 +96,7 @@ const counts = {
               : 'Connect Gusto and your team comes in automatically, or add someone by hand.'}
         </p>
         <div class="empty-actions">
-          {!connected && isOwner && <a class="btn btn-primary" href="/admin/gusto/"><Fragment set:html={svg('gusto', 18)} />Connect Gusto</a>}
+          {!connected && isOwner && <a class="btn btn-primary" href="/admin/payroll/gusto/"><Fragment set:html={svg('gusto', 18)} />Connect Gusto</a>}
           <button type="button" class="btn" data-add-staff><Fragment set:html={svg('plus', 18)} />Add employee</button>
         </div>
       </div>

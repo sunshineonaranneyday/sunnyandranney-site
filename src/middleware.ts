@@ -1,6 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
 import { authenticate } from '@/lib/admin-auth';
-import { adminHostRedirect } from '@/lib/admin-host.mjs';
+import { ADMIN_CSP } from '@/lib/admin-csp.mjs';
+import { EMAIL_HOST, adminHostRedirect, inScope, isEmailPath } from '@/lib/admin-host.mjs';
 
 // Case-insensitive so a route can't be reached around this check by changing
 // the case of the URL. Handlers also call requireRole, as a second gate.
@@ -12,10 +13,8 @@ const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'same-origin',
-  'Content-Security-Policy':
-    // Images may also come from the store's own Cloudflare Images account (the logo), and from
-    // the store's own Shopify files, where product photos live until they move to Cloudflare Images.
-    "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://imagedelivery.net/ROYFuPmfN2vPS6mt5sCkZQ/ https://cdn.shopify.com/s/files/1/0930/2117/6092/; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+  // admin-csp.mjs: where images may come from, with the reasons, and its test
+  'Content-Security-Policy': ADMIN_CSP,
 };
 
 function decodedPath(pathname: string): string {
@@ -43,11 +42,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   const path = decodedPath(context.url.pathname);
-  if (context.isPrerendered || !ADMIN_PATH.test(path)) return next();
-
   const isApi = path.toLowerCase().startsWith('/api/');
+  const host = context.url.hostname.toLowerCase();
+  if (context.isPrerendered) return next();
+  // The email address serves the weekly email and nothing else: not the store's own calls either.
+  if (host === EMAIL_HOST && !isEmailPath(path)) return deny(isApi, 403, 'Not authorized');
+  if (!ADMIN_PATH.test(path)) return next();
+
   const identity = await authenticate(context.request, context.locals.runtime?.env ?? {});
   if (!identity) return deny(isApi, 403, 'Not authorized');
+  // Decided here, before any page runs, so a page added later is closed to an email-only login.
+  if (!inScope(identity, host, path)) return deny(isApi, 403, 'Not authorized');
 
   const method = context.request.method;
   if (method !== 'GET' && method !== 'HEAD') {

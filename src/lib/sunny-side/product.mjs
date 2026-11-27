@@ -5,7 +5,7 @@
  * page on sunnyandranney.com, where it can be bought. The build reads each product from its
  * own page (the structured data search engines read), so the email always shows what the
  * store shows today, and a product that has sold out stops the build instead of going out.
- * No Node or browser APIs, so the build and (later) the admin's product picker share it.
+ * No Node or browser APIs, so the build and the admin's product picker share it.
  */
 
 /** The longest name that fits two lines in a tile on a 320px phone. Longer names need a short one. */
@@ -62,8 +62,8 @@ export function money(n) {
   return '$' + whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (cents === '00' ? '' : '.' + cents);
 }
 
-/** The product's first photo that isn't a PNG: Shopify can't shrink PNGs, and they run 250KB and up. */
-export const photoFor = (images) => images.find((u) => !/\.png(\?|$)/i.test(u)) || null;
+/** The product's main photo, the first in Shopify. The email sends any photo as a JPEG (email.mjs, Email.photo). */
+export const photoFor = (images) => images[0] || null;
 
 /**
  * How many of each product the store has, by handle, from the shop page's product cards: the same

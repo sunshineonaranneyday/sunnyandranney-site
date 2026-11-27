@@ -105,7 +105,9 @@ const itemListSchema = hasShopify ? {
     <div class="container shop-hero__inner">
       <div class="shop-hero__row">
         <div class="shop-hero__text">
+          <p class="shop-hero__eyebrow" id="shop-eyebrow" hidden>Search results</p>
           <h1 class="shop-hero__title animate-fade-up" id="shop-title">The Collection</h1>
+          <p class="shop-hero__notice" id="search-notice" hidden></p>
           <a href="/shop/" class="shop-hero__clear animate-fade-up delay-1" id="shop-clear-collection" style="display:none;">← All Products</a>
         </div>
         <a href="/about/" class="shop-hero__mission">
@@ -116,6 +118,24 @@ const itemListSchema = hasShopify ? {
       </div>
     </div>
   </section>
+
+  {/* A search (/shop/?q=): its title before first paint, and the index on its way while the
+       page's script loads; the grid waits for the ranked results instead of flashing all products. */}
+  <script is:inline>
+    (function () {
+      var q = (new URLSearchParams(location.search).get('q') || '').trim();
+      var root = document.documentElement;
+      if (!q) { delete root.dataset.searching; return; }
+      root.dataset.searching = '';
+      if (!window.__srIndexReady && !window.__srIndexLoading && !window.__srIndex) {
+        window.__srIndex = fetch('/shop/search-index.json', { credentials: 'omit', signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined });
+      }
+      var title = document.getElementById('shop-title');
+      if (title) title.textContent = '\u201c' + q + '\u201d';
+      var eyebrow = document.getElementById('shop-eyebrow');
+      if (eyebrow) eyebrow.hidden = false;
+    })();
+  </script>
 
   <!-- ═══ TOOLBAR ═══ -->
   <section class="filters-bar">
@@ -202,6 +222,11 @@ const itemListSchema = hasShopify ? {
     <div class="container">
       {hasShopify ? (
         <>
+          {/* A search's help pages ("hours" → Visit) and the kinds of piece it found, to narrow by */}
+          <div class="search-extras" id="search-extras" hidden>
+            <div class="search-pages" id="search-pages"></div>
+            <div class="search-kinds" id="search-kinds" role="group" aria-label="Narrow these results" hidden></div>
+          </div>
           <div class="product-grid" id="shop-grid">
             {products.map((product, idx) => {
               const image = product.images.edges[0]?.node;
@@ -309,15 +334,19 @@ const itemListSchema = hasShopify ? {
                 <line x1="26" y1="34" x2="42" y2="34" stroke="var(--color-stone)" stroke-width="2" stroke-linecap="round" opacity="0.25"/>
               </svg>
             </div>
-            <h3 class="no-results__heading">No results for <span id="no-results-query"></span></h3>
+            <h2 class="no-results__heading">No results for <span id="no-results-query"></span></h2>
             <p class="no-results__sub" id="no-results-sub">We couldn't find a match. Check the spelling or try a broader term.</p>
+            <div class="no-results__suggestions" id="no-results-suggestions" style="display:none;">
+              <p class="no-results__suggestions-label" id="no-results-suggestions-label">Popular categories</p>
+              <div class="no-results__suggestion-pills" id="no-results-pills"></div>
+            </div>
             <div class="no-results__actions">
               <button class="btn btn--primary" id="no-results-clear">Browse All Products</button>
             </div>
-            <div class="no-results__suggestions" id="no-results-suggestions" style="display:none;">
-              <p class="no-results__suggestions-label">Popular categories</p>
-              <div class="no-results__suggestion-pills" id="no-results-pills"></div>
-            </div>
+            <p class="no-results__help" id="no-results-help" hidden>
+              Looking for something special? Call us at <a href="tel:+16788885140">(678)&nbsp;888-5140</a>
+              or <button type="button" class="no-results__chat" id="no-results-chat">ask Staci</button>.
+            </p>
           </div>
         </>
       ) : (
@@ -462,6 +491,36 @@ const itemListSchema = hasShopify ? {
   .shop-hero__mission:hover .shop-hero__mission-arrow {
     opacity: 0.8;
     transform: translateX(2px);
+  }
+
+  .shop-hero__eyebrow {
+    margin: 0 0 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-slate);
+  }
+  .shop-hero__eyebrow[hidden], .shop-hero__notice[hidden] { display: none; }
+
+  /* What a search was understood as: a typo fixed, a word left out, the closest matches */
+  .shop-hero__notice {
+    margin: 0.85rem 0 0;
+    max-width: 60ch;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--color-slate);
+  }
+  .shop-hero__notice :global(strong) { color: var(--color-charcoal); font-weight: 600; }
+
+  .shop-hero__title { overflow-wrap: anywhere; }
+
+  /* Until a search's results are ranked, its page shows no products rather than all of them */
+  :global(:root[data-searching]) .product-grid,
+  :global(:root[data-searching]) .load-more-wrap,
+  :global(:root[data-searching]) .no-results,
+  :global(:root[data-searching]) .toolbar__count {
+    visibility: hidden;
   }
 
   .shop-hero__clear {
@@ -1415,6 +1474,66 @@ const itemListSchema = hasShopify ? {
     padding-bottom: var(--space-sm);
   }
 
+  /* ─── Search: help pages and narrowing by kind ─── */
+  .search-extras {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .search-extras[hidden], .search-kinds[hidden] { display: none; }
+
+  .search-pages { display: flex; flex-direction: column; gap: 0.6rem; }
+  .search-pages:empty { display: none; }
+  .search-pages :global(.search-page) {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    max-width: 560px;
+    padding: 0.95rem 1.15rem;
+    background: var(--color-warm-white);
+    border: 1px solid var(--color-cream-dark);
+    border-radius: 10px;
+    color: var(--color-charcoal);
+    text-decoration: none;
+    transition: border-color 0.15s;
+  }
+  .search-pages :global(.search-page:hover) { border-color: var(--color-stone); }
+  .search-pages :global(.search-page:focus-visible) { outline: 2px solid var(--color-charcoal); outline-offset: 2px; }
+  .search-pages :global(.search-page__body) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+  .search-pages :global(.search-page__title) { font-weight: 600; color: var(--color-link); }
+  .search-pages :global(.search-page__blurb) { font-size: 0.88rem; color: var(--color-slate); }
+  .search-pages :global(.search-page svg) { flex-shrink: 0; color: var(--color-link); }
+
+  .search-kinds { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .search-kinds :global(.search-kind) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 40px;
+    padding: 0 1rem;
+    background: var(--color-warm-white);
+    border: 1px solid var(--color-cream-dark);
+    border-radius: 100px;
+    color: var(--color-charcoal);
+    font-family: inherit;
+    font-size: 0.86rem;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .search-kinds :global(.search-kind:hover) { border-color: var(--color-stone); }
+  .search-kinds :global(.search-kind:focus-visible) { outline: 2px solid var(--color-charcoal); outline-offset: 2px; }
+  .search-kinds :global(.search-kind[aria-pressed="true"]) {
+    background: var(--color-charcoal);
+    border-color: var(--color-charcoal);
+    color: #fff;
+  }
+  .search-kinds :global(.search-kind__n) { color: var(--color-stone); font-variant-numeric: tabular-nums; }
+  .search-kinds :global(.search-kind[aria-pressed="true"] .search-kind__n) { color: #dcd7cf; }
+  @media (pointer: coarse) {
+    .search-kinds :global(.search-kind) { min-height: 44px; }
+  }
+
   /* ─── No Results ───────────────────────── */
   .no-results {
     text-align: center;
@@ -1472,8 +1591,30 @@ const itemListSchema = hasShopify ? {
     background: var(--color-slate);
   }
   .no-results__suggestions {
-    border-top: 1px solid var(--color-cream-dark);
+    margin-bottom: 1.75rem;
+  }
+  .no-results__help {
+    margin: 0;
     padding-top: 1.5rem;
+    border-top: 1px solid var(--color-cream-dark);
+    font-size: 0.92rem;
+    line-height: 1.6;
+    color: var(--color-slate);
+  }
+  .no-results__help[hidden] { display: none; }
+  .no-results__help a,
+  .no-results__chat {
+    color: var(--color-link);
+    font-weight: 500;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .no-results__chat {
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    cursor: pointer;
   }
   .no-results__suggestions-label {
     font-size: 0.72rem;
@@ -1488,7 +1629,13 @@ const itemListSchema = hasShopify ? {
     gap: 0.5rem;
     justify-content: center;
   }
-  .no-results__pill {
+  .no-results__suggestion-pills :global(.no-results__pill) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 40px;
+    text-decoration: none;
+    font-family: inherit;
     background: var(--color-cream);
     border: 1px solid var(--color-cream-dark);
     color: var(--color-charcoal);
@@ -1499,10 +1646,11 @@ const itemListSchema = hasShopify ? {
     transition: background 0.15s, border-color 0.15s;
     white-space: nowrap;
   }
-  .no-results__pill:hover {
+  .no-results__suggestion-pills :global(.no-results__pill:hover) {
     background: var(--color-cream-dark);
     border-color: var(--color-stone);
   }
+  .no-results__suggestion-pills :global(.no-results__pill-n) { color: var(--color-slate); font-variant-numeric: tabular-nums; }
 
 
   /* ─── Placeholder ─────────────────────── */
@@ -1664,12 +1812,19 @@ const itemListSchema = hasShopify ? {
 </style>
 
 <script>
+  import { loadSearchIndex } from '@/lib/search/client';
+  import { popular, results as searchFor } from '@/lib/search/complete.mjs';
+  import { KINDS } from '@/lib/search/lexicon.mjs';
+  import { logSearch } from '@/lib/search/memory';
+
+  type Found = ReturnType<typeof searchFor>;
+
   document.addEventListener('astro:page-load', () => {
   if (!document.getElementById('shop-grid')) return;
 
   // ─── DOM refs ──────────────────────────────────
   const grid = document.getElementById('shop-grid');
-  const sortSelect = document.getElementById('sort-select') as HTMLSelectElement;
+  const sortSelect = (document.getElementById('sort-select') as HTMLSelectElement | null)!;
   const viewBtns = document.querySelectorAll('.toolbar__view');
   const countEl = document.getElementById('product-count');
   const panelCountEl = document.getElementById('panel-product-count');
@@ -1754,6 +1909,13 @@ const itemListSchema = hasShopify ? {
   });
 
   let activeSearch = '';
+  // A search's results, from the same engine as the search box (src/lib/search): each piece's
+  // place in the ranking, and the kinds it is, for the chips that narrow the results.
+  let searchRank: Map<string, number> | null = null;
+  let searchKinds = new Map<string, Set<string>>();
+  let searchFound: Found | null = null;
+  let popularSearches: Array<{ text: string; label: string; count: number }> = [];
+  let activeKind = '';
   let activeCollection = '';
   let activeSale = false;
   let activeInStock = false;
@@ -1771,7 +1933,7 @@ const itemListSchema = hasShopify ? {
     if (activeSearch) params.set('q', activeSearch);
     if (priceMin > 0) params.set('pmin', String(priceMin));
     if (priceMax < Infinity) params.set('pmax', String(priceMax));
-    if (sortSelect?.value && sortSelect.value !== 'best-selling') params.set('sort', sortSelect.value);
+    if (sortSelect?.value && sortSelect.value !== 'best-selling' && sortSelect.value !== 'relevance') params.set('sort', sortSelect.value);
     if (activeSale) params.set('sale', 'true');
     if (activeInStock) params.set('stock', 'now');
     if (activeView !== 'grid') params.set('view', activeView);
@@ -1825,7 +1987,7 @@ const itemListSchema = hasShopify ? {
       }});
     }
 
-    if (sortSelect?.value && sortSelect.value !== 'best-selling') {
+    if (sortSelect?.value && sortSelect.value !== 'best-selling' && sortSelect.value !== 'relevance') {
       const sortLabels: Record<string, string> = {
         'price-asc': 'Price: Low → High',
         'price-desc': 'Price: High → Low',
@@ -1857,8 +2019,7 @@ const itemListSchema = hasShopify ? {
 
     if (activeSearch) {
       chips.push({ label: `"${activeSearch}"`, action: () => {
-        activeSearch = '';
-        if (searchBanner) searchBanner.style.display = 'none';
+        clearSearch();
         visiblePage = 0;
         applyAll();
       }});
@@ -1867,7 +2028,13 @@ const itemListSchema = hasShopify ? {
     for (const chip of chips) {
       const btn = document.createElement('button');
       btn.className = 'filter-chip';
-      btn.innerHTML = `${chip.label} <span class="filter-chip__x">&times;</span>`;
+      // Labels come from the URL (a search, a collection): text, never HTML.
+      btn.textContent = `${chip.label} `;
+      const x = document.createElement('span');
+      x.className = 'filter-chip__x';
+      x.setAttribute('aria-hidden', 'true');
+      x.textContent = '×';
+      btn.appendChild(x);
       btn.addEventListener('click', chip.action);
       filterChipsList.appendChild(btn);
     }
@@ -2134,12 +2301,11 @@ const itemListSchema = hasShopify ? {
         ? (isNewArrival && card.dataset.available !== 'false' && card.dataset.onSale !== 'true')
         : collections.split(',').includes(activeCollection));
       const matchesProductType = !activeProductType || category === activeProductType || type.toLowerCase() === activeProductType.toLowerCase();
-      const matchesSearch = !activeSearch ||
-        title.includes(activeSearch) ||
-        type.includes(activeSearch) ||
-        category.toLowerCase().includes(activeSearch) ||
-        tags.includes(activeSearch) ||
-        desc.includes(activeSearch);
+      const plain = activeSearch.toLowerCase();
+      const matchesSearch = !activeSearch || (searchRank
+        ? searchRank.has(handle) && (!activeKind || !!searchKinds.get(handle)?.has(activeKind))
+        // The index didn't load: the words, as the page found them before the search engine.
+        : title.includes(plain) || type.includes(plain) || category.toLowerCase().includes(plain) || tags.includes(plain) || desc.includes(plain));
       const matchesPrice = cardPrice >= priceMin && cardPrice <= priceMax;
       const matchesSale = !activeSale || (card.dataset.onSale === 'true' && parseInt(card.dataset.totalQty || '0') > 0);
       const matchesStock = !activeInStock || card.dataset.available !== 'false';
@@ -2187,59 +2353,7 @@ const itemListSchema = hasShopify ? {
       const showEmpty = matchCount === 0;
       noResults.style.display = showEmpty ? '' : 'none';
       if (showEmpty) {
-        // Populate search query display
-        if (noResultsQuery) {
-          noResultsQuery.textContent = activeSearch ? `"${activeSearch}"` : '';
-        }
-        // Contextual subtitle
-        if (noResultsSub) {
-          noResultsSub.textContent = activeSearch
-            ? 'We couldn\'t find a match. Check the spelling or try a broader term.'
-            : 'No products match your current filters.';
-        }
-        // Contextual heading
-        const heading = noResults.querySelector('.no-results__heading') as HTMLElement;
-        if (heading) {
-          heading.innerHTML = activeSearch
-            ? `No results for <span>"${activeSearch}"</span>`
-            : 'No products found';
-        }
-        // Build category suggestion pills from available product types
-        if (noResultsPills && noResultsSuggestions) {
-          noResultsPills.innerHTML = '';
-          const types = new Set<string>();
-          document.querySelectorAll<HTMLElement>('#shop-grid .product-card[data-type]').forEach(c => {
-            const t = c.dataset.type;
-            if (t) types.add(t);
-          });
-          const topTypes = [...types].slice(0, 6);
-          if (topTypes.length > 0) {
-            noResultsSuggestions.style.display = '';
-            for (const t of topTypes) {
-              const pill = document.createElement('button');
-              pill.className = 'no-results__pill';
-              pill.textContent = t;
-              pill.addEventListener('click', () => {
-                activeSearch = '';
-                if (searchBanner) searchBanner.style.display = 'none';
-                activeProductType = t;
-                visiblePage = 0;
-                syncPillBarState();
-                applyAll();
-                // Scroll to grid
-                const gridEl = document.getElementById('shop-grid');
-                const bar = document.querySelector('.filters-bar');
-                if (gridEl && bar) {
-                  const offset = gridEl.getBoundingClientRect().top + window.scrollY - bar.offsetHeight - parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--nav-height') || '0');
-                  window.scrollTo({ top: offset, behavior: 'smooth' });
-                }
-              });
-              noResultsPills.appendChild(pill);
-            }
-          } else {
-            noResultsSuggestions.style.display = 'none';
-          }
-        }
+        renderNoResults();
       }
     }
     if (grid) grid.style.display = matchCount === 0 ? 'none' : '';
@@ -2278,6 +2392,255 @@ const itemListSchema = hasShopify ? {
     // Re-observe cards so newly-visible ones get the card-visible animation class
     requestAnimationFrame(() => observeCards());
   }
+
+  // ─── Search (/shop/?q=) ─────────────────────
+  const ARROW = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>';
+
+  /** Adds text and nodes (Element.append's type clashes with the Workers types in this project). */
+  function put(parent: Node, ...parts: Array<Node | string>) {
+    for (const part of parts) parent.appendChild(typeof part === 'string' ? document.createTextNode(part) : part);
+  }
+  function strong(text: string) {
+    const b = document.createElement('strong');
+    b.textContent = text;
+    return b;
+  }
+
+  /** "Best match" is the order while searching; it goes away with the search. */
+  function relevanceSort(on: boolean) {
+    if (!sortSelect) return;
+    const existing = sortSelect.querySelector('option[value="relevance"]');
+    if (on && !existing) sortSelect.insertBefore(new Option('Best match', 'relevance'), sortSelect.firstChild);
+    if (!on && existing) {
+      if (sortSelect.value === 'relevance') sortSelect.value = 'best-selling';
+      existing.remove();
+    }
+  }
+
+  function orderByRank() {
+    if (!searchRank || !grid) return;
+    const rank = searchRank;
+    const place = (c: HTMLElement) => rank.get(c.dataset.handle || '') ?? Number.MAX_SAFE_INTEGER;
+    const cards = getCards();
+    cards.sort((a, b) => place(a) - place(b) || parseInt(a.dataset.idx || '0') - parseInt(b.dataset.idx || '0'));
+    cards.forEach((card) => grid.appendChild(card));
+  }
+
+  /** What the search was understood as, its help pages, and chips to narrow it by kind. */
+  function renderSearchContext(found: Found) {
+    const n = found.items.length;
+    const notice = document.getElementById('search-notice');
+    if (notice) {
+      notice.replaceChildren();
+      if (n && found.completed) put(notice, 'Showing results for ', strong(`“${found.completed}”`), '. ');
+      else if (n && found.query.corrected) put(notice, 'Showing results for ', strong(`“${found.query.corrected}”`), '. ');
+      if (n && found.relaxed.length) put(notice, 'Showing results without ', strong(found.relaxed.map((w) => `“${w}”`).join(', ')), '. ');
+      if (n && found.partial) put(notice, 'Nothing has everything you searched for, so these are the closest matches.');
+      notice.hidden = !notice.childNodes.length;
+    }
+
+    const pagesEl = document.getElementById('search-pages');
+    pagesEl?.replaceChildren();
+    for (const page of found.query.pages) {
+      const a = document.createElement('a');
+      a.className = 'search-page';
+      a.href = page.href;
+      const body = document.createElement('span');
+      body.className = 'search-page__body';
+      const title = document.createElement('span');
+      title.className = 'search-page__title';
+      title.textContent = page.title;
+      const blurb = document.createElement('span');
+      blurb.className = 'search-page__blurb';
+      blurb.textContent = page.blurb;
+      put(body, title, blurb);
+      put(a, body);
+      a.insertAdjacentHTML('beforeend', ARROW);
+      pagesEl?.appendChild(a);
+    }
+
+    // Kinds that narrow: found on two pieces or more, and not on every one.
+    const kindsEl = document.getElementById('search-kinds');
+    const counts = new Map<string, number>();
+    for (const { item } of found.items) for (const id of item.kinds.keys()) counts.set(id, (counts.get(id) ?? 0) + 1);
+    const chips = KINDS
+      .filter((k) => k.id !== 'chair' && (counts.get(k.id) ?? 0) >= 2 && (counts.get(k.id) ?? 0) < n)
+      .sort((a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0))
+      .slice(0, 6);
+    kindsEl?.replaceChildren();
+    const showChips = !!kindsEl && chips.length >= 2 && n >= 8;
+    if (kindsEl && showChips) {
+      for (const k of chips) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'search-kind';
+        b.dataset.kind = k.id;
+        b.setAttribute('aria-pressed', String(activeKind === k.id));
+        const count = document.createElement('span');
+        count.className = 'search-kind__n';
+        count.textContent = String(counts.get(k.id));
+        put(b, k.label, count);
+        b.addEventListener('click', () => {
+          activeKind = activeKind === k.id ? '' : k.id;
+          kindsEl.querySelectorAll('.search-kind').forEach((x) => x.setAttribute('aria-pressed', String((x as HTMLElement).dataset.kind === activeKind)));
+          visiblePage = 0;
+          applyAll();
+        });
+        kindsEl.appendChild(b);
+      }
+    }
+    if (kindsEl) kindsEl.hidden = !showChips;
+    const extras = document.getElementById('search-extras');
+    if (extras) extras.hidden = !found.query.pages.length && !showChips;
+  }
+
+  /** The empty page: never a dead end (Baymard): what the store has now, and people to ask. */
+  function renderNoResults() {
+    const heading = noResults?.querySelector('.no-results__heading') as HTMLElement | null;
+    const help = document.getElementById('no-results-help');
+    const label = document.getElementById('no-results-suggestions-label');
+    if (help) help.hidden = !activeSearch;
+    if (noResultsPills) noResultsPills.replaceChildren();
+    if (!activeSearch) {
+      if (noResultsClear) { noResultsClear.textContent = 'Browse all products'; noResultsClear.dataset.mode = 'all'; }
+      if (heading) heading.textContent = 'No products found';
+      if (noResultsSub) noResultsSub.textContent = 'No products match your current filters.';
+      if (noResultsSuggestions) noResultsSuggestions.style.display = 'none';
+      return;
+    }
+    const filtered = !!searchRank?.size; // the search found pieces; the filters hid them all
+    const hasPages = !!searchFound?.query.pages.length;
+    if (heading) {
+      heading.replaceChildren();
+      const quoted = document.createElement('span');
+      quoted.textContent = `“${activeSearch}”`;
+      if (filtered) put(heading, 'No ', quoted, ' results match these filters');
+      else put(heading, hasPages ? 'No pieces match ' : 'Nothing in the showroom matches ', quoted);
+    }
+    if (noResultsClear) {
+      noResultsClear.textContent = filtered ? 'Clear filters' : 'Browse all products';
+      noResultsClear.dataset.mode = filtered ? 'filters' : 'all';
+    }
+    if (noResultsSub) {
+      noResultsSub.textContent = filtered
+        ? `Clear the filters to see all ${searchRank!.size} results.`
+        : hasPages
+          ? 'The page above should help. Or start from what’s in the showroom now:'
+          : 'Our pieces change every week. Try another word, or start from what’s in the showroom now:';
+    }
+    const showPills = !filtered && popularSearches.length > 0;
+    if (label) label.textContent = 'Popular right now';
+    if (noResultsSuggestions) noResultsSuggestions.style.display = showPills ? '' : 'none';
+    if (showPills && noResultsPills) {
+      for (const p of popularSearches) {
+        const a = document.createElement('a');
+        a.className = 'no-results__pill';
+        a.href = `/shop/?q=${encodeURIComponent(p.text)}`;
+        const count = document.createElement('span');
+        count.className = 'no-results__pill-n';
+        count.textContent = String(p.count);
+        put(a, p.label, count);
+        noResultsPills.appendChild(a);
+      }
+    }
+  }
+
+  function logSearchOnce(q: string, n: number) {
+    try {
+      const key = `sr_logged:${q.toLowerCase()}`;
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, '1');
+    } catch { /* storage off: count it anyway */ }
+    logSearch({ e: 'search', q, n, src: 'page' });
+  }
+
+  async function runSearch(q: string) {
+    const page = grid;
+    try {
+      const index = await loadSearchIndex();
+      if (!page?.isConnected || activeSearch !== q) return; // the shopper has moved on
+      const found = searchFor(index, q);
+      searchFound = found;
+      searchRank = new Map(found.items.map(({ item }, i) => [item.doc.h, i]));
+      searchKinds = new Map(found.items.map(({ item }) => [item.doc.h, new Set(item.kinds.keys())]));
+      popularSearches = popular(index, 6);
+      renderSearchContext(found);
+      logSearchOnce(q, found.items.length);
+    } catch {
+      if (!page?.isConnected) return;
+      searchRank = null; // no index: the words, matched the way the page did before
+    }
+    if (sortSelect?.value === 'relevance') orderByRank();
+    delete document.documentElement.dataset.searching;
+    visiblePage = 0;
+    _needsEditorialReposition = true;
+    applyAll();
+  }
+
+  function clearSearch() {
+    activeSearch = '';
+    searchRank = null;
+    searchFound = null;
+    activeKind = '';
+    delete document.documentElement.dataset.searching;
+    const notice = document.getElementById('search-notice');
+    if (notice) notice.hidden = true;
+    const extras = document.getElementById('search-extras');
+    if (extras) extras.hidden = true;
+    const eyebrow = document.getElementById('shop-eyebrow');
+    if (eyebrow) eyebrow.hidden = true;
+    if (shopTitle && !activeCollection && !activeSale && !activeProductType) shopTitle.textContent = 'The Collection';
+    // The cards were in the search's order: back to the shop's own.
+    if (sortSelect?.value === 'relevance') {
+      relevanceSort(false);
+      const cards = getCards();
+      cards.sort((a, b) => parseInt(a.dataset.idx || '0') - parseInt(b.dataset.idx || '0'));
+      cards.forEach((card) => grid?.appendChild(card));
+    }
+    relevanceSort(false);
+    // The header's boxes held the search; it's gone now.
+    for (const [box, clear] of [['nav-search-input', 'nav-search-clear'], ['mobile-topbar-search', 'mobile-search-clear']]) {
+      const input = document.getElementById(box) as HTMLInputElement | null;
+      if (input && document.activeElement !== input) {
+        input.value = '';
+        const x = document.getElementById(clear);
+        if (x) x.hidden = true;
+      }
+    }
+  }
+
+  /** The search stays; everything narrowing it goes (the empty page's "Clear filters"). */
+  function clearFiltersKeepSearch() {
+    activeCollection = '';
+    activeProductType = '';
+    activeSale = false;
+    activeKind = '';
+    priceMin = 0;
+    priceMax = Infinity;
+    if (priceMinInput) priceMinInput.value = '';
+    if (priceMaxInput) priceMaxInput.value = '';
+    document.querySelectorAll('#search-kinds .search-kind').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+    buildSubcategoryPills();
+    buildPanelCategories();
+    if (shopTitle) shopTitle.textContent = `“${activeSearch}”`;
+    visiblePage = 0;
+    _needsEditorialReposition = true;
+    applyAll();
+  }
+
+  // A click on a result, counted with its place, for the admin's Search page.
+  grid?.addEventListener('click', (e) => {
+    if (!activeSearch || !searchRank) return;
+    const target = e.target as HTMLElement;
+    const card = target.closest<HTMLElement>('.product-card');
+    if (!card || !target.closest('a')) return;
+    const shown = getCards().filter((c) => !c.classList.contains('product-card--paginated'));
+    logSearch({ e: 'click', q: activeSearch, h: card.dataset.handle, p: shown.indexOf(card) + 1, src: 'page' });
+  });
+
+  document.getElementById('no-results-chat')?.addEventListener('click', () => {
+    document.getElementById('staci-toggle')?.click();
+  });
 
   // ─── Category Filter (now handled by subcategory pills) ────
 
@@ -2326,6 +2689,11 @@ const itemListSchema = hasShopify ? {
   sortSelect?.addEventListener('change', () => {
     const cards = getCards();
     const sortBy = sortSelect.value;
+    if (sortBy === 'relevance') {
+      orderByRank();
+      applyAll();
+      return;
+    }
 
     cards.sort(compareCards(sortBy));
 
@@ -2371,12 +2739,18 @@ const itemListSchema = hasShopify ? {
   // ─── Restore all filters from URL ────────────
   const params = new URLSearchParams(window.location.search);
 
-  // Search
-  const searchQuery = params.get('q');
+  // Search: ranked by the search engine once its index is in (runSearch, below)
+  const searchQuery = (params.get('q') || '').trim();
   if (searchQuery) {
-    activeSearch = searchQuery.toLowerCase();
-    if (searchBanner) searchBanner.style.display = '';
-    if (searchBannerText) searchBannerText.textContent = `Results for "${searchQuery}"`;
+    activeSearch = searchQuery;
+    if (shopTitle) shopTitle.textContent = `“${searchQuery}”`;
+    const eyebrow = document.getElementById('shop-eyebrow');
+    if (eyebrow) eyebrow.hidden = false;
+    if (clearCollectionLink) clearCollectionLink.style.display = '';
+    relevanceSort(true);
+    if (sortSelect) sortSelect.value = 'relevance';
+  } else {
+    delete document.documentElement.dataset.searching;
   }
 
 
@@ -2425,7 +2799,7 @@ const itemListSchema = hasShopify ? {
 
   // ─── Clear handlers ──────────────────────────
   function clearAllFilters() {
-    activeSearch = '';
+    clearSearch();
     activeCollection = '';
     activeProductType = '';
     activeSale = false;
@@ -2450,13 +2824,15 @@ const itemListSchema = hasShopify ? {
   }
 
   searchClear?.addEventListener('click', clearAllFilters);
-  noResultsClear?.addEventListener('click', clearAllFilters);
+  noResultsClear?.addEventListener('click', () => (noResultsClear.dataset.mode === 'filters' ? clearFiltersKeepSearch() : clearAllFilters()));
   filterChipsClear?.addEventListener('click', clearAllFilters);
 
   // ─── Initial render — apply all URL-restored filters ────
   // Run immediately (not debounced) so observeCards() fires on the first rAF
-  // and cards surrounding the editorial don't sit invisible for 60ms.
-  applyAll();
+  // and cards surrounding the editorial don't sit invisible for 60ms. A search
+  // renders once its results are ranked (a few milliseconds once the index is in).
+  if (activeSearch) void runSearch(activeSearch);
+  else applyAll();
 
 
 

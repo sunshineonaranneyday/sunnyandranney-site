@@ -1,0 +1,90 @@
+---
+export const prerender = false;
+
+/**
+ * The store’s weekly emails that have gone out, newest first, read from Kit: what subscribers got, to check what
+ * was sent last week or before. Read-only: the one email being worked on is at /admin/email/.
+ */
+
+import AdminBase from '@/layouts/AdminBase.astro';
+import { kitClient, sentEmails } from '@/lib/sunny-side/kit.mjs';
+
+const admin = Astro.locals.admin;
+if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
+
+const env = Astro.locals.runtime.env;
+let sent: Awaited<ReturnType<typeof sentEmails>> = [];
+let problem: string | null = null;
+if (!env.KIT_API_KEY) problem = 'The site isn’t connected to Kit (KIT_API_KEY isn’t set), so the emails it sent can’t be listed.';
+else {
+  try {
+    sent = await sentEmails(kitClient({ key: env.KIT_API_KEY, base: env.KIT_API_BASE || undefined }));
+  } catch (err) {
+    problem = `${err instanceof Error ? err.message : 'Kit didn’t answer.'} Reload to try again.`;
+  }
+}
+const when = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+---
+
+<AdminBase title="Sent emails">
+  <div class="sent">
+    <div class="page-header">
+      <div>
+        <p class="crumb"><a href="/admin/email/">Weekly email</a></p>
+        <h1>Sent emails</h1>
+        <p class="muted">The store’s weekly emails as they went out, newest first, exactly as Kit sent them. These can’t change. The charity’s emails, sent from the same Kit account, aren’t listed.</p>
+      </div>
+    </div>
+
+    {problem && (
+      <div class="notice" role="alert">
+        <div>{problem}</div>
+      </div>
+    )}
+
+    {!problem && sent.length === 0 && (
+      <section class="card empty">
+        <h2>Nothing has gone out yet</h2>
+        <p>Once an email is sent, it’s here to look back at.</p>
+      </section>
+    )}
+
+    {sent.length > 0 && (
+      <ol class="card sent-list">
+        {sent.map((e) => (
+          <li>
+            <a class="sent-row" href={`/admin/email/sent/${e.id}/`}>
+              <span class="sent-when">{when.format(new Date(e.sentAt))}</span>
+              <span class="sent-subject">{e.subject || '(No subject)'}</span>
+              {e.preheader && <span class="sent-pre">{e.preheader}</span>}
+            </a>
+          </li>
+        ))}
+      </ol>
+    )}
+  </div>
+</AdminBase>
+
+<style>
+  .sent { max-width: 880px; }
+  .crumb { font-size: 0.8125rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .crumb a { color: var(--ink-3); text-decoration: none; }
+  .crumb a:hover { color: var(--ink); text-decoration: underline; }
+  .sent-list { list-style: none; margin: 0; padding: 0.375rem; }
+  .sent-list li + li { border-top: 1px solid var(--line); }
+  .sent-row {
+    display: grid;
+    gap: 0.125rem;
+    min-height: 44px;
+    padding: 0.875rem 0.875rem;
+    border-radius: var(--r-md);
+    color: var(--ink);
+    text-decoration: none;
+    transition: background-color 0.15s var(--ease);
+  }
+  .sent-row:hover { background: var(--sunk); }
+  .sent-row:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+  .sent-when { font-size: 0.8125rem; font-weight: 600; color: var(--ink-3); }
+  .sent-subject { font-weight: 700; overflow-wrap: anywhere; }
+  .sent-pre { font-size: 0.875rem; color: var(--ink-2); overflow-wrap: anywhere; }
+</style>

@@ -16,7 +16,7 @@ export function notify(message: string, tone: 'ok' | 'error' = 'ok'): void {
     Object.assign(region.style, {
       position: 'fixed',
       left: '50%',
-      bottom: 'calc(5.5rem + env(safe-area-inset-bottom, 0px))',
+      bottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))',
       transform: 'translateX(-50%)',
       display: 'grid',
       gap: '0.5rem',

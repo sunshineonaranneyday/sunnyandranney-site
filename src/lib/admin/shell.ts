@@ -74,7 +74,8 @@ function pageCommands(): Command[] {
   return [...document.querySelectorAll<HTMLAnchorElement>(".side-link")]
     .filter((link) => !seen.has(link.href) && seen.add(link.href))
     .map((link) => ({
-      label: link.textContent?.trim() ?? "",
+      // The label alone, not the work waiting beside it.
+      label: link.querySelector(".side-label")?.textContent?.trim() ?? "",
       hint: "Page",
       href: link.href,
     }));
@@ -306,43 +307,74 @@ if (sideNav) {
     const row = current.getBoundingClientRect();
     if (row.bottom > box.bottom) sideNav.scrollTop += row.bottom - box.bottom + box.height / 3;
   }
-  const markEdges = () => {
-    sideNav.classList.toggle("more-above", sideNav.scrollTop > 1);
-    sideNav.classList.toggle(
-      "more-below",
-      sideNav.scrollTop + sideNav.clientHeight < sideNav.scrollHeight - 1,
-    );
-  };
-  sideNav.addEventListener("scroll", markEdges, { passive: true });
-  new ResizeObserver(markEdges).observe(sideNav);
-  markEdges();
+  // The list scrolls beside the page; on a phone the whole slide-in menu does (.side-menu).
+  for (const scroller of [sideNav, document.getElementById("side-menu")]) {
+    if (!scroller) continue;
+    const markEdges = () => {
+      scroller.classList.toggle("more-above", scroller.scrollTop > 1);
+      scroller.classList.toggle(
+        "more-below",
+        scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 1,
+      );
+    };
+    scroller.addEventListener("scroll", markEdges, { passive: true });
+    new ResizeObserver(markEdges).observe(scroller);
+    markEdges();
+  }
 }
 
-// The phone's More sheet closes like an iOS menu: a tap outside it, or Escape.
-// That tap only closes the sheet, so it can't press a button on the page under
-// it; the other tabs still work, as in a tab bar.
-const more = document.querySelector<HTMLDetailsElement>(".tab-more");
-if (more) {
-  let closedAt = -Infinity;
-  document.addEventListener("pointerdown", (event) => {
-    if (!more.open || more.contains(event.target as Node)) return;
-    more.open = false;
-    if (!(event.target as Element).closest(".tabbar")) closedAt = event.timeStamp;
+// On a phone or an upright iPad the sidebar is a menu that slides in below the top bar, from
+// the menu button (a disclosure, as in WAI-ARIA's navigation pattern). While it's open the page
+// under it can't be scrolled, tapped or tabbed to. It closes from the button again, a tap
+// anywhere outside it (the dimmed page or the top bar), Escape (back to the button), a wider
+// window, or going to a page.
+const menuButton = document.querySelector<HTMLButtonElement>(".menu-button");
+const sideMenu = document.getElementById("side-menu");
+if (menuButton && sideMenu) {
+  const root = document.documentElement;
+  const header = menuButton.closest<HTMLElement>(".sidebar");
+  const isOpen = () => menuButton.getAttribute("aria-expanded") === "true";
+  const setOpen = (open: boolean) => {
+    root.classList.toggle("menu-open", open);
+    menuButton.setAttribute("aria-expanded", String(open));
+    for (const el of document.querySelectorAll<HTMLElement>(".main, .skip-link, .brand, .search-button")) el.inert = open;
+    if (open) {
+      // The current page in view, as the sidebar does on a short window.
+      const current = sideMenu.querySelector<HTMLElement>('[aria-current="page"], .side-parent-current');
+      if (current) {
+        const box = sideMenu.getBoundingClientRect();
+        const row = current.getBoundingClientRect();
+        if (row.bottom > box.bottom || row.top < box.top) sideMenu.scrollTop += row.top - box.top - box.height / 3;
+      }
+    }
+  };
+  menuButton.addEventListener("click", () => setOpen(!isOpen()));
+  document.querySelector(".menu-scrim")?.addEventListener("click", () => setOpen(false));
+  // The logo and search are inert while it's open, so a tap on them lands on the bar itself.
+  header?.addEventListener("click", (event) => {
+    if (isOpen() && !sideMenu.contains(event.target as Node) && !menuButton.contains(event.target as Node)) setOpen(false);
   });
-  document.addEventListener("pointercancel", () => (closedAt = -Infinity));
-  document.addEventListener(
-    "click",
+  document.addEventListener("keydown", (event) => {
+    // Search's own Escape closes search first.
+    if (event.key !== "Escape" || !isOpen() || document.querySelector("dialog[open]")) return;
+    setOpen(false);
+    menuButton.focus();
+  });
+  // The page's keyboard shortcuts are as inert as the page while the menu is open (the schedule's
+  // ] would change the week out of sight). This runs first, on the way down to the page's own
+  // listeners; Escape and ⌘K search still pass, and so does typing in an open dialog. Tab, Enter
+  // and Space still move through and open the menu's links: those are the browser's, not listeners'.
+  addEventListener(
+    "keydown",
     (event) => {
-      if (event.timeStamp - closedAt > 1000) return;
-      closedAt = -Infinity;
-      event.preventDefault();
-      event.stopPropagation();
+      if (!isOpen() || event.key === "Escape") return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") return;
+      if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
+      event.stopImmediatePropagation();
     },
     true,
   );
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !more.open) return;
-    more.open = false;
-    more.querySelector("summary")?.focus();
-  });
+  matchMedia("(min-width: 1024px)").addEventListener("change", (event) => event.matches && setOpen(false));
+  // Back to a page from the browser's memory, it opens closed, as the page would.
+  addEventListener("pageshow", (event) => event.persisted && setOpen(false));
 }

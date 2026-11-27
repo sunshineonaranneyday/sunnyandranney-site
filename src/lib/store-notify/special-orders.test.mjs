@@ -14,7 +14,7 @@ async function createD1() {
   mfs.push(mf);
   const db = await mf.getD1Database('DB');
   await db.prepare('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)').run();
-  const sql = readFileSync(new URL('../../../migrations/0013_special_order_requests.sql', import.meta.url), 'utf8')
+  const sql = readFileSync(new URL('../../../migrations/0014_special_order_requests.sql', import.meta.url), 'utf8')
     .split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
   for (const stmt of sql.split(';').map((s) => s.trim()).filter(Boolean)) await db.prepare(stmt).run();
   return db;
