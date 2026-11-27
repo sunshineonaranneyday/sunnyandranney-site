@@ -15,6 +15,7 @@
     "deploy:shop-redirect": "wrangler deploy --config workers/shop-redirect/wrangler.toml",
     "deploy:sales-tax": "wrangler deploy --config workers/sales-tax/wrangler.toml",
     "deploy:email-again": "wrangler deploy --config workers/email-again/wrangler.toml",
+    "deploy:store-notify": "wrangler deploy --config workers/store-notify/wrangler.toml",
     "sync-redirects": "node scripts/sync-shopify-redirects.mjs"
   },
   "dependencies": {

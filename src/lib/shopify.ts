@@ -116,6 +116,12 @@ const PRODUCT_FRAGMENT = `
           title
           availableForSale
           quantityAvailable
+          storeAvailability(first: 5) {
+            nodes {
+              quantityAvailable
+              location { name }
+            }
+          }
           price {
             amount
             currencyCode
@@ -622,6 +628,8 @@ export interface ProductVariant {
   title: string;
   availableForSale: boolean;
   quantityAvailable: number | null;
+  /** Units at each store location (109 Oak Street, Warehouse), for where a piece is. */
+  storeAvailability?: { nodes: Array<{ quantityAvailable: number | null; location: { name: string } }> };
   price: MoneyV2;
   compareAtPrice: MoneyV2 | null;
   selectedOptions: Array<{ name: string; value: string }>;

@@ -1,0 +1,46 @@
+---
+/**
+ * One sold-out piece on the admin's Special orders page, with what can be done to it:
+ * offer it as a special order, mark it one of a kind (or not), or archive it.
+ */
+import { leadTimeLabel } from '@/lib/availability.mjs';
+
+interface Props {
+  p: { handle: string; title: string; vendor: string | null; price: string; state: string; why: string; leadDays: number | null };
+}
+const { p } = Astro.props;
+const price = Number.isFinite(parseFloat(p.price)) ? `$${Math.round(parseFloat(p.price)).toLocaleString('en-US')}` : null;
+const meta = [price, p.state === 'special' && p.leadDays !== null ? leadTimeLabel(p.leadDays) : null].filter(Boolean).join(' · ');
+---
+
+<li class="piece" data-handle={p.handle} data-search={`${p.title} ${p.vendor ?? ''}`.toLowerCase()}>
+  <div class="piece-what">
+    <a class="piece-title" href={`https://sunnyandranney.com/shop/${p.handle}/`} target="_blank" rel="noopener">{p.title}</a>
+    {meta && <span class="piece-meta">{meta}</span>}
+  </div>
+  <span class="piece-actions">
+    {p.state !== 'special' && <button type="button" class="btn btn-small" data-mark="special-order">Offer as special order</button>}
+    {p.why !== 'one-of-a-kind' && <button type="button" class="btn btn-ghost btn-small" data-mark="one-of-a-kind">One of a kind</button>}
+    {p.why === 'one-of-a-kind' && <button type="button" class="btn btn-ghost btn-small" data-mark="clear">Not one of a kind</button>}
+    <button type="button" class="btn btn-ghost btn-small" data-archive>Archive</button>
+  </span>
+</li>
+
+<style>
+  .piece { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.25rem 1rem; align-items: center; min-height: 56px; padding: 0.4rem 0; border-top: 1px solid var(--line); }
+  .piece[hidden] { display: none; }
+  .piece-what { display: flex; flex-direction: column; min-width: 0; }
+  .piece-title { display: inline-flex; align-items: center; min-height: 32px; color: var(--ink); overflow-wrap: anywhere; }
+  .piece-meta { font-size: 0.8125rem; color: var(--ink-2); }
+  .piece-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; justify-content: flex-end; }
+  .piece.busy { opacity: 0.55; pointer-events: none; transition: opacity 0.2s; }
+  :global(.piece-done) { grid-column: 1 / -1; margin: 0; color: var(--teal); font-size: 0.875rem; font-weight: 500; }
+  @media (max-width: 640px) {
+    .piece { grid-template-columns: minmax(0, 1fr); }
+    .piece-actions { justify-content: flex-start; }
+  }
+  /* The store's iPad: every control at least 44pt (Apple HIG). */
+  @media (pointer: coarse) {
+    .piece-title { min-height: 44px; }
+  }
+</style>

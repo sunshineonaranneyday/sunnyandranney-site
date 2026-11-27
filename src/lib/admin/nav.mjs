@@ -153,7 +153,14 @@ export function navFor({ role, owner }) {
             children: [{ href: '/admin/buying/costs/', label: 'Costs to match' }],
           },
           { href: '/admin/receiving/', label: 'Receiving', icon: 'receive', cadence: 'deliveries' },
-          { href: '/admin/vendors/', label: 'Vendors', icon: 'vendors', cadence: 'rarely' },
+          {
+            href: '/admin/vendors/',
+            label: 'Vendors',
+            icon: 'vendors',
+            cadence: 'rarely',
+            // Special orders hang on vendor lead times: a vendor with one makes its sold-out pieces requestable.
+            children: [{ href: '/admin/vendors/special-orders/', label: 'Special orders' }],
+          },
         ],
       },
       {

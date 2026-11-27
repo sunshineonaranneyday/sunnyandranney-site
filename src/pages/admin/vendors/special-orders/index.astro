@@ -1,0 +1,587 @@
+---
+export const prerender = false;
+
+import AdminBase from '@/layouts/AdminBase.astro';
+import Piece from '@/components/admin/SoldPiece.astro';
+import { svg } from '@/lib/admin-ui';
+import { STORE_TIME_ZONE } from '@/lib/time-clock/hours.mjs';
+import { getStoreAddress, listRequests, replyStats } from '@/lib/store-notify/requests-store.mjs';
+import { MAX_ATTEMPTS } from '@/lib/store-notify/special-orders.mjs';
+import { mailto, replyDraft } from '@/lib/store-notify/emails.mjs';
+import { leadTimeLabel, vendorKey } from '@/lib/availability.mjs';
+import { storeDate } from '@/lib/special-order-request.mjs';
+import { medusaConfigured, medusaJson } from '@/lib/medusa-admin';
+
+const admin = Astro.locals.admin;
+if (admin?.role !== 'manager') return new Response('Not authorized', { status: 403 });
+
+const env = Astro.locals.runtime.env;
+const db = env.DB;
+const now = new Date();
+const today = storeDate(now);
+
+interface Request {
+  id: string; created_at: string; handle: string; title: string; vendor: string | null; price_cents: number | null; image_url: string | null; lead_days: number | null;
+  name: string; email: string | null; phone: string | null; note: string | null; reply_by: string | null; status: 'new' | 'replied' | 'ordered' | 'closed';
+  replied_at: string | null; replied_by: string | null; closed_at: string | null; email_attempts: number; email_error: string | null;
+}
+const [requests, storeTo] = (await Promise.all([listRequests(db), getStoreAddress(db)])) as [Request[], string | null];
+const stats = replyStats(requests, now);
+const waiting = requests.filter((r) => r.status === 'new');
+const answered = requests.filter((r) => r.status === 'replied');
+const finished = requests.filter((r) => r.status === 'ordered' || r.status === 'closed');
+
+interface Listed { handle: string; title: string; vendor: string | null; price: string; image: string | null; state: string; why: string; leadDays: number | null }
+/**
+ * What the website shows, from the last build's /shop/availability.json: read from the
+ * deployment's own files on Cloudflare (ASSETS), or from the dev server on a laptop.
+ */
+let catalog: { builtAt: string; leadTimes?: { asOf: string; source: 'admin' | 'live-site' | 'none' }; products: Listed[] } | null = null;
+try {
+  const url = new URL('/shop/availability.json', Astro.url);
+  const assets = (env as unknown as { ASSETS?: { fetch(u: URL): Promise<Response> } }).ASSETS;
+  const res = assets ? await assets.fetch(url) : await fetch(url);
+  if (res.ok) catalog = await res.json();
+} catch { /* shown below as not built yet */ }
+
+// The admin's vendors, so each row offers what fits: a wholesale vendor can be given a
+// lead time; a donation or a retail buy can't be reordered at all.
+type Kind = 'wholesale' | 'retail' | 'house';
+const vendorInfo = new Map<string, { id: string; kind: Kind }>();
+let vendorsLoaded = false;
+if (medusaConfigured(env)) {
+  try {
+    const { vendors } = await medusaJson<{ vendors: Array<{ id: string; name: string; aliases: string[]; kind?: Kind }> }>(env, 'purchasing/vendors');
+    for (const v of vendors) for (const n of [v.name, ...(v.aliases ?? [])]) vendorInfo.set(vendorKey(n), { id: v.id, kind: v.kind ?? 'wholesale' });
+    vendorsLoaded = true;
+  } catch { /* shown on the list: the Vendors page link still works */ }
+}
+
+/** Sold-out pieces by vendor, most pieces first: a lead time is set per vendor, so that's where the work is. */
+function byVendor(items: Listed[]) {
+  const groups = new Map<string, Listed[]>();
+  for (const p of items) {
+    const k = p.vendor?.trim() || 'No vendor';
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(p);
+  }
+  return [...groups.entries()]
+    .map(([vendor, pieces]) => {
+      const info = vendor === 'No vendor' ? null : vendorInfo.get(vendorKey(vendor)) ?? null;
+      return { vendor, pieces, id: info?.id ?? null, kind: info?.kind ?? null, leadDays: pieces[0]?.leadDays ?? null };
+    })
+    .sort((a, b) => b.pieces.length - a.pieces.length || a.vendor.localeCompare(b.vendor));
+}
+const gone = catalog?.products.filter((p) => p.state === 'gone') ?? [];
+const noLead = byVendor(gone.filter((p) => p.why === 'no-lead-time'));
+const oneOfAKind = gone.filter((p) => p.why === 'one-of-a-kind');
+const special = byVendor(catalog?.products.filter((p) => p.state === 'special') ?? []);
+const noLeadCount = noLead.reduce((n, g) => n + g.pieces.length, 0);
+const specialCount = special.reduce((n, g) => n + g.pieces.length, 0);
+
+const shortDate = (iso: string) => new Intl.DateTimeFormat('en-US', { timeZone: STORE_TIME_ZONE, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(iso));
+const ago = (iso: string) => {
+  const h = (now.getTime() - Date.parse(iso)) / 3_600_000;
+  if (h < 1) return `${Math.max(1, Math.round(h * 60))} min ago`;
+  if (h < 24) return `${Math.round(h)} h ago`;
+  return shortDate(iso);
+};
+const hoursLabel = (h: number | null) => (h === null ? '—' : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
+const dollars = (cents: number | null) => (cents === null ? null : `$${Math.round(cents / 100).toLocaleString('en-US')}`);
+const dayName = (ymd: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' }).format(new Date(`${ymd}T12:00:00Z`));
+/** When a waiting request is due: its saved reply-by day against today in Roswell. */
+function due(r: Request): { label: string; tone: 'late' | 'today' | 'soon' } {
+  if (!r.reply_by) return { label: 'Waiting', tone: 'soon' };
+  if (r.reply_by < today) return { label: 'Late', tone: 'late' };
+  if (r.reply_by === today) return { label: 'Answer today', tone: 'today' };
+  return { label: `Answer by ${dayName(r.reply_by)}`, tone: 'soon' };
+}
+/** An answered request with no order after 3 days is worth a nudge. */
+const followUp = (r: Request) => r.status === 'replied' && r.replied_at !== null && now.getTime() - Date.parse(r.replied_at) > 3 * 86_400_000;
+/** A bounce that sending again won't fix: the address itself is wrong. */
+const badAddress = (err: string | null) => Boolean(err && /does not exist|no such|unknown (user|recipient)|rejected|invalid|not found|\b5\.1\.\d\b|mailbox unavailable/i.test(err));
+const STATUS: Record<Request['status'], [string, string]> = { new: ['Waiting', 'badge-pending'], replied: ['Answered', 'badge-open'], ordered: ['Ordered', 'badge-approved'], closed: ['Closed', ''] };
+const thumb = (url: string | null) => {
+  if (!url) return null;
+  try { const u = new URL(url); if (u.hostname === 'cdn.shopify.com') u.searchParams.set('width', '112'); return u.toString(); } catch { return null; }
+};
+const tel = (phone: string) => `tel:${phone.replace(/[^\d+]/g, '')}`;
+const first = (name: string) => name.trim().split(/\s+/)[0];
+const lists = [
+  { key: 'waiting', title: 'Waiting for an answer', items: waiting, empty: 'Nothing waiting. New requests appear here the moment a shopper sends one.' },
+  { key: 'answered', title: 'Answered, not ordered yet', items: answered, empty: null },
+];
+---
+
+<AdminBase title="Special orders">
+  <div class="page-header">
+    <div>
+      <h1>Special orders</h1>
+      <p class="muted">Shoppers ask for sold-out pieces on the website. Check the price and date with the vendor, reply, then mark it here.</p>
+    </div>
+  </div>
+
+  <section class="card address" aria-label="Where requests are emailed">
+    {storeTo && (
+      <div class="address-view" id="address-view">
+        <span class="address-icon" aria-hidden="true"><Fragment set:html={svg('mail', 18)} /></span>
+        <p>Requests are emailed to <strong>{storeTo}</strong></p>
+        <button type="button" class="btn btn-ghost btn-small" id="address-change" aria-controls="address-form" aria-expanded="false">Change</button>
+      </div>
+    )}
+    {!storeTo && <p class="address-warn"><Fragment set:html={svg('alert', 16)} /> No one is emailed about requests yet. Add the address that should hear about them; until then they wait here.</p>}
+    <form id="address-form" class="address-form" hidden={Boolean(storeTo)} novalidate>
+      <label for="store-to">Email requests to</label>
+      <div class="address-row">
+        <input id="store-to" type="email" autocomplete="email" inputmode="email" value={storeTo ?? ''} placeholder="name@sunnyandranney.com" required />
+        <button type="submit" class="btn btn-dark">Save</button>
+      </div>
+      <p class="form-error" id="address-error" hidden></p>
+    </form>
+  </section>
+
+  <div class="stats">
+    <div class:list={['stat', { 'stat-accent': stats.waiting > 0 }]}>
+      <p class="stat-label">Waiting for an answer</p>
+      <p class="stat-value">{stats.waiting}</p>
+      <p class="stat-note">{stats.oldestWaitingHours === null ? 'None waiting' : `Oldest ${hoursLabel(stats.oldestWaitingHours)}`}</p>
+    </div>
+    <div class="stat">
+      <p class="stat-label">Time to answer</p>
+      <p class="stat-value">{hoursLabel(stats.medianReplyHours)}</p>
+      <p class="stat-note">Median, last 30 days. Promised: one business day.</p>
+    </div>
+    <div class="stat">
+      <p class="stat-label">Requests, 30 days</p>
+      <p class="stat-value">{stats.received}</p>
+      <p class="stat-note">{stats.ordered === 1 ? '1 became an order' : `${stats.ordered} became orders`}</p>
+    </div>
+  </div>
+
+  <div id="requests-live">
+    {lists.map((list) => (list.items.length > 0 || list.empty) && (
+      <section class="requests-section" aria-labelledby={`${list.key}-title`}>
+        <h2 class="section-title" id={`${list.key}-title`} tabindex="-1">{list.title} <span class="count">{list.items.length}</span></h2>
+        {list.items.length === 0 && <div class="card empty"><p class="muted">{list.empty}</p></div>}
+        <div class="requests">
+          {list.items.map((r) => {
+            const [label, badge] = STATUS[r.status];
+            const d = r.status === 'new' ? due(r) : null;
+            const facts = [r.vendor, dollars(r.price_cents), r.lead_days !== null ? `lead time ${leadTimeLabel(r.lead_days)}` : null].filter(Boolean).join(' · ');
+            const img = thumb(r.image_url);
+            const replyHref = r.email ? mailto(r.email, replyDraft(r)) : null;
+            return (
+              <article class:list={['card', 'request', `request-${r.status}`, d && `due-${d.tone}`]} data-id={r.id}>
+                <div class="request-head">
+                  {img ? <img class="request-thumb" src={img} alt="" width="56" height="56" loading="lazy" /> : <span class="request-thumb" aria-hidden="true"></span>}
+                  <div class="request-what">
+                    <a class="request-title" href={`https://sunnyandranney.com/shop/${r.handle}/`} target="_blank" rel="noopener">{r.title}</a>
+                    {facts && <p class="request-facts">{facts}</p>}
+                  </div>
+                  <span class:list={['badge', d ? (d.tone === 'late' ? 'badge-alert' : d.tone === 'today' ? 'badge-warn' : badge) : followUp(r) ? 'badge-warn' : badge]}>{d ? d.label : followUp(r) ? 'Follow up' : label}</span>
+                </div>
+                <div class="request-who">
+                  <strong>{r.name}</strong>
+                  {r.email && <a href={`mailto:${encodeURIComponent(r.email)}`}>{r.email}</a>}
+                  {r.phone && <a href={tel(r.phone)}>{r.phone}</a>}
+                  <span class="muted">Asked {ago(r.created_at)}</span>
+                </div>
+                {r.note && <blockquote class="request-note">{r.note}</blockquote>}
+                {r.email_error && (
+                  <p class="request-warn">
+                    <Fragment set:html={svg('alert', 16)} />
+                    {badAddress(r.email_error)
+                      ? <span>{first(r.name)}’s email address looks wrong, so their confirmation bounced ({r.email_error}). {r.phone ? `Call them to check it.` : 'Your reply would bounce too.'}</span>
+                      : <span>{r.email_attempts >= MAX_ATTEMPTS ? `${first(r.name)}’s confirmation didn’t go through: ` : 'An email didn’t send; trying again: '}{r.email_error}</span>}
+                    {r.email_attempts >= MAX_ATTEMPTS && !badAddress(r.email_error) && <button type="button" class="btn btn-small" data-resend>Send again</button>}
+                  </p>
+                )}
+                <div class="request-actions">
+                  {r.status === 'new' && (
+                    <>
+                      {replyHref && !badAddress(r.email_error)
+                        ? <a class="btn btn-primary" href={replyHref}><Fragment set:html={svg('mail', 16)} /> Reply to {first(r.name)}</a>
+                        : r.phone && <a class="btn btn-primary" href={tel(r.phone)}><Fragment set:html={svg('phone', 16)} /> Call {first(r.name)}</a>}
+                      <button type="button" class="btn" data-status="replied"><Fragment set:html={svg('check', 16)} /> Mark answered</button>
+                    </>
+                  )}
+                  {(r.status === 'new' || r.status === 'replied') && (
+                    <>
+                      <button type="button" class:list={['btn', { 'btn-dark': r.status === 'replied' }]} data-status="ordered">Ordered</button>
+                      <button type="button" class="btn btn-ghost" data-status="closed">Close</button>
+                    </>
+                  )}
+                  {r.replied_at && <span class="muted request-when">Answered {ago(r.replied_at)}{r.replied_by ? ` by ${r.replied_by.split('@')[0]}` : ''}</span>}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    ))}
+    {finished.length > 0 && (
+      <details class="requests-section finished">
+        <summary class="section-title">Finished <span class="count">{finished.length}</span></summary>
+        <ul class="finished-list">
+          {finished.map((r) => (
+            <li class="finished-row" data-id={r.id}>
+              <span class:list={['badge', STATUS[r.status][1]]}>{STATUS[r.status][0]}</span>
+              <a href={`https://sunnyandranney.com/shop/${r.handle}/`} target="_blank" rel="noopener">{r.title}</a>
+              <span class="muted">{r.name} · {r.closed_at ? shortDate(r.closed_at) : ago(r.created_at)}</span>
+              <button type="button" class="btn btn-ghost btn-small finished-reopen" data-status="replied">Reopen</button>
+            </li>
+          ))}
+        </ul>
+      </details>
+    )}
+  </div>
+
+  <section aria-labelledby="catalog-title" class="catalog">
+    <h2 class="section-title" id="catalog-title">Sold out on the website</h2>
+    {!catalog && <div class="notice"><span>This list appears after the next website build.</span></div>}
+    {catalog && (
+      <>
+        <p class="muted catalog-note">As of the website build {ago(catalog.builtAt)}. Changes here reach the website in about 30 minutes.</p>
+        {catalog.leadTimes?.source === 'live-site' && (
+          <p class="address-warn" id="lead-times-stale"><Fragment set:html={svg('alert', 16)} /> The website’s last build couldn’t reach the admin, so it used vendor lead times from {ago(catalog.leadTimes.asOf)}. Lead time changes since then aren’t on the website yet; the next build that reaches the admin brings them.</p>
+        )}
+        <div class="toolbar">
+          <span class="toolbar-icon" aria-hidden="true"><Fragment set:html={svg('search', 18)} /></span>
+          <input id="filter" type="search" placeholder="Find a piece or vendor" autocomplete="off" aria-label="Find a piece or vendor" />
+        </div>
+        <p class="muted filter-empty" id="filter-empty" hidden>Nothing matches.</p>
+
+        <details class="card group" open data-group>
+          <summary><span class="group-title">Off the website: vendor has no lead time</span> <span class="count">{noLeadCount} pieces · {noLead.length} vendors</span></summary>
+          <p class="group-note">Give a vendor a lead time and its pieces come back as special orders after the next website build, unless a piece is marked one of a kind.</p>
+          {!vendorsLoaded && <p class="address-warn"><Fragment set:html={svg('alert', 16)} /> The vendor list couldn’t be read from the admin just now, so each vendor links to the Vendors page.</p>}
+          <ul class="vendors">
+            {noLead.map((g) => (
+              <li class="vendor" data-search={g.vendor.toLowerCase()}>
+                <details>
+                  <summary>
+                    <span class="vendor-name">{g.vendor}</span>
+                    <span class="muted">{g.pieces.length === 1 ? '1 piece' : `${g.pieces.length} pieces`}{g.vendor === 'No vendor' ? '' : g.kind === 'retail' ? ' · bought retail, can’t be reordered' : g.kind === 'house' ? ' · donated or made here, can’t be reordered' : ''}</span>
+                  </summary>
+                  <ul class="pieces">{g.pieces.map((p) => <Piece p={p} />)}</ul>
+                </details>
+                {g.vendor !== 'No vendor' && (!g.kind || g.kind === 'wholesale') && (
+                  !vendorsLoaded
+                    ? <a class="btn btn-ghost btn-small vendor-action" href="/admin/vendors/">Vendors</a>
+                    : <a class="btn btn-small vendor-action" href={g.id ? `/admin/vendors/?edit=${encodeURIComponent(g.id)}` : '/admin/vendors/'}>{g.id ? 'Set lead time' : 'Add vendor'}</a>
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+
+        <details class="card group" data-group>
+          <summary><span class="group-title">Off the website: one of a kind</span> <span class="count">{oneOfAKind.length} pieces</span></summary>
+          <p class="group-note">Gone for good. Their pages stay up for old links and lead with what’s in stock like them.</p>
+          <ul class="pieces">{oneOfAKind.map((p) => <Piece p={p} />)}</ul>
+        </details>
+
+        <details class="card group" data-group>
+          <summary><span class="group-title">On the website as special orders</span> <span class="count">{specialCount} pieces · {special.length} vendors</span></summary>
+          <p class="group-note">Sold out, and shoppers can request them.</p>
+          <ul class="vendors">
+            {special.map((g) => (
+              <li class="vendor" data-search={g.vendor.toLowerCase()}>
+                <details>
+                  <summary><span class="vendor-name">{g.vendor}</span> <span class="muted">{g.pieces.length === 1 ? '1 piece' : `${g.pieces.length} pieces`}{g.leadDays !== null ? ` · ${leadTimeLabel(g.leadDays)}` : ''}</span></summary>
+                  <ul class="pieces">{g.pieces.map((p) => <Piece p={p} />)}</ul>
+                </details>
+                {g.id && <a class="btn btn-ghost btn-small vendor-action" href={`/admin/vendors/?edit=${encodeURIComponent(g.id)}`}>Change lead time</a>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      </>
+    )}
+  </section>
+
+  <dialog id="archive-dialog" aria-labelledby="archive-title">
+    <h2 id="archive-title">Archive this product?</h2>
+    <p id="archive-name"></p>
+    <p class="muted">It comes off the website and the register. Shopify keeps it, and it can be unarchived there.</p>
+    <p class="form-error" id="archive-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-ghost" id="archive-cancel">Keep it</button>
+      <button type="button" class="btn btn-dark" id="archive-confirm">Archive</button>
+    </div>
+  </dialog>
+</AdminBase>
+
+<style>
+  /* Measured in the design audit (scratchpad admin-audit.mjs): ≥ 44px targets on touch
+     screens (Apple HIG), text ≥ 4.5:1, input edges ≥ 3:1. */
+  .address { padding: 0.75rem 1.25rem; margin-bottom: 1.25rem; }
+  .address-view { display: flex; align-items: center; gap: 0.75rem; min-height: 44px; }
+  .address-view p { margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .address-icon { display: inline-flex; color: var(--ink-3); }
+  .address-form { padding: 0.5rem 0; }
+  .address-form[hidden] { display: none; }
+  .address-row { display: flex; gap: 0.5rem; max-width: 560px; }
+  .address-row input { flex: 1; min-height: 44px; }
+  .address-warn { display: flex; gap: 0.5rem; align-items: flex-start; margin: 0.25rem 0; color: var(--clay); font-size: 0.9rem; line-height: 1.45; }
+  .address-warn :global(svg) { flex: none; margin-top: 0.15rem; }
+  .catalog .address-warn { margin-bottom: 1rem; }
+
+  .section-title:focus { outline: none; }
+  .count { margin-left: 0.35rem; font-weight: 500; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .requests-section { margin-bottom: 2rem; }
+  .requests { display: flex; flex-direction: column; gap: 0.75rem; }
+  .request { padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  .request.due-late { box-shadow: inset 3px 0 0 var(--red), var(--shadow-sm); }
+  .request.due-today { box-shadow: inset 3px 0 0 var(--clay), var(--shadow-sm); }
+  .request-head { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; gap: 0.9rem; align-items: start; }
+  .request-thumb { width: 56px; height: 56px; border-radius: var(--r-sm); object-fit: cover; background: var(--sunk); border: 1px solid var(--line); }
+  .request-title { display: inline-block; font-weight: 600; font-size: 1rem; line-height: 1.35; color: var(--ink); padding: 0.1rem 0; }
+  .request-facts { margin: 0.2rem 0 0; font-size: 0.875rem; color: var(--ink-2); }
+  .request-who { display: flex; flex-wrap: wrap; gap: 0 1rem; align-items: center; font-size: 0.9375rem; }
+  .request-who a { min-height: 44px; display: inline-flex; align-items: center; color: var(--teal); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+  .request-note { margin: 0; padding: 0.65rem 0.9rem; border-left: 3px solid var(--gold); background: var(--sunk); border-radius: 0 var(--r-sm) var(--r-sm) 0; font-size: 0.9375rem; line-height: 1.5; }
+  .request-warn { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 0; padding: 0.6rem 0.8rem; border-radius: var(--r-sm); background: var(--red-soft); color: var(--red); font-size: 0.875rem; line-height: 1.45; }
+  .request-warn span { flex: 1 1 16rem; }
+  .request-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .request-actions .btn { min-height: 44px; }
+  .request-when { font-size: 0.875rem; margin-left: 0.25rem; }
+  @media (max-width: 640px) {
+    .request-head { grid-template-columns: 48px minmax(0, 1fr); }
+    .request-thumb { width: 48px; height: 48px; }
+    .request-head .badge { grid-column: 2; justify-self: start; }
+    .request-actions .btn-primary { flex: 1 1 100%; justify-content: center; }
+  }
+
+  .finished > summary { cursor: pointer; display: flex; align-items: center; min-height: 44px; list-style: none; }
+  .finished > summary::-webkit-details-marker { display: none; }
+  .finished > summary::before { content: ''; width: 8px; height: 8px; margin-right: 0.6rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform 0.2s var(--ease); }
+  .finished[open] > summary::before { transform: rotate(45deg); }
+  .finished-list { list-style: none; margin: 0; padding: 0; }
+  .finished-row { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; align-items: center; min-height: 48px; padding: 0.4rem 0; border-top: 1px solid var(--line); font-size: 0.9375rem; }
+  .finished-row a { color: var(--ink); flex: 1 1 14rem; min-width: 0; }
+  .finished-reopen { margin-left: auto; }
+
+  .catalog-note { margin: 0 0 1rem; }
+  .toolbar { position: relative; max-width: 420px; margin-bottom: 1rem; }
+  .toolbar-icon { position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); display: inline-flex; color: var(--ink-3); pointer-events: none; }
+  .toolbar input { padding-left: 2.5rem; min-height: 44px; }
+  .filter-empty[hidden] { display: none; }
+  .catalog .group { margin-top: 0.75rem; padding: 0 1.25rem; }
+  .catalog .group[hidden], .vendor[hidden], .piece[hidden] { display: none; }
+  .group > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; min-height: 56px; padding: 0.5rem 0; list-style: none; }
+  .group > summary::-webkit-details-marker, .vendor summary::-webkit-details-marker { display: none; }
+  .group > summary::before, .vendor summary::before {
+    content: ''; flex: none; width: 7px; height: 7px; margin: 0 0.5rem 0 0.15rem;
+    border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform 0.2s var(--ease);
+  }
+  .group[open] > summary::before, .vendor details[open] > summary::before { transform: rotate(45deg); }
+  .group-title { font-weight: 600; }
+  .group-note { margin: 0 0 0.75rem; font-size: 0.875rem; color: var(--ink-2); max-width: 70ch; }
+  .vendors, .pieces { list-style: none; margin: 0; padding: 0; }
+  .group > .pieces, .group > .vendors { margin-bottom: 0.75rem; }
+  /* The action sits on the vendor's own line (top right); the piece list opens full width below it. */
+  .vendor { position: relative; padding: 0.25rem 0; border-top: 1px solid var(--line); }
+  .vendor-action { position: absolute; top: 0.45rem; right: 0; }
+  .vendor summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.5rem; min-height: 48px; padding-right: 9.5rem; list-style: none; }
+  .vendor:not(:has(.vendor-action)) summary { padding-right: 0; }
+  .vendor-name { font-weight: 600; }
+
+  .vendor .pieces { padding: 0 0 0.5rem 1.4rem; }
+  .vendor details { min-width: 0; }
+
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+  .form-error[hidden] { display: none; }
+  /* Touch screens (the store's iPad): links in a card are 44pt tall too (Apple HIG). */
+  @media (pointer: coarse) {
+    .request-title, .finished-row a { display: inline-flex; align-items: center; min-height: 44px; padding: 0; }
+  }
+  /* A request that moves between lists glides there. */
+  :global(.request.moving) { transition: transform 360ms var(--ease); }
+  @media (prefers-reduced-motion: reduce) { :global(.request.moving) { transition: none; } }
+</style>
+
+<script>
+  import { refreshParts, toast } from '@/lib/admin/shell';
+
+  const post = async (body: Record<string, unknown>) => {
+    const res = await fetch('/api/admin/special-orders/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const out = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new Error(out.error || 'That didn’t save. Try again.');
+    return out;
+  };
+  const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /**
+   * Re-renders the requests from the server, and every card that moved glides from where
+   * it was to where it is now (FLIP), so a marked request is seen going to its new list.
+   */
+  async function refreshRequests(focusId?: string) {
+    const before = new Map<string, DOMRect>();
+    document.querySelectorAll<HTMLElement>('#requests-live [data-id]').forEach((el) => before.set(el.dataset.id!, el.getBoundingClientRect()));
+    await refreshParts('#requests-live');
+    if (!reduceMotion()) {
+      document.querySelectorAll<HTMLElement>('#requests-live .request[data-id]').forEach((el) => {
+        const was = before.get(el.dataset.id!);
+        if (!was) return;
+        const dy = was.top - el.getBoundingClientRect().top;
+        if (Math.abs(dy) < 1) return;
+        el.style.transform = `translateY(${dy}px)`;
+        requestAnimationFrame(() => {
+          el.classList.add('moving');
+          el.style.transform = '';
+          el.addEventListener('transitionend', () => el.classList.remove('moving'), { once: true });
+        });
+      });
+    }
+    const target = focusId ? document.querySelector<HTMLElement>(`#requests-live .request[data-id="${focusId}"] .request-title`) : null;
+    (target ?? document.querySelector<HTMLElement>('#requests-live h2'))?.focus({ preventScroll: true });
+  }
+
+  const LABEL: Record<string, string> = { replied: 'Marked answered', ordered: 'Marked ordered', closed: 'Closed' };
+
+  // The admin has no client router: this runs once. Buttons are bound by delegation, so
+  // markup swapped in by a refresh works at once.
+  document.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+
+    const statusBtn = target.closest<HTMLButtonElement>('#requests-live [data-status]');
+    if (statusBtn) {
+      const card = statusBtn.closest<HTMLElement>('[data-id]')!;
+      // Where focus goes next: the reopened request itself, else the card that followed this one.
+      const reopening = statusBtn.dataset.status === 'replied' && card.classList.contains('finished-row');
+      const nextId = reopening ? card.dataset.id : (card.nextElementSibling as HTMLElement | null)?.dataset.id ?? (card.previousElementSibling as HTMLElement | null)?.dataset.id;
+      if (statusBtn.getAttribute('aria-busy') === 'true') return;
+      statusBtn.setAttribute('aria-busy', 'true');
+      try {
+        await post({ action: 'status', id: card.dataset.id, status: statusBtn.dataset.status });
+        toast(reopening ? 'Reopened' : LABEL[statusBtn.dataset.status ?? ''] ?? 'Saved');
+        await refreshRequests(nextId);
+      } catch (err) {
+        statusBtn.removeAttribute('aria-busy');
+        toast((err as Error).message, 'error');
+      }
+      return;
+    }
+
+    const resend = target.closest<HTMLButtonElement>('.request [data-resend]');
+    if (resend) {
+      const card = resend.closest<HTMLElement>('.request')!;
+      resend.setAttribute('aria-busy', 'true');
+      try {
+        await post({ action: 'resend', id: card.dataset.id });
+        toast('It will go out again within 5 minutes');
+        await refreshRequests();
+      } catch (err) {
+        resend.removeAttribute('aria-busy');
+        toast((err as Error).message, 'error');
+      }
+      return;
+    }
+
+    // Marking a piece: Shopify changes now, the website at its next build.
+    const mark = target.closest<HTMLButtonElement>('.piece [data-mark]');
+    if (mark) {
+      const piece = mark.closest<HTMLElement>('.piece')!;
+      piece.classList.add('busy');
+      try {
+        await post({ action: 'mark', handle: piece.dataset.handle, mark: mark.dataset.mark });
+        const said = mark.dataset.mark === 'special-order' ? 'Offered as a special order from the next website build' : mark.dataset.mark === 'one-of-a-kind' ? 'Marked one of a kind' : 'No longer one of a kind';
+        piece.querySelector('.piece-actions')?.remove();
+        const note = document.createElement('p');
+        note.className = 'piece-done';
+        note.textContent = said;
+        piece.appendChild(note);
+        toast(said);
+      } catch (err) {
+        toast((err as Error).message, 'error');
+      } finally {
+        piece.classList.remove('busy');
+      }
+      return;
+    }
+
+    const archive = target.closest<HTMLButtonElement>('.piece [data-archive]');
+    if (archive) {
+      archiving = archive.closest<HTMLElement>('.piece');
+      (document.getElementById('archive-name') as HTMLElement).textContent = archiving?.querySelector('.piece-title')?.textContent ?? '';
+      archiveError.hidden = true;
+      dialog.showModal();
+      return;
+    }
+
+    if (target.closest('#address-change')) {
+      const form = document.getElementById('address-form') as HTMLFormElement;
+      form.hidden = false;
+      document.getElementById('address-change')?.setAttribute('aria-expanded', 'true');
+      (document.getElementById('store-to') as HTMLInputElement).focus();
+    }
+  });
+
+  const addressForm = document.getElementById('address-form') as HTMLFormElement;
+  const addressError = document.getElementById('address-error') as HTMLElement;
+  addressForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    addressError.hidden = true;
+    try {
+      await post({ action: 'address', email: (document.getElementById('store-to') as HTMLInputElement).value });
+      location.reload();
+    } catch (err) {
+      addressError.textContent = (err as Error).message;
+      addressError.hidden = false;
+    }
+  });
+
+  const dialog = document.getElementById('archive-dialog') as HTMLDialogElement;
+  const archiveError = document.getElementById('archive-error') as HTMLElement;
+  let archiving: HTMLElement | null = null;
+  document.getElementById('archive-cancel')?.addEventListener('click', () => dialog.close());
+  document.getElementById('archive-confirm')?.addEventListener('click', async () => {
+    if (!archiving) return;
+    try {
+      await post({ action: 'archive', handle: archiving.dataset.handle });
+      dialog.close();
+      archiving.querySelector('.piece-actions')?.remove();
+      toast('Archived in Shopify');
+      const note = document.createElement('p');
+      note.className = 'piece-done';
+      note.textContent = 'Archived in Shopify';
+      archiving.appendChild(note);
+    } catch (err) {
+      archiveError.textContent = (err as Error).message;
+      archiveError.hidden = false;
+    }
+  });
+
+  // Find a piece or vendor: only the matches show, and their groups open.
+  const filter = document.getElementById('filter') as HTMLInputElement | null;
+  const empty = document.getElementById('filter-empty');
+  filter?.addEventListener('input', () => {
+    const q = filter.value.trim().toLowerCase();
+    let shown = 0;
+    document.querySelectorAll<HTMLElement>('.catalog [data-group]').forEach((group) => {
+      let groupHits = 0;
+      group.querySelectorAll<HTMLElement>(':scope > .pieces > .piece').forEach((li) => {
+        const hit = !q || Boolean(li.dataset.search?.includes(q));
+        li.hidden = !hit;
+        if (hit) groupHits++;
+      });
+      group.querySelectorAll<HTMLElement>('.vendor').forEach((v) => {
+        const vendorHit = !q || Boolean(v.dataset.search?.includes(q));
+        let pieceHits = 0;
+        v.querySelectorAll<HTMLElement>('.piece').forEach((li) => {
+          const hit = !q || vendorHit || Boolean(li.dataset.search?.includes(q));
+          li.hidden = !hit;
+          if (hit) pieceHits++;
+        });
+        v.hidden = !(vendorHit || pieceHits);
+        const d = v.querySelector('details');
+        if (d && q) d.open = !vendorHit && pieceHits > 0;
+        if (!v.hidden) groupHits++;
+      });
+      group.hidden = Boolean(q) && groupHits === 0;
+      if (q && groupHits) (group as HTMLDetailsElement).open = true;
+      shown += groupHits;
+    });
+    if (empty) empty.hidden = !q || shown > 0;
+  });
+</script>
