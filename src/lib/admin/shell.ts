@@ -264,6 +264,8 @@ if (!isMac)
 if (document.querySelector(".side-link")) {
   document.addEventListener("keydown", (event) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      // Search is for managers: the button is only drawn for them.
+      if (!document.querySelector("[data-open-palette]")) return;
       event.preventDefault();
       if (palette?.open) palette.close();
       else openPalette();

@@ -24,6 +24,8 @@ import { readStoreHours } from '@/lib/schedule/store';
 
 const admin = Astro.locals.admin;
 if (admin?.role !== 'manager' && admin?.role !== 'email') return new Response('Not authorized', { status: 403 });
+// Who the page is drawn for: on the email address, everyone gets the email-only view.
+const view = viewFor(admin, Astro.url.hostname.toLowerCase());
 
 // One weekly email at a time: this week's until it has gone out, then next week's (weekToWorkOn).
 // This week's stays until its Saturday, so one that missed its Tuesday can still go out (sendDays).
@@ -101,7 +103,7 @@ const parts = record?.parts ?? blankParts();
 const using = [parts.hero, ...parts.story.photos].filter((id) => id && !library.some((p) => p.id === id));
 // Problems in the email's own layout, which only the owner is shown (layout-store.mjs), and only on the
 // admin's own address: on the email address no one is the owner, and everyone sees what Mike sees (viewFor)
-const owner = viewFor(admin, Astro.url.hostname.toLowerCase()).owner;
+const owner = view.owner;
 const [older, tests, layoutReports] = await Promise.all([photosByIds(db, using), recentTests(db, send), owner ? listReports(db) : []]);
 const photos = [...library, ...older];
 // Where the week's send stands in Kit now: scheduled, sending or sent. One deleted in Kit's own app
@@ -133,7 +135,7 @@ const props = {
   presets,
   events,
   // Who checks each email: the store's list, kept in D1, with whoever is signed in first
-  test: { people: testPeople(testList, admin.email), me: admin.email.toLowerCase() },
+  test: { people: testPeople(testList, admin.email), me: admin.email.toLowerCase(), managesList: view.role === 'manager' },
   parts,
   photos,
   kitSend,

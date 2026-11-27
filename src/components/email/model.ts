@@ -117,7 +117,8 @@ export interface AppProps {
   record: { special: Special | null; wall: Wall | null; updatedAt: string; updatedBy: string } | null;
   presets: SalePresets;
   events: EventRecord[];
-  test: { people: TestPerson[]; me: string };
+  /** managesList: may add or take people off the list (managers; a test makes each a Kit subscriber). */
+  test: { people: TestPerson[]; me: string; managesList: boolean };
   /** The rest of the email (parts.mjs), as saved, or blank. */
   parts: Parts;
   /** The store's own photos, newest first. */

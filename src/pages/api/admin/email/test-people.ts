@@ -5,9 +5,12 @@ import { addPerson, listPeople, removePerson } from '@/lib/sunny-side/test-store
 
 export const prerender = false;
 
-/** Puts someone on the list a weekly email's test can go to. Managers and email-only logins. */
+/**
+ * Puts someone on the list a weekly email's test can go to. Managers only: a test makes each person
+ * on it a Kit subscriber (readyTester), and the real send goes to every subscriber.
+ */
 export const PUT: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager', 'email');
+  const admin = requireRole(context.locals, 'manager');
   if (admin instanceof Response) return admin;
   const body = await readJson(context.request);
   const person = cleanPerson(body ?? {});
@@ -18,9 +21,9 @@ export const PUT: APIRoute = async (context) => {
   return json({ ok: true, person, people: testPeople(await listPeople(db), admin.email) });
 };
 
-/** Takes someone off the list. Managers and email-only logins. */
+/** Takes someone off the list. Managers only. */
 export const DELETE: APIRoute = async (context) => {
-  const admin = requireRole(context.locals, 'manager', 'email');
+  const admin = requireRole(context.locals, 'manager');
   if (admin instanceof Response) return admin;
   const body = await readJson(context.request);
   const email = String(body?.email ?? '').trim().toLowerCase();

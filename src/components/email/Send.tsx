@@ -75,6 +75,8 @@ interface Props {
   saveFirst: () => Promise<boolean>;
   me: string;
   people: TestPerson[];
+  /** May add or take people off the list (managers). */
+  managesList: boolean;
   tests: TestSent[];
   onTest: (t: TestSent) => void;
   kitSend: KitSend | null;
@@ -408,7 +410,7 @@ export function Send(props: Props) {
                       </span>
                     </span>
                   </label>
-                  {!p.you && (
+                  {!p.you && props.managesList && (
                     <button type="button" class="btn btn-ghost btn-icon em-person-remove" aria-label={`Take ${p.name} off the list`} onClick={() => remove(p)}>
                       <X />
                     </button>
@@ -418,60 +420,62 @@ export function Send(props: Props) {
               return gone && gone.at === i ? [goneCard, card] : [card];
             })}
             {gone && gone.at >= people.length && goneCard}
-            <li class={`em-person em-person-add${showAdd ? ' is-open' : ''}`} key="add">
-              {showAdd ? (
-                <form
-                  class="em-test-add"
-                  onSubmit={add}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') {
-                      e.preventDefault();
-                      closeAdd();
-                    }
-                  }}
-                  noValidate
-                >
-                  <div class="em-test-add-row">
-                    <input ref={nameInput} aria-label="Their name" placeholder="Name" autocomplete="off" value={adding.name} maxLength={40} onInput={(e) => setAdding({ ...adding, name: (e.target as HTMLInputElement).value })} />
-                    <input
-                      type="email"
-                      aria-label="Their email"
-                      placeholder="Email"
-                      autocomplete="off"
-                      value={adding.email}
-                      onInput={(e) => {
-                        setAdding({ ...adding, email: (e.target as HTMLInputElement).value });
-                        setAddError(undefined);
-                      }}
-                      {...(addError ? { 'aria-invalid': true, 'aria-describedby': 'em-test-add-error' } : {})}
-                    />
-                    <FieldError id="em-test-add-error" message={addError} />
-                    <div class="em-test-add-actions">
-                      <button type="button" class="btn btn-ghost" onClick={closeAdd}>
-                        Cancel
-                      </button>
-                      <button type="submit" class="btn btn-dark">
-                        Add
-                      </button>
+            {props.managesList && (
+              <li class={`em-person em-person-add${showAdd ? ' is-open' : ''}`} key="add">
+                {showAdd ? (
+                  <form
+                    class="em-test-add"
+                    onSubmit={add}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        closeAdd();
+                      }
+                    }}
+                    noValidate
+                  >
+                    <div class="em-test-add-row">
+                      <input ref={nameInput} aria-label="Their name" placeholder="Name" autocomplete="off" value={adding.name} maxLength={40} onInput={(e) => setAdding({ ...adding, name: (e.target as HTMLInputElement).value })} />
+                      <input
+                        type="email"
+                        aria-label="Their email"
+                        placeholder="Email"
+                        autocomplete="off"
+                        value={adding.email}
+                        onInput={(e) => {
+                          setAdding({ ...adding, email: (e.target as HTMLInputElement).value });
+                          setAddError(undefined);
+                        }}
+                        {...(addError ? { 'aria-invalid': true, 'aria-describedby': 'em-test-add-error' } : {})}
+                      />
+                      <FieldError id="em-test-add-error" message={addError} />
+                      <div class="em-test-add-actions">
+                        <button type="button" class="btn btn-ghost" onClick={closeAdd}>
+                          Cancel
+                        </button>
+                        <button type="submit" class="btn btn-dark">
+                          Add
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </form>
-              ) : (
-                <button type="button" class="em-person-card em-add-card" ref={addCard} onClick={openAdd}>
-                  <span class="em-avatar" aria-hidden="true">
-                    <span class="em-avatar-face">
-                      <svg viewBox="0 0 24 24">
-                        <path d="M12 5v14M5 12h14" />
-                      </svg>
+                  </form>
+                ) : (
+                  <button type="button" class="em-person-card em-add-card" ref={addCard} onClick={openAdd}>
+                    <span class="em-avatar" aria-hidden="true">
+                      <span class="em-avatar-face">
+                        <svg viewBox="0 0 24 24">
+                          <path d="M12 5v14M5 12h14" />
+                        </svg>
+                      </span>
                     </span>
-                  </span>
-                  <span class="em-person-text">
-                    <span class="em-person-name">Add someone</span>
-                    <span class="em-person-email">Anyone who checks the email</span>
-                  </span>
-                </button>
-              )}
-            </li>
+                    <span class="em-person-text">
+                      <span class="em-person-name">Add someone</span>
+                      <span class="em-person-email">Anyone who checks the email</span>
+                    </span>
+                  </button>
+                )}
+              </li>
+            )}
           </ul>
         </div>
         <div class="em-send-row">

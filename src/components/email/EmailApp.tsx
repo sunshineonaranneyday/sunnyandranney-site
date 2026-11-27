@@ -662,6 +662,7 @@ export default function EmailApp(props: AppProps) {
               saveFirst={save}
               me={props.test.me}
               people={props.test.people}
+              managesList={props.test.managesList}
               tests={tests}
               onTest={(t) => setTests((r) => [t, ...r].slice(0, 3))}
               kitSend={kitSend}
